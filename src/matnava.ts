@@ -72,7 +72,6 @@ export async function main() {
         defaults: {
             configDirectory: DEFAULT_CONFIG_DIR,
         },
-        // @ts-expect-error - ignore zod version compatibility issues for now
         configShape: ConfigSchema.shape,
     });
 
