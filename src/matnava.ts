@@ -36,7 +36,7 @@ export const ConfigSchema = z.object({
     tempDirectory: z.string(),
 });
 
-export const SecureConfigSchema = ConfigSchema.extend({
+export const SecureConfigSchema = z.object({
     openaiApiKey: z.string().optional(),
 });
 
