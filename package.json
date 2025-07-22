@@ -11,7 +11,7 @@
         "type": "git",
         "url": "git+https://github.com/jafarisimran/matnava.git"
     },
-    "packageManager": "pnpm@10.11.0",
+    "packageManager": "pnpm@10.13.1",
     "scripts": {
         "build": "pnpm run lint &&tsc --noEmit && vite build && copyfiles -u 1 \"src/**/*.md\" dist",
         "dev": "vite",
@@ -31,9 +31,9 @@
     "author": "Simran Jafari <jafarisimran@gmail.com>",
     "license": "Apache-2.0",
     "dependencies": {
-        "@riotprompt/riotprompt": "link:../../StJustReckoning/riotprompt",
-        "@theunwalked/cardigantime": "link:../../SemicolonAmbulance/cardigantime",
-        "@theunwalked/dreadcabinet": "link:../../SemicolonAmbulance/dreadcabinet",
+        "@riotprompt/riotprompt": "^0.0.8",
+        "@theunwalked/cardigantime": "^0.0.16",
+        "@theunwalked/dreadcabinet": "^0.0.10",
         "@types/fluent-ffmpeg": "^2.1.27",
         "commander": "^14.0.0",
         "dayjs": "^1.11.13",
