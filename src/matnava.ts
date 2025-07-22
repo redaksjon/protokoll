@@ -36,7 +36,7 @@ export const ConfigSchema = z.object({
     tempDirectory: z.string(),
 });
 
-export const SecureConfigSchema = ConfigSchema.extend({
+export const SecureConfigSchema = z.object({
     openaiApiKey: z.string().optional(),
 });
 
@@ -72,7 +72,6 @@ export async function main() {
         defaults: {
             configDirectory: DEFAULT_CONFIG_DIR,
         },
-        // @ts-expect-error - ignore zod version compatibility issues for now
         configShape: ConfigSchema.shape,
     });
 

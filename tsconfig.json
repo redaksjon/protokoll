@@ -10,7 +10,7 @@
     "rootDir": ".",
     "types": [
       "node",
-      "jest"
+      "vitest/globals"
     ],
     "incremental": true,
     "allowJs": true,

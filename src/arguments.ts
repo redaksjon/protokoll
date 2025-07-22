@@ -36,23 +36,50 @@ export const configure = async (dreadcabinet: Dreadcabinet.DreadCabinet, cardiga
     program = await cardigantime.configure(program);
     program.version(VERSION);
 
+    // Check if --check-config is in process.argv early
+    if (process.argv.includes('--check-config')) {
+        program.parse();
+        const cliArgs: Args = program.opts<Args>();
+
+        // Use CardiganTime's built-in checkConfig method
+        await cardigantime.checkConfig(cliArgs);
+
+        // Return minimal config for consistency, but main processing is done
+        const config: Config = MATNAVA_DEFAULTS as Config;
+        const secureConfig: SecureConfig = { openaiApiKey: process.env.OPENAI_API_KEY };
+        return [config, secureConfig];
+    }
+
+    // Check if --init-config is in process.argv early
+    if (process.argv.includes('--init-config')) {
+        program.parse();
+        const cliArgs: Args = program.opts<Args>();
+
+        // Use CardiganTime's built-in generateConfig method
+        await cardigantime.generateConfig(cliArgs.configDirectory || MATNAVA_DEFAULTS.configDirectory);
+
+        // Return minimal config for consistency, but main processing is done
+        const config: Config = MATNAVA_DEFAULTS as Config;
+        const secureConfig: SecureConfig = { openaiApiKey: process.env.OPENAI_API_KEY };
+        return [config, secureConfig];
+    }
+
     program.parse();
 
     const cliArgs: Args = program.opts<Args>();
     logger.info('Loaded Command Line Options: %s', JSON.stringify(cliArgs, null, 2));
 
-    // Get values from config file first
-    // Validate that the configuration read from the file is valid.
+    // Get values from config file first using CardiganTime's hierarchical configuration
     const fileValues = await cardigantime.read(cliArgs);
-    await cardigantime.validate(fileValues);
 
     // Read the Raw values from the Dreadcabinet Command Line Arguments
     const dreadcabinetValues = await dreadcabinet.read(cliArgs);
 
+    // Merge configurations: Defaults -> File -> CLI (highest precedence)
     let mergedConfig: Partial<Config> = {
         ...MATNAVA_DEFAULTS,    // Start with Matnava defaults
-        ...fileValues,   // Apply file values (overwrites defaults), ensure object
-        ...dreadcabinetValues,              // Apply all CLI args last (highest precedence for all keys, including Dreadcabinet's)
+        ...fileValues,          // Apply file values (overwrites defaults)
+        ...dreadcabinetValues,  // Apply all CLI args last (highest precedence)
     } as Partial<Config>;
 
     const secureConfig: SecureConfig = {

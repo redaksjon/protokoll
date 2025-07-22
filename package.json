@@ -1,6 +1,6 @@
 {
     "name": "@jankhoj/matnava",
-    "version": "0.0.1",
+    "version": "0.0.3",
     "description": "Matnava is a focused transcription tool that helps you transcribe audio intelligently using context.",
     "main": "dist/main.js",
     "type": "module",
@@ -11,7 +11,7 @@
         "type": "git",
         "url": "git+https://github.com/jafarisimran/matnava.git"
     },
-    "packageManager": "pnpm@10.11.0",
+    "packageManager": "pnpm@10.13.1",
     "scripts": {
         "build": "pnpm run lint &&tsc --noEmit && vite build && copyfiles -u 1 \"src/**/*.md\" dist",
         "dev": "vite",
@@ -31,9 +31,9 @@
     "author": "Simran Jafari <jafarisimran@gmail.com>",
     "license": "Apache-2.0",
     "dependencies": {
-        "@riotprompt/riotprompt": "link:../../StJustReckoning/riotprompt",
-        "@theunwalked/cardigantime": "link:../../SemicolonAmbulance/cardigantime",
-        "@theunwalked/dreadcabinet": "link:../../SemicolonAmbulance/dreadcabinet",
+        "@riotprompt/riotprompt": "^0.0.8",
+        "@theunwalked/cardigantime": "^0.0.16",
+        "@theunwalked/dreadcabinet": "^0.0.10",
         "@types/fluent-ffmpeg": "^2.1.27",
         "commander": "^14.0.0",
         "dayjs": "^1.11.13",
@@ -62,6 +62,7 @@
         "eslint": "^9.31.0",
         "eslint-plugin-import": "^2.32.0",
         "globals": "^16.3.0",
+        "mockdate": "^3.0.5",
         "rollup-plugin-preserve-shebang": "^1.0.1",
         "rollup-plugin-visualizer": "^6.0.3",
         "typescript": "^5.8.3",

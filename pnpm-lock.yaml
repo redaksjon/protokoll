@@ -4,24 +4,19 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-overrides:
-  '@riotprompt/riotprompt': link:../../StJustReckoning/riotprompt
-  '@theunwalked/cardigantime': link:../../SemicolonAmbulance/cardigantime
-  '@theunwalked/dreadcabinet': link:../../SemicolonAmbulance/dreadcabinet
-
 importers:
 
   .:
     dependencies:
       '@riotprompt/riotprompt':
-        specifier: link:../../StJustReckoning/riotprompt
-        version: link:../../StJustReckoning/riotprompt
+        specifier: ^0.0.8
+        version: 0.0.8
       '@theunwalked/cardigantime':
-        specifier: link:../../SemicolonAmbulance/cardigantime
-        version: link:../../SemicolonAmbulance/cardigantime
+        specifier: ^0.0.16
+        version: 0.0.16
       '@theunwalked/dreadcabinet':
-        specifier: link:../../SemicolonAmbulance/dreadcabinet
-        version: link:../../SemicolonAmbulance/dreadcabinet
+        specifier: ^0.0.10
+        version: 0.0.10
       '@types/fluent-ffmpeg':
         specifier: ^2.1.27
         version: 2.1.27
@@ -101,6 +96,9 @@ importers:
       globals:
         specifier: ^16.3.0
         version: 16.3.0
+      mockdate:
+        specifier: ^3.0.5
+        version: 3.0.5
       rollup-plugin-preserve-shebang:
         specifier: ^1.0.1
         version: 1.0.1
@@ -413,6 +411,9 @@ packages:
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
     engines: {node: '>=14'}
 
+  '@riotprompt/riotprompt@0.0.8':
+    resolution: {integrity: sha512-l8fiKsTM1yTYF/XG97L88fYeKhfS1wc8IwxkG65XmV3IwapdbazdhONYgX3PmcQRV7+3yn7or4t1k85SmjXJiA==}
+
   '@rollup/plugin-replace@6.0.2':
     resolution: {integrity: sha512-7QaYCf8bqF04dOy7w/eHmJeNExxTYwvKAmlSAH/EaWWUzbT0h5sbF6bktFoX/0F/0qwng5/dWFMyf3gzaM8DsQ==}
     engines: {node: '>=14.0.0'}
@@ -612,6 +613,12 @@ packages:
 
   '@swc/types@0.1.23':
     resolution: {integrity: sha512-u1iIVZV9Q0jxY+yM2vw/hZGDNudsN85bBpTqzAQ9rzkxW9D+e3aEM4Han+ow518gSewkXgjmEK0BD79ZcNVgPw==}
+
+  '@theunwalked/cardigantime@0.0.16':
+    resolution: {integrity: sha512-OVvdID93rS4M7+0q3CHijCpNLYuZVeCojnisVLYJKl3HGmZE6ptEmxP99Fr6BKuAnl8t2tLeDj+NeGl7TQGJHQ==}
+
+  '@theunwalked/dreadcabinet@0.0.10':
+    resolution: {integrity: sha512-vlSR0SMCWbwcySgJs1Hnp70tch0x8865gj2kukv1rfL+TAlB2sJVLDXK1E8iguja4YZ5cYz8pEYERA8tZBV7hw==}
 
   '@types/chai@5.2.2':
     resolution: {integrity: sha512-8kB30R7Hwqf40JPiKhVzodJs2Qc1ZJ5zuT3uzw5Hq/dhNCl3G3l83jfpdI1e20BP348+fV7VIL/+FxaXkqBmWg==}
@@ -1534,6 +1541,11 @@ packages:
     resolution: {integrity: sha512-hXdUTZYIVOt1Ex//jAQi+wTZZpUpwBj/0QsOzqegb3rGMMeJiSEu5xLHnYfBrRV4RH2+OCSOO95Is/7x1WJ4bw==}
     engines: {node: '>=10'}
 
+  marked@16.1.1:
+    resolution: {integrity: sha512-ij/2lXfCRT71L6u0M29tJPhP0bM5shLL3u5BePhFwPELj2blMJ6GDtD7PfJhRLhJ/c2UwrK17ySVcDzy2YHjHQ==}
+    engines: {node: '>= 20'}
+    hasBin: true
+
   math-intrinsics@1.1.0:
     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
     engines: {node: '>= 0.4'}
@@ -1568,6 +1580,9 @@ packages:
     resolution: {integrity: sha512-vVqVZQyf3WLx2Shd0qJ9xuvqgAyKPLAiqITEtqW0oIUjzo3PePDd6fW9iFz30ef7Ysp/oiWqbhszeGWW2T6Gzw==}
     engines: {node: '>=10'}
     hasBin: true
+
+  mockdate@3.0.5:
+    resolution: {integrity: sha512-iniQP4rj1FhBdBYS/+eQv7j1tadJ9lJtdzgOpvsOHng/GbcDh2Fhdeq+ZRldrPYdXvCyfFUmFeEwEGXZB5I/AQ==}
 
   moment-timezone@0.6.0:
     resolution: {integrity: sha512-ldA5lRNm3iJCWZcBCab4pnNL3HSZYXVb/3TYr75/1WCTWYuTqYUb5f/S384pncYjJ88lbO8Z4uPDvmoluHJc8Q==}
@@ -2406,6 +2421,12 @@ snapshots:
   '@pkgjs/parseargs@0.11.0':
     optional: true
 
+  '@riotprompt/riotprompt@0.0.8':
+    dependencies:
+      glob: 11.0.3
+      marked: 16.1.1
+      zod: 4.0.5
+
   '@rollup/plugin-replace@6.0.2(rollup@4.45.1)':
     dependencies:
       '@rollup/pluginutils': 5.2.0(rollup@4.45.1)
@@ -2539,6 +2560,20 @@ snapshots:
   '@swc/types@0.1.23':
     dependencies:
       '@swc/counter': 0.1.3
+
+  '@theunwalked/cardigantime@0.0.16':
+    dependencies:
+      commander: 14.0.0
+      glob: 11.0.3
+      js-yaml: 4.1.0
+      zod: 4.0.5
+
+  '@theunwalked/dreadcabinet@0.0.10':
+    dependencies:
+      commander: 14.0.0
+      dayjs: 1.11.13
+      glob: 11.0.3
+      zod: 4.0.5
 
   '@types/chai@5.2.2':
     dependencies:
@@ -3658,6 +3693,8 @@ snapshots:
     dependencies:
       semver: 7.7.2
 
+  marked@16.1.1: {}
+
   math-intrinsics@1.1.0: {}
 
   merge2@1.4.1: {}
@@ -3684,6 +3721,8 @@ snapshots:
   minipass@7.1.2: {}
 
   mkdirp@1.0.4: {}
+
+  mockdate@3.0.5: {}
 
   moment-timezone@0.6.0:
     dependencies:
