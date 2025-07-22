@@ -69,7 +69,35 @@ export default defineConfig({
             formats: ['es'],
         },
         rollupOptions: {
-            external: ['@theunwalked/dreadcabinet', '@theunwalked/cardigantime'],
+            external: [
+                // Dependencies from package.json
+                '@riotprompt/riotprompt',
+                '@theunwalked/cardigantime',
+                '@theunwalked/dreadcabinet',
+                '@types/fluent-ffmpeg',
+                'commander',
+                'dayjs',
+                'dotenv',
+                'fluent-ffmpeg',
+                'glob',
+                'js-yaml',
+                'luxon',
+                'moment-timezone',
+                'openai',
+                'winston',
+                'zod',
+                // Node.js built-in modules
+                'fs',
+                'path',
+                'os',
+                'util',
+                'child_process',
+                'crypto',
+                'stream',
+                'url',
+                'events',
+                'process'
+            ],
             input: 'src/main.ts',
             output: {
                 format: 'esm',
