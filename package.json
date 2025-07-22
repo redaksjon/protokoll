@@ -62,6 +62,7 @@
         "eslint": "^9.31.0",
         "eslint-plugin-import": "^2.32.0",
         "globals": "^16.3.0",
+        "mockdate": "^3.0.5",
         "rollup-plugin-preserve-shebang": "^1.0.1",
         "rollup-plugin-visualizer": "^6.0.3",
         "typescript": "^5.8.3",
