@@ -272,7 +272,7 @@ describe('media util', () => {
             try {
                 await mediaUtil.splitAudioFile(testFilePath, outputDir, maxSizeBytes);
                 // If we get here, the test should fail
-                fail('Expected function to throw an error');
+                throw new Error('Expected function to throw an error');
             } catch (err: any) {
                 expect(err.message).toBe(`Failed to split audio file ${testFilePath}: Error: File not found`);
                 expect(mockLogger.error).toHaveBeenCalledWith('Error splitting audio file: %s', error);

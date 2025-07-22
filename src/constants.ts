@@ -69,9 +69,13 @@ export const MATNAVA_DEFAULTS = {
     dryRun: DEFAULT_DRY_RUN,
     verbose: DEFAULT_VERBOSE,
     debug: DEFAULT_DEBUG,
+    diff: DEFAULT_DIFF,
+    log: DEFAULT_LOG,
     transcriptionModel: DEFAULT_TRANSCRIPTION_MODEL,
     model: DEFAULT_MODEL,
+    contentTypes: DEFAULT_CONTENT_TYPES,
     overrides: DEFAULT_OVERRIDES,
     maxAudioSize: DEFAULT_MAX_AUDIO_SIZE,
     tempDirectory: DEFAULT_TEMP_DIRECTORY || os.tmpdir(),
+    configDirectory: DEFAULT_CONFIG_DIR,
 };
