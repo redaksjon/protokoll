@@ -1,0 +1,8 @@
+contextDirectories:
+  - .kodrdriv/context
+commit:
+  cached: true
+  sendit: true
+release:
+  from: main
+  to: HEAD

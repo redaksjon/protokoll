@@ -1,0 +1,72 @@
+{
+    "name": "@jankhoj/matnava",
+    "version": "0.0.1",
+    "description": "Matnava is a focused transcription tool that helps you transcribe audio intelligently using context.",
+    "main": "dist/main.js",
+    "type": "module",
+    "bin": {
+        "matnava": "./dist/main.js"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/jafarisimran/matnava.git"
+    },
+    "packageManager": "pnpm@10.11.0",
+    "scripts": {
+        "build": "pnpm run lint &&tsc --noEmit && vite build && copyfiles -u 1 \"src/**/*.md\" dist",
+        "dev": "vite",
+        "watch": "vite build --watch",
+        "test": "vitest run --coverage",
+        "lint": "eslint . --ext .ts",
+        "lint:fix": "eslint . --ext .ts --fix",
+        "clean": "rm -rf dist",
+        "prepublishOnly": "pnpm run clean && pnpm run build"
+    },
+    "keywords": [
+        "focus",
+        "productivity",
+        "notes",
+        "genai"
+    ],
+    "author": "Simran Jafari <jafarisimran@gmail.com>",
+    "license": "Apache-2.0",
+    "dependencies": {
+        "@riotprompt/riotprompt": "link:../../StJustReckoning/riotprompt",
+        "@theunwalked/cardigantime": "link:../../SemicolonAmbulance/cardigantime",
+        "@theunwalked/dreadcabinet": "link:../../SemicolonAmbulance/dreadcabinet",
+        "@types/fluent-ffmpeg": "^2.1.27",
+        "commander": "^14.0.0",
+        "dayjs": "^1.11.13",
+        "dotenv": "^17.2.0",
+        "fluent-ffmpeg": "^2.1.3",
+        "glob": "^11.0.3",
+        "js-yaml": "^4.1.0",
+        "luxon": "^3.7.1",
+        "moment-timezone": "^0.6.0",
+        "openai": "^5.10.2",
+        "winston": "^3.17.0",
+        "zod": "^4.0.5"
+    },
+    "devDependencies": {
+        "@eslint/eslintrc": "^3.3.1",
+        "@eslint/js": "^9.31.0",
+        "@rollup/plugin-replace": "^6.0.2",
+        "@swc/core": "^1.13.1",
+        "@types/js-yaml": "^4.0.9",
+        "@types/luxon": "^3.6.2",
+        "@types/node": "^24.1.0",
+        "@typescript-eslint/eslint-plugin": "^8.38.0",
+        "@typescript-eslint/parser": "^8.38.0",
+        "@vitest/coverage-v8": "^3.2.4",
+        "copyfiles": "^2.4.1",
+        "eslint": "^9.31.0",
+        "eslint-plugin-import": "^2.32.0",
+        "globals": "^16.3.0",
+        "rollup-plugin-preserve-shebang": "^1.0.1",
+        "rollup-plugin-visualizer": "^6.0.3",
+        "typescript": "^5.8.3",
+        "vite": "^7.0.5",
+        "vite-plugin-node": "^7.0.0",
+        "vitest": "^3.2.4"
+    }
+}

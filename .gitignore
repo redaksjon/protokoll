@@ -1,0 +1,14 @@
+.env 
+dist
+node_modules
+*.log
+.vscode
+coverage/
+test/
+output/
+input/
+processed/
+.maloomscan/
+output
+outdiff
+outlog
