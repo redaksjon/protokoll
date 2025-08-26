@@ -2,8 +2,6 @@ import * as Dreadcabinet from "@theunwalked/dreadcabinet";
 import * as Cardigantime from '@theunwalked/cardigantime';
 import { Command } from "commander";
 import {
-    ALLOWED_MODELS,
-    ALLOWED_TRANSCRIPTION_MODELS,
     MATNAVA_DEFAULTS,
     DEFAULT_MAX_AUDIO_SIZE,
     PROGRAM_NAME,
@@ -131,8 +129,9 @@ async function validateSecureConfig(config: SecureConfig): Promise<void> {
 async function validateConfig(config: Config): Promise<void> {
     const logger = getLogger();
 
-    validateModel(config.model, true, 'model', ALLOWED_MODELS);
-    validateModel(config.transcriptionModel, true, 'transcriptionModel', ALLOWED_TRANSCRIPTION_MODELS);
+    // Validate that models are provided (but don't restrict to specific allowlist)
+    validateModelPresence(config.model, true, 'model');
+    validateModelPresence(config.transcriptionModel, true, 'transcriptionModel');
 
     if (config.contextDirectories && config.contextDirectories.length > 0) {
         await validateContextDirectories(config.contextDirectories);
@@ -154,16 +153,20 @@ async function validateConfig(config: Config): Promise<void> {
     logger.info("Final configuration validated successfully.");
 }
 
-function validateModel(model: string | undefined, required: boolean, modelOptionName: string, allowedModels: string[]) {
+function validateModelPresence(model: string | undefined, required: boolean, modelOptionName: string) {
     const logger = getLogger();
-    logger.debug(`Validating model for ${modelOptionName}: ${model} (Required: ${required})`);
+    logger.debug(`Validating model presence for ${modelOptionName}: ${model} (Required: ${required})`);
     if (required && !model) {
         throw new Error(`Model for ${modelOptionName} is required`);
     }
 
-    if (model && !allowedModels.includes(model)) {
-        throw new Error(`Invalid ${modelOptionName}: ${model}. Allowed models are: ${allowedModels.join(', ')}`);
+    if (model && model.trim() === '') {
+        throw new Error(`Model for ${modelOptionName} cannot be empty`);
     }
+
+    // Note: We no longer validate against a static allowlist
+    // The actual model validation will happen when the API call is made
+    // This allows for dynamic model discovery and future model additions
 }
 
 async function validateContextDirectories(contextDirectories: string[]) {

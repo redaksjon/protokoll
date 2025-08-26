@@ -53,9 +53,9 @@ export const DEFAULT_INSTRUCTIONS_DIR = `/instructions`;
 
 export const DEFAULT_INSTRUCTIONS_TRANSCRIBE_FILE = `${DEFAULT_INSTRUCTIONS_DIR}/transcribe.md`;
 
-// TODO: Add more models, but also this should be a part of an OpenAI specific extension.
-export const ALLOWED_MODELS: string[] = ['gpt-4o', 'gpt-4o-mini', 'o1-preview', 'o1-mini', 'o3-mini', 'o3-preview', 'o1-pro', 'o1-preview-2024-09-12'];
-export const ALLOWED_TRANSCRIPTION_MODELS: string[] = ['whisper-1'];
+// Note: We no longer maintain a static allowlist of models
+// This allows for dynamic model discovery and future model additions
+// Users can specify any model supported by their OpenAI API
 
 export const DEFAULT_TRANSCRIPTION_MODEL = 'whisper-1';
 export const DEFAULT_MODEL = 'gpt-4o-mini';

@@ -1,12 +1,12 @@
-# maloomscan: Transcripts to Intelligent Notes
+# Matnava: Intelligent Audio Transcription Tool
 
 > **Note:** This utility is currently in pre-release status. Features and interfaces may change before the final release.
 
-maloomscan is a powerful command-line utility that transforms audio recordings into intelligent, context-enhanced notes. It uses AI to transcribe, classify, and enhance audio content, making it more useful and actionable.
+Matnava is a powerful command-line utility that transforms audio recordings into intelligent, context-enhanced notes. It uses AI to transcribe and enhance audio content, making it more useful and actionable.
 
 ## How It Works
 
-maloomscan processes each audio file through three distinct phases:
+Matnava processes each audio file through a streamlined workflow:
 
 ### 1. Locate Phase
 
@@ -16,23 +16,13 @@ The locate phase handles the initial setup for processing:
 - Determines the appropriate output directory based on configured structure
 - Constructs the base filename for the output files
 
-### 2. Classify Phase
+### 2. Transcribe Phase
 
-The classify phase transforms audio into structured data:
+The transcribe phase transforms audio into structured text:
 - Transcribes the audio file using OpenAI's Whisper model
-- Sends the transcription to an AI model with a "classifier" persona
-- Analyzes the content to identify the note type (meeting, email, call, etc.)
-- Extracts key metadata like subject, attendees, and sections
-- Stores the classification results as a JSON file for reference
-
-### 3. Compose Phase
-
-The compose phase creates the final intelligent note:
-- Takes the classified transcription from the previous phase
-- Selects type-specific instructions based on classification (meeting, email, etc.)
-- Applies a "you" persona to represent the speaker's voice
+- Sends the transcription to an AI model for enhancement and formatting
+- Applies intelligent formatting and structure to the content
 - Generates a well-structured, enhanced markdown note
-- Formats the content according to the note type's requirements
 
 Each phase builds on the previous one, gradually transforming raw audio into a useful, structured note. If you run in debug mode, you can examine the intermediate files created during each phase.
 
@@ -40,10 +30,32 @@ Each phase builds on the previous one, gradually transforming raw audio into a u
 
 - Simple command-line interface
 - Support for multiple audio formats
-- Automatic content classification
-- Type-specific note formatting
+- Intelligent audio transcription and enhancement
+- **Flexible AI model selection** - Use any OpenAI model without restrictions
 - Recursive directory processing
-- Configurable AI models
+- Context-aware processing
+
+## Model Selection
+
+Matnava provides flexible model selection without hardcoded allowlists:
+
+- **Any OpenAI Model**: You can specify any model supported by your OpenAI API (e.g., `gpt-5-mini`, `gpt-4o`, `o1-preview`)
+- **Dynamic Validation**: Model validation happens at the API level, not locally
+- **Future-Proof**: New models are automatically supported without code updates
+- **Default Models**: Sensible defaults are provided but can be overridden
+
+### Examples
+
+```bash
+# Use the latest GPT-5 model
+matnava --model gpt-5-mini --input-directory ./recordings
+
+# Use a different transcription model
+matnava --transcription-model whisper-1 --input-directory ./recordings
+
+# Use any model you prefer
+matnava --model o1-preview --input-directory ./recordings
+```
 
 ## Installation
 
@@ -56,7 +68,7 @@ Each phase builds on the previous one, gradually transforming raw audio into a u
 
 ```bash
 # Install globally
-npm install -g @jafarisimran/maloomscan
+npm install -g @jankhoj/matnava
 
 # Create a .env file with your OpenAI API key in your working directory
 echo "OPENAI_API_KEY=your-api-key" > .env
@@ -66,8 +78,8 @@ echo "OPENAI_API_KEY=your-api-key" > .env
 
 ```bash
 # Clone the repository
-git clone https://github.com/jafarisimran/maloomscan.git
-cd maloomscan
+git clone https://github.com/jafarisimran/matnava.git
+cd matnava
 
 # Install dependencies
 npm install
@@ -85,60 +97,48 @@ echo "OPENAI_API_KEY=your-api-key" > .env
 
 ```bash
 # Run directly
-maloomscan --input-directory ./recordings --output-directory ./notes
+matnava --input-directory ./recordings --output-directory ./notes
 
 # Or run with npx
-npx @jafarisimran/maloomscan --input-directory ./recordings --output-directory ./notes
+npx @jankhoj/matnava --input-directory ./recordings --output-directory ./notes
 ```
 
 ### If not installed globally:
 
 ```bash
 # Run with npx without installing
-npx @jafarisimran/maloomscan --input-directory ./recordings --output-directory ./notes
+npx @jankhoj/matnava --input-directory ./recordings --output-directory ./notes
 ```
 
 Additional options:
 ```bash
 # Process files recursively
-maloomscan --input-directory ./recordings --output-directory ./notes --recursive
+matnava --input-directory ./recordings --output-directory ./notes --recursive
 
 # Enable verbose logging
-maloomscan --input-directory ./recordings --output-directory ./notes --verbose
+matnava --input-directory ./recordings --output-directory ./notes --verbose
 
-# Specify custom AI model
-maloomscan --input-directory ./recordings --output-directory ./notes --model gpt-4
+# Use any OpenAI model (e.g., gpt-5-mini, o1-preview)
+matnava --input-directory ./recordings --output-directory ./notes --model gpt-5-mini
 ```
 
 
 
 ## Output Files
 
-maloomscan generates two output files for each processed audio file:
+Matnava generates enhanced markdown notes for each processed audio file:
 
-1. **JSON Classification File** (`filename.json`):
-   - Contains structured data about the transcript
-   - Includes classification of the note type (meeting, call, email, etc.)
-   - Stores extracted metadata such as:
-     - Meeting attendees
-     - Subject/topic
-     - Conference tool used (Zoom, Teams, etc.)
-     - Recipients (for email type)
-     - Tasks and their urgency/status
-     - Content sections
-   - Preserves the original transcript text
-
-2. **Markdown Note File** (`filename.md`):
-   - Contains the enhanced, formatted version of the transcript
-   - Organized according to the note type
-   - Includes relevant sections, headers, and formatting
-   - Ready for use in note-taking applications or knowledge bases
+**Markdown Note File** (`filename.md`):
+- Contains the enhanced, formatted version of the transcript
+- Organized with intelligent headings and structure
+- Preserves the original meaning while improving readability
+- Ready for use in note-taking applications or knowledge bases
 
 The output files are saved to the directory specified with the `--output-directory` option.
 
 ## Command Line Options
 
-maloomscan provides a variety of command line options to customize its behavior:
+Matnava provides a variety of command line options to customize its behavior:
 
 | Option | Description | Default |
 |--------|-------------|---------|
@@ -146,14 +146,12 @@ maloomscan provides a variety of command line options to customize its behavior:
 | `-o, --output-directory <dir>` | Output directory for generated files | `./notes` |
 | `-r, --recursive` | Process files recursively in input directory | `false` |
 | `-a, --audio-extensions [ext...]` | Audio extensions to process | `mp3,mp4,wav,m4a` |
-| `--model <model>` | OpenAI model to use for all operations | `gpt-4` |
-| `--classify-model <model>` | Specific model for classification phase | Same as `--model` |
-| `--compose-model <model>` | Specific model for composition phase | Same as `--model` |
+| `--model <model>` | OpenAI model to use for transcription enhancement | `gpt-4o-mini` |
 | `--transcription-model <model>` | OpenAI transcription model | `whisper-1` |
 | `--output-structure <type>` | Output directory structure | `none` |
 | `--filename-options [options...]` | Filename format options | `date,time,subject` |
 | `--context-directories [dirs...]` | Directories to search for context files | `[]` |
-| `--config-dir <dir>` | Configuration directory | `~/.maloomscan` |
+| `--config-dir <dir>` | Configuration directory | `~/.matnava` |
 | `--overrides` | Allow overrides of default configuration | `false` |
 | `--openai-api-key <key>` | OpenAI API key | From env var |
 | `--timezone <timezone>` | Timezone for date calculations | `UTC` |
@@ -161,26 +159,28 @@ maloomscan provides a variety of command line options to customize its behavior:
 | `--verbose` | Enable verbose logging | `false` |
 | `--debug` | Enable debug logging | `false` |
 
+> **Note on Model Selection**: Matnava accepts any OpenAI model string without restrictions. You can use `gpt-5-mini`, `o1-preview`, or any other model supported by your OpenAI API. Model validation happens at the API level, ensuring future compatibility.
+
 ### Examples
 
 Process all audio files in the current directory:
 ```bash
-maloomscan --input-directory . --output-directory ./notes
+matnava --input-directory . --output-directory ./notes
 ```
 
 Process files recursively with verbose logging:
 ```bash
-maloomscan --input-directory ./recordings --output-directory ./notes --recursive --verbose
+matnava --input-directory ./recordings --output-directory ./notes --recursive --verbose
 ```
 
-Specify different models for classification and composition phases:
+Use any OpenAI model for transcription enhancement:
 ```bash
-maloomscan --classify-model gpt-4 --compose-model gpt-3.5-turbo --input-directory ./recordings
+matnava --model gpt-5-mini --input-directory ./recordings
 ```
 
-Use a single model for all AI operations:
+Use a different transcription model:
 ```bash
-maloomscan --model gpt-4-turbo --input-directory ./recordings
+matnava --transcription-model whisper-1 --input-directory ./recordings
 ```
 
 Organize output files by date structure:
