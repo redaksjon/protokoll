@@ -46,13 +46,13 @@ importers:
         version: 0.6.0
       openai:
         specifier: ^5.10.2
-        version: 5.10.2(zod@4.0.5)
+        version: 5.10.2(zod@4.1.11)
       winston:
         specifier: ^3.17.0
         version: 3.17.0
       zod:
         specifier: ^4.0.5
-        version: 4.0.5
+        version: 4.1.11
     devDependencies:
       '@eslint/eslintrc':
         specifier: ^3.3.1
@@ -2207,8 +2207,8 @@ packages:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
     engines: {node: '>=10'}
 
-  zod@4.0.5:
-    resolution: {integrity: sha512-/5UuuRPStvHXu7RS+gmvRf4NXrNxpSllGwDnCBcJZtQsKrviYXm54yDGV2KYNLT5kq0lHGcl7lqWJLgSaG+tgA==}
+  zod@4.1.11:
+    resolution: {integrity: sha512-WPsqwxITS2tzx1bzhIKsEs19ABD5vmCVa4xBo2tq/SrV4RNZtfws1EnCWQXM6yh8bD08a1idvkB5MZSBiZsjwg==}
 
 snapshots:
 
@@ -2425,7 +2425,7 @@ snapshots:
     dependencies:
       glob: 11.0.3
       marked: 16.1.1
-      zod: 4.0.5
+      zod: 4.1.11
 
   '@rollup/plugin-replace@6.0.2(rollup@4.45.1)':
     dependencies:
@@ -2566,14 +2566,14 @@ snapshots:
       commander: 14.0.0
       glob: 11.0.3
       js-yaml: 4.1.0
-      zod: 4.0.5
+      zod: 4.1.11
 
   '@theunwalked/dreadcabinet@0.0.10':
     dependencies:
       commander: 14.0.0
       dayjs: 1.11.13
       glob: 11.0.3
-      zod: 4.0.5
+      zod: 4.1.11
 
   '@types/chai@5.2.2':
     dependencies:
@@ -3788,9 +3788,9 @@ snapshots:
       is-docker: 2.2.1
       is-wsl: 2.2.0
 
-  openai@5.10.2(zod@4.0.5):
+  openai@5.10.2(zod@4.1.11):
     optionalDependencies:
-      zod: 4.0.5
+      zod: 4.1.11
 
   optionator@0.9.4:
     dependencies:
@@ -4447,4 +4447,4 @@ snapshots:
 
   yocto-queue@0.1.0: {}
 
-  zod@4.0.5: {}
+  zod@4.1.11: {}
