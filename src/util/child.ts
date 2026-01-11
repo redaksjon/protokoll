@@ -5,5 +5,9 @@ import util from 'util';
 export async function run(command: string, options: child_process.ExecOptions = {}): Promise<{ stdout: string; stderr: string }> {
     const execPromise = util.promisify(exec);
     const optionsWithEncoding = { ...options, encoding: 'utf8' as const };
-    return execPromise(command, optionsWithEncoding);
+    const result = await execPromise(command, optionsWithEncoding);
+    return {
+        stdout: result.stdout.toString(),
+        stderr: result.stderr.toString()
+    };
 }

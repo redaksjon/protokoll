@@ -1,6 +1,6 @@
 import { Builder, Chat, Prompt } from "@riotprompt/riotprompt";
 import { DEFAULT_INSTRUCTIONS_TRANSCRIBE_FILE, DEFAULT_PERSONA_TRANSCRIBER_FILE } from '@/constants';
-import { Config } from '@/matnava';
+import { Config } from '@/protokoll';
 import { fileURLToPath } from "url";
 import path from "path";
 import { getLogger } from "@/logging";

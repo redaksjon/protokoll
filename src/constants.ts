@@ -3,7 +3,7 @@ import { FilenameOption } from '@theunwalked/dreadcabinet';
 import { FilesystemStructure } from '@theunwalked/dreadcabinet';
 
 export const VERSION = '__VERSION__ (__GIT_BRANCH__/__GIT_COMMIT__ __GIT_TAGS__ __GIT_COMMIT_DATE__) __SYSTEM_INFO__';
-export const PROGRAM_NAME = 'matnava';
+export const PROGRAM_NAME = 'protokoll';
 export const DEFAULT_CHARACTER_ENCODING = 'utf-8';
 export const DEFAULT_BINARY_TO_TEXT_ENCODING = 'base64';
 export const DEFAULT_DIFF = true;
@@ -64,8 +64,8 @@ export const DEFAULT_OVERRIDES = false;
 export const DEFAULT_MAX_AUDIO_SIZE = 26214400; // 25MB in bytes
 export const DEFAULT_TEMP_DIRECTORY = os.tmpdir(); // Use OS default temp directory
 
-// Define Matnava-specific defaults
-export const MATNAVA_DEFAULTS = {
+// Define Protokoll-specific defaults
+export const PROTOKOLL_DEFAULTS = {
     dryRun: DEFAULT_DRY_RUN,
     verbose: DEFAULT_VERBOSE,
     debug: DEFAULT_DEBUG,

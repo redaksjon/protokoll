@@ -1,7 +1,7 @@
 import { describe, expect, beforeAll, beforeEach, afterAll, test, vi } from 'vitest';
 
 // Variables to hold dynamically imported modules
-let matnava: { main: () => Promise<void> };
+let protokoll: { main: () => Promise<void> };
 
 // Define a simplified mock config 
 const mockConfig = {
@@ -130,7 +130,7 @@ afterAll(() => {
 // Load all dynamic imports before tests
 beforeAll(async () => {
     // Import the module under test after all mocks are set up
-    matnava = await import('../src/matnava.js');
+    protokoll = await import('../src/protokoll.js');
 });
 
 describe('main', () => {
@@ -152,7 +152,7 @@ describe('main', () => {
 
         const loggingModule = await import('../src/logging.js');
 
-        await matnava.main();
+        await protokoll.main();
 
         // Verify setLogLevel was called with 'verbose'
         expect(loggingModule.setLogLevel).toHaveBeenCalledWith('verbose');
@@ -172,7 +172,7 @@ describe('main', () => {
 
         const loggingModule = await import('../src/logging.js');
 
-        await matnava.main();
+        await protokoll.main();
 
         // Verify setLogLevel was called with 'debug'
         expect(loggingModule.setLogLevel).toHaveBeenCalledWith('debug');

@@ -1,24 +1,26 @@
 {
-    "name": "@jankhoj/matnava",
-    "version": "0.0.6-dev.0",
-    "description": "Matnava is a focused transcription tool that helps you transcribe audio intelligently using context.",
+    "name": "@redaksjon/protokoll",
+    "version": "0.0.7",
+    "description": "Focused audio transcription with intelligent context integration",
     "main": "dist/main.js",
     "type": "module",
     "bin": {
-        "matnava": "./dist/main.js"
+        "protokoll": "./dist/main.js"
     },
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/jafarisimran/matnava.git"
+        "url": "git+https://github.com/tobrien/redaksjon-protokoll.git"
     },
     "scripts": {
         "build": "npm run lint &&tsc --noEmit && vite build && copyfiles -u 1 \"src/**/*.md\" dist",
         "dev": "vite",
         "watch": "vite build --watch",
         "test": "vitest run --coverage",
+        "test:coverage": "vitest run --coverage",
         "lint": "eslint . --ext .ts",
         "lint:fix": "eslint . --ext .ts --fix",
         "clean": "rm -rf dist",
+        "precommit": "npm run lint && npm run test",
         "prepublishOnly": "npm run clean && npm run build"
     },
     "keywords": [
@@ -27,8 +29,12 @@
         "notes",
         "genai"
     ],
-    "author": "Simran Jafari <jafarisimran@gmail.com>",
+    "author": "Tim O'Brien <tobrien@discursive.com>",
     "license": "Apache-2.0",
+    "engines": {
+        "node": ">=18.0.0",
+        "npm": ">=9.0.0"
+    },
     "dependencies": {
         "@riotprompt/riotprompt": "^0.0.8",
         "@theunwalked/cardigantime": "^0.0.16",

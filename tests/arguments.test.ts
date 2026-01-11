@@ -55,10 +55,23 @@ const defaultCommanderMock = {
 };
 
 // Mock the Command class
-vi.mock('commander', () => {
-    const mockCommand = vi.fn().mockImplementation(() => defaultCommanderMock);
-    return { Command: mockCommand };
-});
+class MockCommand {
+    name = vi.fn().mockReturnThis();
+    summary = vi.fn().mockReturnThis();
+    description = vi.fn().mockReturnThis();
+    option = vi.fn().mockReturnThis();
+    version = vi.fn().mockReturnThis();
+    parse = vi.fn();
+    opts = vi.fn().mockReturnValue(defaultCommanderMock.opts());
+    
+    constructor() {
+        Object.assign(this, defaultCommanderMock);
+    }
+}
+
+vi.mock('commander', () => ({
+    Command: MockCommand
+}));
 
 // Mock Dreadcabinet
 const mockDreadcabinetInstance = {
