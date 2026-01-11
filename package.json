@@ -37,7 +37,7 @@
   },
   "dependencies": {
     "@riotprompt/riotprompt": "^0.0.8",
-    "@theunwalked/cardigantime": "^0.0.16",
+    "@theunwalked/cardigantime": "^0.0.20",
     "@theunwalked/dreadcabinet": "^0.0.10",
     "@types/fluent-ffmpeg": "^2.1.28",
     "commander": "^14.0.2",
