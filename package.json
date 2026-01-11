@@ -1,6 +1,6 @@
 {
     "name": "@jankhoj/matnava",
-    "version": "0.0.5-dev.0",
+    "version": "0.0.6-dev.0",
     "description": "Matnava is a focused transcription tool that helps you transcribe audio intelligently using context.",
     "main": "dist/main.js",
     "type": "module",
