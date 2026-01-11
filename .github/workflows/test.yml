@@ -1,14 +1,16 @@
+# This workflow runs tests on push and pull requests
 name: Run Tests
-
-permissions:
-  contents: write
 
 on:
   push:
     branches:
       - main
+      - working
       - 'release/**'
       - 'feature/**'
+  pull_request:
+    branches:
+      - main
 
 jobs:
   test:
@@ -18,12 +20,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - uses: pnpm/action-setup@v4
-      - run: pnpm install --frozen-lockfile --strict-peer-dependencies
-      - run: pnpm run lint
-      - run: pnpm run build
-      - run: pnpm test
+      - name: Install dependencies
+        run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: npm test
       - uses: codecov/codecov-action@v5
         with:
-          slug: jafarisimran/maloomscan
+          slug: tobrien/redaksjon-protokoll
           token: ${{ secrets.CODECOV_TOKEN }}
