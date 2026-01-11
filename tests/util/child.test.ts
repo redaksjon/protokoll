@@ -49,7 +49,7 @@ describe('child util', () => {
             expect(mockPromisify).toHaveBeenCalledWith(mockExec);
 
             // Verify the promisified exec was called with correct arguments
-            expect(mockExecPromise).toHaveBeenCalledWith('test command', {});
+            expect(mockExecPromise).toHaveBeenCalledWith('test command', { encoding: 'utf8' });
 
             // Verify the result contains expected output
             expect(result).toEqual({
@@ -62,7 +62,7 @@ describe('child util', () => {
             const options = { cwd: '/tmp', env: { NODE_ENV: 'test' } };
             await run('test command', options);
 
-            expect(mockExecPromise).toHaveBeenCalledWith('test command', options);
+            expect(mockExecPromise).toHaveBeenCalledWith('test command', { ...options, encoding: 'utf8' });
         });
 
         test('should handle command failures', async () => {

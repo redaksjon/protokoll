@@ -2,14 +2,12 @@ import * as Dreadcabinet from "@theunwalked/dreadcabinet";
 import * as Cardigantime from '@theunwalked/cardigantime';
 import { Command } from "commander";
 import {
-    ALLOWED_MODELS,
-    ALLOWED_TRANSCRIPTION_MODELS,
-    MATNAVA_DEFAULTS,
+    PROTOKOLL_DEFAULTS,
     DEFAULT_MAX_AUDIO_SIZE,
     PROGRAM_NAME,
     VERSION
 } from "@/constants";
-import { Args, Config, SecureConfig } from "@/matnava";
+import { Args, Config, SecureConfig } from "@/protokoll";
 import { getLogger } from "@/logging";
 import * as Storage from "@/util/storage";
 
@@ -20,7 +18,7 @@ export const configure = async (dreadcabinet: Dreadcabinet.DreadCabinet, cardiga
     program
         .name(PROGRAM_NAME)
         .summary('Intelligent audio transcription tool with context')
-        .description('Matnava transcribes audio files intelligently using context to improve accuracy')
+        .description('Protokoll transcribes audio files intelligently using context to improve accuracy')
         .option('--dry-run', 'perform a dry run without saving files')
         .option('--verbose', 'enable verbose logging')
         .option('--debug', 'enable debug logging')
@@ -45,7 +43,7 @@ export const configure = async (dreadcabinet: Dreadcabinet.DreadCabinet, cardiga
         await cardigantime.checkConfig(cliArgs);
 
         // Return minimal config for consistency, but main processing is done
-        const config: Config = MATNAVA_DEFAULTS as Config;
+        const config: Config = PROTOKOLL_DEFAULTS as Config;
         const secureConfig: SecureConfig = { openaiApiKey: process.env.OPENAI_API_KEY };
         return [config, secureConfig];
     }
@@ -56,10 +54,10 @@ export const configure = async (dreadcabinet: Dreadcabinet.DreadCabinet, cardiga
         const cliArgs: Args = program.opts<Args>();
 
         // Use CardiganTime's built-in generateConfig method
-        await cardigantime.generateConfig(cliArgs.configDirectory || MATNAVA_DEFAULTS.configDirectory);
+        await cardigantime.generateConfig(cliArgs.configDirectory || PROTOKOLL_DEFAULTS.configDirectory);
 
         // Return minimal config for consistency, but main processing is done
-        const config: Config = MATNAVA_DEFAULTS as Config;
+        const config: Config = PROTOKOLL_DEFAULTS as Config;
         const secureConfig: SecureConfig = { openaiApiKey: process.env.OPENAI_API_KEY };
         return [config, secureConfig];
     }
@@ -77,7 +75,7 @@ export const configure = async (dreadcabinet: Dreadcabinet.DreadCabinet, cardiga
 
     // Merge configurations: Defaults -> File -> CLI (highest precedence)
     let mergedConfig: Partial<Config> = {
-        ...MATNAVA_DEFAULTS,    // Start with Matnava defaults
+        ...PROTOKOLL_DEFAULTS,    // Start with Protokoll defaults
         ...fileValues,          // Apply file values (overwrites defaults)
         ...dreadcabinetValues,  // Apply all CLI args last (highest precedence)
     } as Partial<Config>;
@@ -93,10 +91,10 @@ export const configure = async (dreadcabinet: Dreadcabinet.DreadCabinet, cardiga
             mergedConfig.maxAudioSize = parsedSize;
         } else {
             logger.warn(`Invalid maxAudioSize value detected after merge: '${mergedConfig.maxAudioSize}', using default: ${DEFAULT_MAX_AUDIO_SIZE}`);
-            mergedConfig.maxAudioSize = DEFAULT_MAX_AUDIO_SIZE; // Use Matnava default if parsing fails
+            mergedConfig.maxAudioSize = DEFAULT_MAX_AUDIO_SIZE; // Use Protokoll default if parsing fails
         }
     } else if (mergedConfig.maxAudioSize === undefined) {
-        // If still undefined after all merges, apply Matnava default
+        // If still undefined after all merges, apply Protokoll default
         mergedConfig.maxAudioSize = DEFAULT_MAX_AUDIO_SIZE;
     }
 
@@ -108,7 +106,7 @@ export const configure = async (dreadcabinet: Dreadcabinet.DreadCabinet, cardiga
     // Validate Dreadcabinet final config
     dreadcabinet.validate(config);
 
-    // Validate Matnava final config
+    // Validate Protokoll final config
     await validateConfig(config);
     await validateSecureConfig(secureConfig);
 
@@ -131,8 +129,9 @@ async function validateSecureConfig(config: SecureConfig): Promise<void> {
 async function validateConfig(config: Config): Promise<void> {
     const logger = getLogger();
 
-    validateModel(config.model, true, 'model', ALLOWED_MODELS);
-    validateModel(config.transcriptionModel, true, 'transcriptionModel', ALLOWED_TRANSCRIPTION_MODELS);
+    // Validate that models are provided (but don't restrict to specific allowlist)
+    validateModelPresence(config.model, true, 'model');
+    validateModelPresence(config.transcriptionModel, true, 'transcriptionModel');
 
     if (config.contextDirectories && config.contextDirectories.length > 0) {
         await validateContextDirectories(config.contextDirectories);
@@ -154,16 +153,20 @@ async function validateConfig(config: Config): Promise<void> {
     logger.info("Final configuration validated successfully.");
 }
 
-function validateModel(model: string | undefined, required: boolean, modelOptionName: string, allowedModels: string[]) {
+function validateModelPresence(model: string | undefined, required: boolean, modelOptionName: string) {
     const logger = getLogger();
-    logger.debug(`Validating model for ${modelOptionName}: ${model} (Required: ${required})`);
+    logger.debug(`Validating model presence for ${modelOptionName}: ${model} (Required: ${required})`);
     if (required && !model) {
         throw new Error(`Model for ${modelOptionName} is required`);
     }
 
-    if (model && !allowedModels.includes(model)) {
-        throw new Error(`Invalid ${modelOptionName}: ${model}. Allowed models are: ${allowedModels.join(', ')}`);
+    if (model && model.trim() === '') {
+        throw new Error(`Model for ${modelOptionName} cannot be empty`);
     }
+
+    // Note: We no longer validate against a static allowlist
+    // The actual model validation will happen when the API call is made
+    // This allows for dynamic model discovery and future model additions
 }
 
 async function validateContextDirectories(contextDirectories: string[]) {

@@ -1,4 +1,4 @@
 #!/usr/bin/env node
-import { main } from '@/matnava';
+import { main } from '@/protokoll';
 
 main();

@@ -3,7 +3,7 @@ import { FilenameOption } from '@theunwalked/dreadcabinet';
 import { FilesystemStructure } from '@theunwalked/dreadcabinet';
 
 export const VERSION = '__VERSION__ (__GIT_BRANCH__/__GIT_COMMIT__ __GIT_TAGS__ __GIT_COMMIT_DATE__) __SYSTEM_INFO__';
-export const PROGRAM_NAME = 'matnava';
+export const PROGRAM_NAME = 'protokoll';
 export const DEFAULT_CHARACTER_ENCODING = 'utf-8';
 export const DEFAULT_BINARY_TO_TEXT_ENCODING = 'base64';
 export const DEFAULT_DIFF = true;
@@ -53,9 +53,9 @@ export const DEFAULT_INSTRUCTIONS_DIR = `/instructions`;
 
 export const DEFAULT_INSTRUCTIONS_TRANSCRIBE_FILE = `${DEFAULT_INSTRUCTIONS_DIR}/transcribe.md`;
 
-// TODO: Add more models, but also this should be a part of an OpenAI specific extension.
-export const ALLOWED_MODELS: string[] = ['gpt-4o', 'gpt-4o-mini', 'o1-preview', 'o1-mini', 'o3-mini', 'o3-preview', 'o1-pro', 'o1-preview-2024-09-12'];
-export const ALLOWED_TRANSCRIPTION_MODELS: string[] = ['whisper-1'];
+// Note: We no longer maintain a static allowlist of models
+// This allows for dynamic model discovery and future model additions
+// Users can specify any model supported by their OpenAI API
 
 export const DEFAULT_TRANSCRIPTION_MODEL = 'whisper-1';
 export const DEFAULT_MODEL = 'gpt-4o-mini';
@@ -64,8 +64,8 @@ export const DEFAULT_OVERRIDES = false;
 export const DEFAULT_MAX_AUDIO_SIZE = 26214400; // 25MB in bytes
 export const DEFAULT_TEMP_DIRECTORY = os.tmpdir(); // Use OS default temp directory
 
-// Define Matnava-specific defaults
-export const MATNAVA_DEFAULTS = {
+// Define Protokoll-specific defaults
+export const PROTOKOLL_DEFAULTS = {
     dryRun: DEFAULT_DRY_RUN,
     verbose: DEFAULT_VERBOSE,
     debug: DEFAULT_DEBUG,

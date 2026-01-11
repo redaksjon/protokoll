@@ -2,7 +2,7 @@ import * as Logging from '@/logging';
 import * as TranscribePhase from '@/phases/transcribe';
 import * as LocatePhase from '@/phases/locate';
 import * as Dreadcabinet from '@theunwalked/dreadcabinet';
-import { Config } from '@/matnava';
+import { Config } from '@/protokoll';
 
 export interface Transcription {
     text: string;

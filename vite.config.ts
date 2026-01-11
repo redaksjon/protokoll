@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { defineConfig } from 'vite';
 import { VitePluginNode } from 'vite-plugin-node';
 import replace from '@rollup/plugin-replace';
 // import { visualizer } from 'rollup-plugin-visualizer';
@@ -119,26 +119,6 @@ export default defineConfig({
     resolve: {
         alias: {
             '@': path.resolve(__dirname, 'src'),
-        },
-    },
-    test: {
-        globals: false,
-        environment: 'node',
-        setupFiles: ['tests/setup.ts'],
-        include: ['tests/**/*.test.ts'],
-        exclude: ['node_modules/**/*', 'dist/**/*'],
-        testTimeout: 30000,
-        coverage: {
-            provider: 'v8',
-            reporter: ['text', 'html', 'lcov'],
-            include: ['src/**/*'],
-            exclude: ['dist/**/*', 'node_modules/**/*', 'tests/**/*'],
-            thresholds: {
-                lines: 88,
-                statements: 88,
-                branches: 83,
-                functions: 88,
-            },
         },
     },
 }); 

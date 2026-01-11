@@ -23,7 +23,7 @@ import {
 
 describe('constants', () => {
     test('should have correct string values', () => {
-        expect(PROGRAM_NAME).toBe('matnava');
+        expect(PROGRAM_NAME).toBe('protokoll');
         expect(DEFAULT_CHARACTER_ENCODING).toBe('utf-8');
         expect(DEFAULT_BINARY_TO_TEXT_ENCODING).toBe('base64');
     });
