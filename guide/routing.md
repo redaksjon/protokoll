@@ -66,11 +66,11 @@ Protokoll uses Dreadcabinet structure codenames:
 
 | Option | Example | Description |
 |--------|---------|-------------|
-| `date` | `2026-01-11` | ISO date |
-| `time` | `1430` | 24-hour time |
+| `date` | `260111` | YYMMDD format |
+| `time` | `1430` | HHmm format |
 | `subject` | `meeting-notes` | Derived from content |
 
-Combined example: `2026-01-11-1430-meeting-notes.md`
+Combined example: `260111-1430-meeting-notes.md`
 
 ## Classification Signals
 

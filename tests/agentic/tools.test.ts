@@ -57,7 +57,7 @@ describe('Agentic Tools', () => {
             expect(result.data.found).toBe(false);
         });
     
-        it('should try phonetic match', async () => {
+        it('should try phonetic match when phonetic arg provided', async () => {
             mockContext.contextInstance.findBySoundsLike = vi.fn(() => ({
                 id: 'priya', name: 'Priya Sharma', type: 'person'
             }));
@@ -67,6 +67,29 @@ describe('Agentic Tools', () => {
       
             expect(result.success).toBe(true);
             expect(result.data.found).toBe(true);
+        });
+
+        it('should not try phonetic match when phonetic arg not provided', async () => {
+            mockContext.contextInstance.search = vi.fn(() => []);
+            mockContext.contextInstance.findBySoundsLike = vi.fn();
+      
+            const tool = LookupPerson.create(mockContext);
+            const result = await tool.execute({ name: 'Unknown' });
+      
+            expect(result.success).toBe(true);
+            expect(result.data.found).toBe(false);
+            expect(mockContext.contextInstance.findBySoundsLike).not.toHaveBeenCalled();
+        });
+
+        it('should return not found when phonetic match fails', async () => {
+            mockContext.contextInstance.search = vi.fn(() => []);
+            mockContext.contextInstance.findBySoundsLike = vi.fn(() => undefined);
+      
+            const tool = LookupPerson.create(mockContext);
+            const result = await tool.execute({ name: 'Unknown', phonetic: 'phonetic' });
+      
+            expect(result.success).toBe(true);
+            expect(result.data.found).toBe(false);
         });
     });
   
@@ -91,7 +114,7 @@ describe('Agentic Tools', () => {
             expect(result.data.found).toBe(false);
         });
     
-        it('should match trigger phrases', async () => {
+        it('should match trigger phrases when provided', async () => {
             mockContext.contextInstance.getAllProjects = vi.fn(() => [{
                 id: 'quarterly',
                 name: 'Quarterly Planning',
@@ -113,10 +136,80 @@ describe('Agentic Tools', () => {
             expect(result.data.found).toBe(true);
             expect(result.data.matchedTrigger).toBe('quarterly planning meeting');
         });
+
+        it('should not match trigger phrases when triggerPhrase not provided', async () => {
+            mockContext.contextInstance.getAllProjects = vi.fn(() => [{
+                id: 'quarterly',
+                name: 'Quarterly Planning',
+                type: 'project',
+            }]);
+      
+            const tool = LookupProject.create(mockContext);
+            const result = await tool.execute({ 
+                name: 'planning'
+            });
+      
+            expect(result.success).toBe(true);
+            expect(result.data.found).toBe(false);
+            expect(mockContext.contextInstance.getAllProjects).not.toHaveBeenCalled();
+        });
+
+        it('should handle project without explicit_phrases', async () => {
+            mockContext.contextInstance.getAllProjects = vi.fn(() => [{
+                id: 'project',
+                name: 'Test Project',
+                type: 'project',
+                classification: {
+                    context_type: 'work'
+                },
+            }]);
+      
+            const tool = LookupProject.create(mockContext);
+            const result = await tool.execute({ 
+                name: 'test', 
+                triggerPhrase: 'test phrase' 
+            });
+      
+            expect(result.success).toBe(true);
+            expect(result.data.found).toBe(false);
+        });
+
+        it('should handle multiple projects with trigger phrase match', async () => {
+            mockContext.contextInstance.getAllProjects = vi.fn(() => [
+                {
+                    id: 'project1',
+                    name: 'First Project',
+                    type: 'project',
+                    classification: {
+                        context_type: 'work',
+                        explicit_phrases: ['first']
+                    },
+                },
+                {
+                    id: 'project2',
+                    name: 'Matching Project',
+                    type: 'project',
+                    classification: {
+                        context_type: 'work',
+                        explicit_phrases: ['quarterly planning']
+                    },
+                }
+            ]);
+      
+            const tool = LookupProject.create(mockContext);
+            const result = await tool.execute({ 
+                name: 'test', 
+                triggerPhrase: 'quarterly planning' 
+            });
+      
+            expect(result.success).toBe(true);
+            expect(result.data.found).toBe(true);
+            expect(result.data.project.id).toBe('project2');
+        });
     });
   
     describe('verify_spelling', () => {
-        it('should return best guess in non-interactive mode', async () => {
+        it('should return best guess in non-interactive mode with suggestion', async () => {
             const tool = VerifySpelling.create(mockContext);
             const result = await tool.execute({ 
                 term: 'pria', 
@@ -127,8 +220,31 @@ describe('Agentic Tools', () => {
             expect(result.data.spelling).toBe('Priya');
             expect(result.data.useSuggestion).toBe(true);
         });
+
+        it('should return term itself in non-interactive mode without suggestion', async () => {
+            const tool = VerifySpelling.create(mockContext);
+            const result = await tool.execute({ 
+                term: 'pria'
+            });
+      
+            expect(result.success).toBe(true);
+            expect(result.data.spelling).toBe('pria');
+            expect(result.data.verified).toBe(false);
+        });
     
-        it('should request user input in interactive mode', async () => {
+        it('should request user input in interactive mode with suggestion', async () => {
+            mockContext.interactiveMode = true;
+      
+            const tool = VerifySpelling.create(mockContext);
+            const result = await tool.execute({ term: 'pria', suggestedSpelling: 'Priya' });
+      
+            expect(result.success).toBe(true);
+            expect(result.needsUserInput).toBe(true);
+            expect(result.userPrompt).toContain('pria');
+            expect(result.userPrompt).toContain('Priya');
+        });
+
+        it('should request user input in interactive mode without suggestion', async () => {
             mockContext.interactiveMode = true;
       
             const tool = VerifySpelling.create(mockContext);
@@ -137,6 +253,20 @@ describe('Agentic Tools', () => {
             expect(result.success).toBe(true);
             expect(result.needsUserInput).toBe(true);
             expect(result.userPrompt).toContain('pria');
+            expect(result.userPrompt).not.toContain('Suggested');
+        });
+
+        it('should include context in user prompt when provided', async () => {
+            mockContext.interactiveMode = true;
+      
+            const tool = VerifySpelling.create(mockContext);
+            const result = await tool.execute({ 
+                term: 'pria',
+                context: 'Speaker context'
+            });
+      
+            expect(result.success).toBe(true);
+            expect(result.userPrompt).toContain('context:');
         });
     });
   

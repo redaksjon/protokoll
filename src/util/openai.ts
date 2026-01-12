@@ -47,9 +47,9 @@ export async function createCompletion(messages: ChatCompletionMessageParam[], o
         };
         
         if (supportsReasoning) {
-            const reasoningLevel = options.reasoningLevel || 'high';
+            const reasoningLevel = options.reasoningLevel || 'medium';
             requestParams.reasoning_effort = reasoningLevel;
-            logger.info('Using reasoning_effort: %s', reasoningLevel);
+            logger.debug('Using reasoning_effort: %s', reasoningLevel);
         }
         
         const completion = await openai.chat.completions.create(

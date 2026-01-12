@@ -1,16 +1,33 @@
 # Protokoll: Intelligent Audio Transcription
 
-## Overview
+> **Transform voice memos into perfectly organized, context-aware notes—without the transcription chaos.**
 
-Protokoll is an intelligent audio transcription system that uses reasoning models to create highly accurate, context-enhanced transcripts. Unlike basic transcription tools, Protokoll:
+## The Problem
 
-- **Learns your vocabulary**: Recognizes and correctly spells names, projects, and organizations
-- **Routes intelligently**: Sends notes to the right directories based on content
-- **Preserves full content**: Cleans up transcripts without summarizing
-- **Improves over time**: Builds context that makes future transcriptions more accurate
+You record voice memos constantly. Quick thoughts, meeting notes, ideas to remember. But the reality:
+
+- Whisper mishears names: "Priya" becomes "pre a", "kubernetes" becomes "cube er net ease"
+- Notes go everywhere: Work notes end up in personal folders, client calls get mixed with internal meetings
+- You spend 30% of your time organizing and fixing what transcription services got wrong
+- Every tool forces you to choose between *accuracy* and *volume*
+
+Protokoll solves this.
+
+## What Makes Protokoll Different
+
+Protokoll is an intelligent audio transcription system that uses advanced reasoning models to create highly accurate, context-enhanced transcripts. Unlike basic transcription tools, Protokoll:
+
+- **🧠 Learns Your World**: Maintains a knowledge base of people, projects, and organizations you mention. When Whisper mishears someone, Protokoll recognizes and corrects it using phonetic variants and context awareness
+- **🎯 Routes Intelligently**: Multi-signal classification sends notes to the right destination—work notes stay in your work folder, client calls go to client projects, personal thoughts go to personal notes
+- **📝 Preserves Everything**: This is NOT a summarizer. Protokoll preserves the full content of what you said while cleaning up filler words, false starts, and obvious transcription errors
+- **📚 Improves Over Time**: The more you use it, the smarter it gets. Build context incrementally and watch transcription quality improve session after session
+- **⚡ Zero Configuration Start**: Works out of the box with sensible defaults. No API wrestling, no complex setup—just transcribe
 
 ## Table of Contents
 
+- [The Problem](#the-problem)
+- [What Makes Protokoll Different](#what-makes-protokoll-different)
+- [Why Protokoll](#why-protokoll)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Getting Started](#getting-started)
@@ -25,6 +42,42 @@ Protokoll is an intelligent audio transcription system that uses reasoning model
 - [Supported Models](#supported-models)
 - [Troubleshooting](#troubleshooting)
 - [Architecture](#architecture)
+- [Examples](#examples)
+
+## Why Protokoll
+
+### For Knowledge Workers
+
+You're drowning in voice memos but can't use them because they're disorganized. Protokoll fixes this:
+
+- **One command**: `protokoll --input-directory ~/recordings` and you're done
+- **Smart naming**: Files are automatically named with date, time, and detected topic
+- **Automatic routing**: Work goes to work, personal goes to personal, project notes go to projects
+- **Growing context**: Each session teaches Protokoll about your people, projects, and vocabulary
+
+### Compared to Other Tools
+
+| Feature | Protokoll | Basic Whisper | Otter | Temi |
+|---------|-----------|---------------|-------|------|
+| Name Recognition | ✓ Learns yours | ✗ | Limited | Limited |
+| Smart Routing | ✓ Automatic | ✗ | ✗ | ✗ |
+| Full Content | ✓ Preserved | ✓ | Summarized | Summarized |
+| Reasoning Mode | ✓ Optional | ✗ | Limited | Limited |
+| Self-Hosted Context | ✓ Your data | ✗ | Cloud | Cloud |
+| Cost-Effective | ✓ ~$0.01/min | ~$0.10/min | $10-30/mo | $10-25/mo |
+| Privacy | ✓ Your files | ✓ Offline | Cloud | Cloud |
+
+### Who Should Use Protokoll
+
+✅ **Product Managers**: Record customer conversations, feature ideas, meeting notes—Protokoll routes them to projects automatically
+
+✅ **Researchers**: Capture interview insights, lab notes, findings—build a growing knowledge base that improves over time
+
+✅ **Authors & Creators**: Dictate ideas, chapter notes, research—get organized files without manual organization
+
+✅ **Managers**: Record 1-on-1s, team meetings, strategy sessions—automatic routing means they're never lost
+
+✅ **Teams**: Self-hosted means your transcripts never leave your server—perfect for regulated industries
 
 ## Prerequisites
 
@@ -49,7 +102,7 @@ npm install -g @redaksjon/protokoll
 ### From Source
 
 ```bash
-git clone https://github.com/tobrien/redaksjon-protokoll.git
+git clone https://github.com/redaksjon/protokoll.git
 cd protokoll
 npm install
 npm run build
@@ -64,75 +117,101 @@ protokoll --version
 
 ## Getting Started
 
-### Step 1: Set Up Environment
+### 2-Minute Quickstart
 
-Create a `.env` file in your project directory or set environment variables:
-
-```bash
-# Required for transcription
-export OPENAI_API_KEY='sk-your-openai-key'
-
-# Optional: For Claude reasoning models
-export ANTHROPIC_API_KEY='sk-ant-your-anthropic-key'
-```
-
-Or create `~/.env` or `.env` in your working directory:
-
-```env
-OPENAI_API_KEY=sk-your-openai-key
-ANTHROPIC_API_KEY=sk-ant-your-anthropic-key
-```
-
-### Step 2: First Run (Zero-Config Start)
-
-Protokoll works out of the box with sensible defaults:
+**Option 1: No Setup Required**
 
 ```bash
-# Transcribe all audio files in a directory
+# Just install and use
+npm install -g @redaksjon/protokoll
+export OPENAI_API_KEY='sk-your-key'
+
+# Start transcribing (outputs to ~/notes by default)
+protokoll --input-directory ~/recordings --verbose
+```
+
+Done. Your transcripts are in `~/notes` organized by month with full names corrected and auto-detected routing.
+
+**Option 2: With Interactive Onboarding**
+
+```bash
+# First run: answers a few setup questions
+protokoll --input-directory ~/recordings --interactive
+
+# Future runs: use your learned context automatically
 protokoll --input-directory ~/recordings
 ```
 
-On first run with `--interactive`, Protokoll will guide you through initial setup:
+**Option 3: The Controlled Approach (5 minutes)**
+
+Create your context before transcribing:
 
 ```bash
-protokoll --input-directory ~/recordings --interactive
-```
+# 1. Create context directory
+mkdir -p ~/.protokoll/people ~/.protokoll/projects
 
-### Step 3: Create Your First Context (Optional)
-
-Create a `.protokoll` directory to store context:
-
-```bash
-mkdir -p ~/.protokoll/people
-mkdir -p ~/.protokoll/projects
-mkdir -p ~/.protokoll/companies
-mkdir -p ~/.protokoll/terms
-```
-
-Add a person:
-
-```bash
+# 2. Add someone you mention frequently
 cat > ~/.protokoll/people/john-smith.yaml << EOF
 id: john-smith
 name: John Smith
-firstName: John
-lastName: Smith
-company: acme-corp
-role: Product Manager
 sounds_like:
   - "john"
   - "jon smith"
-context: "Colleague from product team"
 EOF
+
+# 3. Add a project
+cat > ~/.protokoll/projects/work.yaml << EOF
+id: work
+name: Work Notes
+destination: ~/work/notes
+triggers:
+  - "work note"
+  - "work meeting"
+EOF
+
+# 4. Now transcribe - names are corrected, routing is automatic
+protokoll --input-directory ~/recordings
 ```
 
-### Step 4: Transcribe with Context
+### What Happens Next
 
-Now when you transcribe, Protokoll will recognize "john" or "jon smith" and correct it:
+1. **Transcription**: Your audio is sent to OpenAI Whisper (transcription model)
+2. **Enhancement**: Protokoll uses a reasoning model (gpt-5.2 by default) to:
+   - Recognize and correct names using your context knowledge base
+   - Clean up transcription artifacts
+   - Add proper formatting
+   - Preserve your exact wording
+3. **Routing**: Notes automatically go to the right folder based on content
+4. **Output**: You get markdown files with perfect names, proper organization, and full content
+
+### Where Are My Files?
 
 ```bash
-protokoll --input-directory ~/recordings --verbose
+~/notes/2026/01/              # Default location
+├── 260111-1430-meeting.md     # date-time-subject
+├── 260111-1530-brainstorm.md
+└── 260112-0900-client-call.md
+
+~/work/notes/2026/01/         # Project-specific routing
+└── 260111-1530-project-alpha.md
 ```
+
+### The Learning Loop
+
+Protokoll gets smarter with every file you process:
+
+```bash
+# First file: names might not be perfect
+protokoll --input-directory ~/recordings
+
+# Interactive mode: correct the ones that were wrong
+protokoll --input-directory ~/recordings --interactive
+
+# Future files: those corrections are remembered
+protokoll --input-directory ~/recordings
+```
+
+Try it with `--interactive` once, fix a few names or add a new project, then run normally. You'll see the difference immediately.
 
 ## Configuration
 
@@ -402,23 +481,88 @@ When multiple projects match:
 
 ## Interactive Mode
 
-When you run with `--interactive`, Protokoll will stop and ask questions:
+When you run with `--interactive`, Protokoll will ask clarification questions and confirm important decisions:
+
+### What Protokoll Asks About
+
+#### 1. Names and Spelling
+Protokoll detects potential misspellings and asks for corrections:
 
 ```
-Name Clarification Needed
-
+[Name Spelling Clarification]
 Context: "...meeting with pre a about..."
-Detected: "pre a"
-Suggested: "Priya"
+Heard: "pre a"
+Suggested correction: "Priya"
 
-? Enter correct spelling: Priya Sharma
-? Remember this for future? Yes
+Enter correct spelling (or press Enter to accept suggestion):
+> Priya Sharma
+✓ Remembered! "Priya Sharma" will be recognized in future transcripts.
+```
 
-New Person Detected
+#### 2. New People
+When encountering unknown people:
 
-? Company (optional): Acme Corp
-? Role (optional): Engineering Manager
-? Add to context? Yes
+```
+[New Person Detected]
+Context: "...meeting with Priya about..."
+Name heard: "Priya"
+
+Who is this person? (brief description, or press Enter to skip):
+> Engineering manager at Acme Corp
+✓ Remembered! "Engineering manager at Acme Corp" will be recognized in future transcripts.
+```
+
+#### 3. New Projects
+When encountering unknown projects:
+
+```
+[New Project Detected]
+Context: "...working on Project Alpha..."
+Project name: "Project Alpha"
+
+What is this project? (brief description, or press Enter to skip):
+> Client engagement for Q1 2026
+✓ Remembered! "Client engagement for Q1 2026" will be recognized in future transcripts.
+```
+
+#### 4. Technical Terms and Vocabulary
+Protokoll learns domain-specific vocabulary:
+
+```
+[New Term Found]
+Context: "...we built this using GraphQL..."
+Term: "GraphQL"
+
+What does this term mean? (brief description, or press Enter to skip):
+> Query language for APIs
+✓ Remembered! "Query language for APIs" will be recognized in future transcripts.
+```
+
+**Key Feature**: Once you define a term, Protokoll won't ask about it again. It's remembered forever.
+
+#### 5. Routing Confirmation
+When routing confidence is low (< 70%), Protokoll asks for confirmation:
+
+```
+[Confirm Note Routing]
+Confidence: 65%
+This note seems like it should go to:
+"/home/user/work/notes"
+
+Detected signals: client-meeting, quarterly-budget
+
+Is this correct? (Y/Enter to accept, or enter different path):
+> y
+```
+
+### How to Enable Interactive Mode
+
+```bash
+# Single run with interactive mode
+protokoll --input-directory ~/recordings --interactive
+
+# Set as default in config
+echo "interactive: true" >> ~/.protokoll/config.yaml
 ```
 
 ### First-Run Onboarding
@@ -494,6 +638,86 @@ With `--debug`, intermediate files are preserved:
 │   ├── reflection-report.md       # Self-reflection
 │   └── session.json               # Interactive session log
 ```
+
+## Transcript Metadata
+
+Every transcript includes structured metadata at the top in Markdown format. This makes your notes immediately actionable:
+
+### Metadata Sections
+
+Each transcript includes:
+
+```markdown
+# Meeting Title
+
+## Metadata
+
+**Date**: January 12, 2026
+**Time**: 02:30 PM
+
+**Project**: Project Alpha
+**Project ID**: `proj-alpha`
+
+### Routing
+
+**Destination**: /home/user/work/notes
+**Confidence**: 95.0%
+
+**Classification Signals**:
+- explicit phrase: "work meeting" (90% weight)
+- associated person: "John Smith" (60% weight)
+
+**Reasoning**: Matched by explicit phrase and associated person
+
+**Tags**: `work`, `meeting`, `Q1-planning`
+
+**Duration**: 12m 45s
+
+---
+
+# Your Transcript Content Here
+```
+
+### Metadata Fields
+
+| Field | Description |
+|-------|-------------|
+| **Title** | Auto-detected from content or audio filename |
+| **Date** | Recording date in human-readable format |
+| **Time** | Recording time with AM/PM |
+| **Project** | Detected project if matched by routing |
+| **Project ID** | Internal project identifier |
+| **Destination** | Final routing location |
+| **Confidence** | Routing confidence score (0-100%) |
+| **Classification Signals** | Individual signals that influenced routing with weights |
+| **Reasoning** | Explanation of routing decision |
+| **Tags** | Auto-extracted from signals (people, companies, topics) |
+| **Duration** | Audio duration in human-readable format |
+
+### Using Metadata
+
+The metadata section helps you:
+
+- **Understand routing decisions**: See exactly why a note went to that folder
+- **Track confidence**: Low confidence (< 70%) might need manual review
+- **Find related notes**: Tags make searching across your note collection easier
+- **Verify accuracy**: Check if the right project was detected
+- **Archive intelligently**: Metadata makes automated archiving and organization possible
+
+### Example: Routing Confidence
+
+```markdown
+**Confidence**: 65.2%
+```
+
+A low confidence score means:
+- Note might need manual sorting
+- Consider adding more context (people, projects) to improve detection
+- Could be a boundary case between multiple projects
+
+High confidence (> 85%) means:
+- Routing is highly reliable
+- Automatic processes can trust this decision
 
 ## Supported Models
 
@@ -610,6 +834,57 @@ Protokoll is built with a modular architecture designed for extensibility:
 | **Pipeline** | Orchestrates all modules |
 
 ## Examples
+
+### Real-World Scenarios
+
+#### Scenario 1: Product Manager with Multiple Projects
+
+You're juggling three client projects. You record a 10-minute voice memo about budget discussions with Acme Corp and a feature request from their engineering lead Priya.
+
+```bash
+protokoll --input-directory ~/inbox
+```
+
+**What happens:**
+- Whisper mishears "Priya" as "pria"
+- Your context has `sounds_like: ["pria", "pre a"]` → Correctly expanded to "Priya Sharma"
+- Content mentions Acme Corp → Automatically routes to `~/clients/acme-corp/notes/2026/01/`
+- File created: `260112-1430-budget-and-feature-request.md`
+- You spend 0 seconds organizing—it's already perfect
+
+#### Scenario 2: Research Interviews
+
+You're doing research interviews with 15 participants. Names are hard, contexts matter, you want participant notes grouped by topic.
+
+```bash
+# First interview: interactive mode to set up participants
+protokoll --input-directory ~/interviews/batch-1 --interactive
+
+# Subsequent interviews: automatic
+protokoll --input-directory ~/interviews/batch-2
+protokoll --input-directory ~/interviews/batch-3
+```
+
+**What happens:**
+- Each participant is in your context with phonetic variants
+- Topics (like "business model" or "user retention") are detected
+- Files organize by date: `~/interviews/2026/01/260111-1430-participant-03.md`
+- All names are perfectly spelled, all context is preserved
+
+#### Scenario 3: Engineering Team
+
+Your team records technical discussions. You want them automatically organized by project.
+
+```bash
+# Team context: shared ~team/.protokoll/projects/
+protokoll --input-directory ~/team/recordings
+```
+
+**What happens:**
+- Discussion mentions "Project Atlas" → Routes to `~/projects/atlas/notes/`
+- Team members (Sarah, Dmitri, etc.) are in context → Names are correct
+- Technical terms (Kubernetes, gRPC, etc.) are in vocabulary → Spelled correctly
+- Entire team's recordings automatically organized by project
 
 ### Basic Transcription
 

@@ -22,6 +22,7 @@ export interface Args extends Dreadcabinet.Args, Cardigantime.Args {
     tempDirectory?: string;
     interactive?: boolean;
     selfReflection?: boolean;
+    processedDirectory?: string;
 }
 
 export const ConfigSchema = z.object({
@@ -39,6 +40,7 @@ export const ConfigSchema = z.object({
     tempDirectory: z.string(),
     interactive: z.boolean(),
     selfReflection: z.boolean(),
+    processedDirectory: z.string().optional(),
 });
 
 export const SecureConfigSchema = z.object({
@@ -112,6 +114,7 @@ export async function main() {
             interactive: config.interactive,
             selfReflection: config.selfReflection,
             debug: config.debug,
+            dryRun: config.dryRun,
             contextDirectory: config.configDirectory,
             intermediateDir: DEFAULT_INTERMEDIATE_DIRECTORY,
             keepIntermediates: config.debug,
@@ -120,6 +123,7 @@ export async function main() {
             outputFilenameOptions: config.outputFilenameOptions || DEFAULT_OUTPUT_FILENAME_OPTIONS,
             maxAudioSize: config.maxAudioSize,
             tempDirectory: config.tempDirectory,
+            processedDirectory: config.processedDirectory,
         });
 
         await operator.process(async (file: string) => {

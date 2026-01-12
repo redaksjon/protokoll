@@ -53,7 +53,6 @@ export const create = (config: ReasoningConfig): ClientInstance => {
     const complete = async (request: ReasoningRequest): Promise<ReasoningResponse> => {
         const startTime = Date.now();
         logger.debug('Reasoning request starting', { model: config.model });
-        logger.info('Sending request to reasoning model: %s', config.model);
     
         try {
             // Build messages for OpenAI
@@ -84,11 +83,11 @@ export const create = (config: ReasoningConfig): ClientInstance => {
                 tool_choice: tools && tools.length > 0 ? 'auto' : undefined,
             };
             
-            // Add reasoning_effort for models that support it (default to 'high')
+            // Add reasoning_effort for models that support it (default to 'medium')
             if (supportsReasoningLevel(config.model)) {
-                const reasoningLevel = config.reasoningLevel || 'high';
+                const reasoningLevel = config.reasoningLevel || 'medium';
                 requestOptions.reasoning_effort = reasoningLevel;
-                logger.info('Using reasoning_effort: %s for model %s', reasoningLevel, config.model);
+                logger.debug('Using reasoning_effort: %s for model %s', reasoningLevel, config.model);
             }
             
             const response = await getClient().chat.completions.create(
@@ -96,10 +95,17 @@ export const create = (config: ReasoningConfig): ClientInstance => {
             );
       
             const duration = Date.now() - startTime;
-            logger.info('Reasoning model responded in %dms', duration);
+            logger.debug('Reasoning model responded in %dms', duration);
       
             const choice = response.choices[0];
             const message = choice.message;
+      
+            // Extract token usage
+            const usage = response.usage ? {
+                promptTokens: response.usage.prompt_tokens,
+                completionTokens: response.usage.completion_tokens,
+                totalTokens: response.usage.total_tokens,
+            } : undefined;
       
             // Extract tool calls if any
             const toolCalls: ToolCall[] | undefined = message.tool_calls?.map(tc => {
@@ -116,13 +122,14 @@ export const create = (config: ReasoningConfig): ClientInstance => {
             });
       
             if (toolCalls && toolCalls.length > 0) {
-                logger.info('Model requested %d tool calls: %s', toolCalls.length, toolCalls.map(t => t.name).join(', '));
+                logger.debug('Model requested %d tool calls: %s', toolCalls.length, toolCalls.map(t => t.name).join(', '));
             }
       
             return {
                 content: message.content || '',
                 model: config.model,
                 duration,
+                usage,
                 toolCalls,
                 finishReason: choice.finish_reason,
             };

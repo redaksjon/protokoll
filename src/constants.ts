@@ -71,7 +71,7 @@ export const DEFAULT_INSTRUCTIONS_TRANSCRIBE_FILE = `${DEFAULT_INSTRUCTIONS_DIR}
 
 export const DEFAULT_TRANSCRIPTION_MODEL = 'whisper-1';
 export const DEFAULT_MODEL = 'gpt-5.2';
-export const DEFAULT_REASONING_LEVEL = 'high';
+export const DEFAULT_REASONING_LEVEL = 'medium';
 
 export const DEFAULT_OVERRIDES = false;
 export const DEFAULT_MAX_AUDIO_SIZE = 26214400; // 25MB in bytes

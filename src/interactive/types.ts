@@ -9,7 +9,9 @@ export type ClarificationType =
     | 'new_person'
     | 'new_project'
     | 'new_company'
+    | 'new_term'
     | 'routing_decision'
+    | 'low_confidence_routing'
     | 'first_run_onboarding'
     | 'general';
 

@@ -79,6 +79,14 @@ const formatClarificationPrompt = (request: ClarificationRequest): string => {
             lines.push('Any notes about this company? (or press Enter to skip):');
             break;
             
+        case 'new_term':
+            lines.push(`[New Term Found]`);
+            lines.push(`Context: ${request.context}`);
+            lines.push(`Term: "${request.term}"`);
+            lines.push('');
+            lines.push('What does this term mean? (brief description, or press Enter to skip):');
+            break;
+            
         case 'routing_decision':
             lines.push(`[Routing Decision Required]`);
             lines.push(`Context: ${request.context}`);
@@ -93,6 +101,14 @@ const formatClarificationPrompt = (request: ClarificationRequest): string => {
                 lines.push('');
                 lines.push('Where should this note be filed?');
             }
+            break;
+            
+        case 'low_confidence_routing':
+            lines.push(`[Confirm Note Routing]`);
+            lines.push(`Confidence: ${request.term}`);
+            lines.push(`${request.context}`);
+            lines.push('');
+            lines.push('Is this correct? (Y/Enter to accept, or enter different path):');
             break;
             
         case 'first_run_onboarding':
@@ -118,10 +134,13 @@ const formatClarificationPrompt = (request: ClarificationRequest): string => {
                 lines.push(`Term: "${request.term}"`);
             }
             if (request.suggestion) {
-                lines.push(`Suggestion: "${request.suggestion}"`);
+                lines.push(`Suggested spelling: "${request.suggestion}"`);
+                lines.push('');
+                lines.push('Press Enter or Y to accept suggestion, or type alternative:');
+            } else {
+                lines.push('');
+                lines.push('Your response:');
             }
-            lines.push('');
-            lines.push('Your response:');
             break;
     }
     
@@ -212,8 +231,8 @@ export const create = (config: InteractiveConfig): HandlerInstance => {
         let finalResponse: string;
         let shouldRemember = false;
         
-        if (userInput === '') {
-            // User pressed Enter - use suggestion or original
+        if (userInput === '' || userInput.toLowerCase() === 'y') {
+            // User pressed Enter or typed Y - use suggestion or original
             finalResponse = request.suggestion || request.term;
         } else if (request.options && /^\d+$/.test(userInput)) {
             // User entered a number - select from options

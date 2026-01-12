@@ -171,6 +171,31 @@ describe('Pipeline Orchestrator', () => {
             // Should have routing info (even if default)
             expect(typeof result.routingConfidence).toBe('number');
         });
+
+        it('should include metadata header in output file', async () => {
+            const pipeline = await Pipeline.create(createConfig());
+      
+            const result = await pipeline.process({
+                audioFile: '/test/audio.m4a',
+                creation: new Date('2026-01-11T12:00:00'),
+                hash: 'abc123def456',
+            });
+      
+            // Read the output file and verify it contains metadata
+            const outputContent = await fs.readFile(result.outputPath, 'utf-8');
+            
+            // Should have metadata section
+            expect(outputContent).toContain('## Metadata');
+            expect(outputContent).toContain('**Date**:');
+            
+            // Should have routing section
+            expect(outputContent).toContain('### Routing');
+            expect(outputContent).toContain('**Destination**:');
+            expect(outputContent).toContain('**Confidence**:');
+            
+            // Should have the actual transcript content after the metadata
+            expect(outputContent).toContain('# Formatted Transcript');
+        });
     });
   
     describe('DEFAULT_PIPELINE_CONFIG', () => {

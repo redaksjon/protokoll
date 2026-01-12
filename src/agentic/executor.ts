@@ -16,6 +16,7 @@ export interface ExecutorInstance {
         state: TranscriptionState;
         toolsUsed: string[];
         iterations: number;
+        totalTokens?: number;
     }>;
 }
 
@@ -45,6 +46,7 @@ export const create = (
     
         const toolsUsed: string[] = [];
         let iterations = 0;
+        let totalTokens = 0;
         const maxIterations = 15;
     
         // Conversation history for multi-turn
@@ -93,13 +95,18 @@ Remember: preserve ALL content, only fix transcription errors.`;
 
         try {
             // Initial reasoning call
-            logger.info('Starting agentic transcription - analyzing for names and routing...');
+            logger.debug('Starting agentic transcription - analyzing for names and routing...');
             let response = await reasoning.complete({
                 systemPrompt,
                 prompt: initialPrompt,
                 tools: registry.getToolDefinitions(),
                 maxIterations,
             });
+            
+            // Track token usage
+            if (response.usage) {
+                totalTokens += response.usage.totalTokens;
+            }
             
             // Add assistant response to history
             conversationHistory.push({ 
@@ -115,15 +122,14 @@ Remember: preserve ALL content, only fix transcription errors.`;
             // Iterative tool use loop
             while (response.toolCalls && response.toolCalls.length > 0 && iterations < maxIterations) {
                 iterations++;
-                logger.info('Iteration %d: Processing %d tool calls...', iterations, response.toolCalls.length);
+                logger.debug('Iteration %d: Processing %d tool calls...', iterations, response.toolCalls.length);
       
                 // Collect tool results
                 const toolResults: Array<{ id: string; name: string; result: string }> = [];
       
                 // Execute each tool call
                 for (const toolCall of response.toolCalls) {
-                    logger.info('Executing tool: %s', toolCall.name);
-                    logger.debug('Tool arguments', toolCall.arguments);
+                    logger.debug('Executing tool: %s', toolCall.name);
                     toolsUsed.push(toolCall.name);
         
                     try {
@@ -133,11 +139,11 @@ Remember: preserve ALL content, only fix transcription errors.`;
                         const resultStr = JSON.stringify(result.data || { success: result.success, message: result.error || 'OK' });
                         toolResults.push({ id: toolCall.id, name: toolCall.name, result: resultStr });
                         
-                        logger.info('Tool %s result: %s', toolCall.name, result.success ? 'success' : 'failed');
+                        logger.debug('Tool %s result: %s', toolCall.name, result.success ? 'success' : 'failed');
           
                         // Handle results that need user input
                         if (result.needsUserInput && ctx.interactiveMode && ctx.interactiveInstance) {
-                            logger.info('Tool requires user input', { prompt: result.userPrompt });
+                            logger.info('Interactive: %s requires clarification', toolCall.name);
                             
                             const termName = String(toolCall.arguments.name || toolCall.arguments.term || '');
                             
@@ -151,7 +157,7 @@ Remember: preserve ALL content, only fix transcription errors.`;
                             
                             if (clarification.response) {
                                 state.resolvedEntities.set(termName, clarification.response);
-                                logger.info('User clarified: %s -> %s', termName, clarification.response);
+                                logger.info('Clarified: %s -> %s', termName, clarification.response);
                             }
                         }
           
@@ -205,6 +211,11 @@ Do NOT summarize - include ALL original content with corrections applied.`;
                     tools: registry.getToolDefinitions(),
                 });
                 
+                // Track token usage
+                if (response.usage) {
+                    totalTokens += response.usage.totalTokens;
+                }
+                
                 conversationHistory.push({ 
                     role: 'assistant', 
                     content: response.content,
@@ -220,10 +231,10 @@ Do NOT summarize - include ALL original content with corrections applied.`;
             if (response.content && response.content.length > 50) {
                 state.correctedText = response.content;
                 state.confidence = 0.9;
-                logger.info('Final transcript generated: %d characters', response.content.length);
+                logger.debug('Final transcript generated: %d characters', response.content.length);
             } else {
                 // Model didn't produce content - ask for it explicitly
-                logger.warn('Model did not produce transcript, requesting explicitly...');
+                logger.debug('Model did not produce transcript, requesting explicitly...');
                 
                 const finalRequest = `Please output the COMPLETE corrected transcript now.
 
@@ -239,6 +250,11 @@ Output the full transcript as clean Markdown. Do NOT summarize.`;
                     systemPrompt,
                     prompt: finalRequest,
                 });
+                
+                // Track token usage
+                if (finalResponse.usage) {
+                    totalTokens += finalResponse.usage.totalTokens;
+                }
                 
                 state.correctedText = finalResponse.content || transcriptText;
                 state.confidence = 0.8;
@@ -256,6 +272,7 @@ Output the full transcript as clean Markdown. Do NOT summarize.`;
             state,
             toolsUsed: [...new Set(toolsUsed)],
             iterations,
+            totalTokens: totalTokens > 0 ? totalTokens : undefined,
         };
     };
   

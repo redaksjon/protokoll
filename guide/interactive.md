@@ -11,10 +11,20 @@ When enabled, Protokoll will:
 3. Offer to remember new entities
 4. Request routing clarification
 
+**Note**: Interactive mode is disabled by default. Use `--interactive` to enable it.
+
 ## Enabling Interactive Mode
 
 ```bash
 protokoll --interactive --input-directory ./recordings
+```
+
+Or in config:
+
+```yaml
+# ~/.protokoll/config.yaml
+features:
+  interactive: true
 ```
 
 ## Clarification Types
@@ -83,22 +93,23 @@ All clarifications are recorded in the session file:
 }
 ```
 
-## Non-Interactive Mode
+## Non-Interactive Mode (Default)
 
-For batch processing without prompts:
+By default, Protokoll runs without prompts:
 
 ```bash
-protokoll --batch --input-directory ./recordings
+protokoll --input-directory ./recordings
 ```
 
-In batch mode:
+In non-interactive mode:
 - Uses suggestions when available
 - Skips unknown entities
 - Uses default routing
+- Still generates self-reflection reports
 
 ## First-Run Onboarding
 
-On first run, Protokoll detects if you need setup:
+On first run with `--interactive` and no existing config:
 
 ```
 Welcome to Protokoll!
@@ -164,7 +175,7 @@ type ClarificationType =
 
 1. **Start with interactive mode**: Build context quickly
 2. **Review session files**: See what was learned
-3. **Switch to batch**: Once context is established
+3. **Switch to default**: Once context is established
 4. **Periodic interactive runs**: Catch new names
 
 ## Troubleshooting
@@ -172,17 +183,17 @@ type ClarificationType =
 ### No Prompts Appearing
 
 1. Check `--interactive` flag is set
-2. Ensure not also using `--batch`
-3. Verify terminal supports prompts
+2. Verify terminal supports prompts
+3. Check if running in a non-TTY environment
 
 ### Too Many Prompts
 
 1. Add more context entries
-2. Use `--batch` for known content
+2. Run without `--interactive` for known content
 3. Add sounds_like mappings
 
 ### Prompts Timing Out
 
 1. Increase timeout in config
-2. Use `--batch` with manual review
+2. Run without interactive mode and review manually
 

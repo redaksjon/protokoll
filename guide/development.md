@@ -12,7 +12,7 @@ Guide for developing and extending Protokoll.
 ### Clone and Install
 
 ```bash
-git clone https://github.com/tobrien/redaksjon-protokoll.git
+git clone https://github.com/redaksjon/protokoll.git
 cd protokoll
 npm install
 ```
@@ -33,6 +33,7 @@ npm test
 
 ```bash
 npm run lint
+npm run lint:fix  # Auto-fix issues
 ```
 
 ## Project Structure
@@ -42,6 +43,11 @@ protokoll/
 ├── src/
 │   ├── agentic/           # Agentic tool system
 │   │   ├── tools/         # Individual tools
+│   │   │   ├── lookup-person.ts
+│   │   │   ├── lookup-project.ts
+│   │   │   ├── route-note.ts
+│   │   │   ├── store-context.ts
+│   │   │   └── verify-spelling.ts
 │   │   ├── registry.ts    # Tool registry
 │   │   ├── executor.ts    # Execution loop
 │   │   └── types.ts
@@ -56,6 +62,18 @@ protokoll/
 │   ├── output/            # Output management
 │   │   ├── manager.ts     # File management
 │   │   └── types.ts
+│   ├── pipeline/          # Processing pipeline
+│   │   ├── orchestrator.ts
+│   │   └── types.ts
+│   ├── phases/            # Processing phases
+│   │   ├── locate.ts
+│   │   ├── transcribe.ts
+│   │   └── complete.ts
+│   ├── prompt/            # Prompt templates
+│   │   ├── personas/
+│   │   │   └── transcriber.md
+│   │   └── instructions/
+│   │       └── transcribe.md
 │   ├── reasoning/         # Reasoning integration
 │   │   ├── client.ts      # LLM client
 │   │   ├── strategy.ts    # Strategy selection
@@ -71,15 +89,25 @@ protokoll/
 │   ├── transcription/     # Transcription service
 │   │   ├── service.ts     # Whisper integration
 │   │   └── types.ts
-│   ├── phases/            # Processing phases
 │   ├── util/              # Utilities
+│   │   ├── child.ts
+│   │   ├── dates.ts
+│   │   ├── general.ts
+│   │   ├── media.ts
+│   │   ├── metadata.ts
+│   │   ├── openai.ts
+│   │   └── storage.ts
+│   ├── error/             # Error types
+│   │   └── ArgumentError.ts
 │   ├── arguments.ts       # CLI arguments
 │   ├── constants.ts       # Constants
 │   ├── logging.ts         # Logging
-│   └── protokoll.ts       # Main entry
+│   ├── main.ts            # Entry point
+│   ├── processor.ts       # File processor
+│   └── protokoll.ts       # Main types
 ├── tests/                 # Test files (mirrors src/)
 ├── guide/                 # AI guide documentation
-├── docs/                  # User documentation
+├── docs/                  # User documentation site
 └── output/                # Intermediate files (gitignored)
 ```
 
@@ -157,14 +185,8 @@ npm test -- --grep "should discover"
 ### Coverage
 
 ```bash
-npm test -- --coverage
+npm run test:coverage
 ```
-
-Coverage thresholds:
-- Statements: 90%
-- Branches: 75%
-- Functions: 95%
-- Lines: 90%
 
 ## Code Style
 
@@ -172,7 +194,7 @@ Coverage thresholds:
 
 ```bash
 npm run lint
-npm run lint -- --fix
+npm run lint:fix
 ```
 
 ### TypeScript
@@ -196,10 +218,11 @@ npm run lint -- --fix
 | Package | Purpose |
 |---------|---------|
 | `@theunwalked/dreadcabinet` | Filesystem patterns |
-| `@theunwalked/cardigantime` | Config discovery |
-| `@riotprompt/riotprompt` | Agentic execution |
-| `openai` | OpenAI API |
-| `@anthropic-ai/sdk` | Anthropic API |
+| `@theunwalked/cardigantime` | Hierarchical config discovery |
+| `@riotprompt/riotprompt` | Prompt building and agentic execution |
+| `openai` | OpenAI API (Whisper and GPT) |
+| `@anthropic-ai/sdk` | Anthropic API (Claude) |
+| `@google/generative-ai` | Google API (Gemini) |
 
 ### Dev
 
@@ -240,6 +263,7 @@ Keeps intermediate files in `output/protokoll/`:
 - `*-request.json` - LLM request
 - `*-response.json` - LLM response
 - `*-reflection.md` - Self-reflection report
+- `*-session.json` - Interactive session log
 
 ### Node Debugging
 

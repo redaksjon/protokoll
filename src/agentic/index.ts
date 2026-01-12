@@ -22,6 +22,7 @@ export interface AgenticInstance {
         state: TranscriptionState;
         toolsUsed: string[];
         iterations: number;
+        totalTokens?: number;
     }>;
     getAvailableTools(): string[];
 }

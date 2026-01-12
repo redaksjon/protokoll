@@ -18,11 +18,13 @@ export interface PipelineConfig {
     interactive: boolean;
     selfReflection: boolean;
     debug: boolean;
+    dryRun?: boolean;
   
     // Paths
     contextDirectory?: string;
     intermediateDir: string;
     keepIntermediates: boolean;
+    processedDirectory?: string;
 }
 
 export interface PipelineInput {
@@ -47,6 +49,9 @@ export interface PipelineResult {
     processingTime: number;
     toolsUsed: string[];
     correctionsApplied: number;
+  
+    // File management
+    processedAudioPath?: string;
   
     // Optional outputs
     reflection?: ReflectionReport;

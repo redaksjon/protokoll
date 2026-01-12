@@ -7,6 +7,7 @@
 
 import { OutputConfig, OutputPaths, IntermediateFiles } from './types';
 import * as Manager from './manager';
+import * as Metadata from '../util/metadata';
 
 export interface OutputInstance {
     createOutputPaths(
@@ -21,7 +22,7 @@ export interface OutputInstance {
         type: keyof IntermediateFiles,
         content: unknown
     ): Promise<string>;
-    writeTranscript(paths: OutputPaths, content: string): Promise<string>;
+    writeTranscript(paths: OutputPaths, content: string, metadata?: Metadata.TranscriptMetadata): Promise<string>;
     cleanIntermediates(paths: OutputPaths): Promise<void>;
 }
 

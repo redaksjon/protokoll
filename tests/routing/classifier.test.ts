@@ -255,5 +255,271 @@ describe('Intelligent Classifier', () => {
         expect(results[0].reasoning).toContain('explicit phrase');
         expect(results[0].reasoning).toContain('topic');
     });
+
+    it('should detect people by sounds_like variants', () => {
+        const classifier = Classifier.create(mockContext);
+    
+        const routes: ProjectRoute[] = [{
+            projectId: 'team-project',
+            classification: {
+                context_type: 'work',
+                associated_people: ['priya-sharma'],
+            },
+            destination: { path: '~/work', structure: 'month', filename_options: ['date', 'subject'] },
+        }];
+    
+        // Use the sounds_like variant 'pria' instead of the actual name
+        const results = classifier.classify({
+            transcriptText: 'had a meeting with pria today about the project',
+            audioDate: new Date(),
+            sourceFile: 'recording.m4a',
+        }, routes);
+    
+        expect(results.length).toBe(1);
+        expect(results[0].signals.some(s => s.type === 'associated_person')).toBe(true);
+    });
+
+    it('should detect companies by full name only (not short name in text)', () => {
+        const contextWithFullName = {
+            ...mockContext,
+            getAllCompanies: vi.fn(() => [
+                // Short name is 'Xyz' which won't be in the text
+                { id: 'xyz-corp', name: 'Xyz', type: 'company', fullName: 'Xyz Corporation International' }
+            ]),
+            getCompany: vi.fn((id) =>
+                id === 'xyz-corp' ? { id: 'xyz-corp', name: 'Xyz', type: 'company' } : undefined
+            ),
+        } as Context.ContextInstance;
+        
+        const classifier = Classifier.create(contextWithFullName);
+    
+        const routes: ProjectRoute[] = [{
+            projectId: 'client-work',
+            classification: {
+                context_type: 'work',
+                associated_companies: ['xyz-corp'],
+            },
+            destination: { path: '~/work', structure: 'month', filename_options: ['date', 'subject'] },
+        }];
+    
+        // Use the full name - short name 'Xyz' is not in the text
+        const results = classifier.classify({
+            transcriptText: 'Working on the xyz corporation international project today',
+            audioDate: new Date(),
+            sourceFile: 'recording.m4a',
+        }, routes);
+    
+        expect(results.length).toBe(1);
+        expect(results[0].signals.some(s => s.type === 'associated_company')).toBe(true);
+    });
+
+    it('should detect companies by sounds_like variants', () => {
+        const contextWithSoundsLike = {
+            ...mockContext,
+            getAllCompanies: vi.fn(() => [
+                { id: 'acme-corp', name: 'Acme Corp', type: 'company', sounds_like: ['akme', 'acmee'] }
+            ]),
+        } as Context.ContextInstance;
+        
+        const classifier = Classifier.create(contextWithSoundsLike);
+    
+        const routes: ProjectRoute[] = [{
+            projectId: 'client-work',
+            classification: {
+                context_type: 'work',
+                associated_companies: ['acme-corp'],
+            },
+            destination: { path: '~/work', structure: 'month', filename_options: ['date', 'subject'] },
+        }];
+    
+        // Use the sounds_like variant 'akme'
+        const results = classifier.classify({
+            transcriptText: 'Working on the akme project today',
+            audioDate: new Date(),
+            sourceFile: 'recording.m4a',
+        }, routes);
+    
+        expect(results.length).toBe(1);
+        expect(results[0].signals.some(s => s.type === 'associated_company')).toBe(true);
+    });
+
+    it('should infer personal context type', () => {
+        const classifier = Classifier.create(mockContext);
+    
+        const routes: ProjectRoute[] = [{
+            projectId: 'personal-notes',
+            classification: {
+                context_type: 'personal',
+            },
+            destination: { path: '~/personal', structure: 'month', filename_options: ['date', 'subject'] },
+        }];
+    
+        const results = classifier.classify({
+            transcriptText: 'Planning for the weekend vacation with family and friends',
+            audioDate: new Date(),
+            sourceFile: 'recording.m4a',
+        }, routes);
+    
+        expect(results.length).toBe(1);
+        expect(results[0].signals.some(s => s.type === 'context_type' && s.value === 'personal')).toBe(true);
+    });
+
+    it('should return 0 confidence for empty signals array', () => {
+        const classifier = Classifier.create(mockContext);
+    
+        const confidence = classifier.calculateConfidence([]);
+        expect(confidence).toBe(0);
+    });
+
+    it('should use pre-detected people when provided in context', () => {
+        const classifier = Classifier.create(mockContext);
+    
+        const routes: ProjectRoute[] = [{
+            projectId: 'team-project',
+            classification: {
+                context_type: 'work',
+                associated_people: ['priya-sharma'],
+            },
+            destination: { path: '~/work', structure: 'month', filename_options: ['date', 'subject'] },
+        }];
+    
+        // Provide pre-detected people in the routing context
+        const results = classifier.classify({
+            transcriptText: 'Some random text without names',
+            audioDate: new Date(),
+            sourceFile: 'recording.m4a',
+            detectedPeople: ['priya-sharma'],
+        }, routes);
+    
+        expect(results.length).toBe(1);
+        expect(results[0].signals.some(s => s.type === 'associated_person')).toBe(true);
+    });
+
+    it('should use pre-detected companies when provided in context', () => {
+        const classifier = Classifier.create(mockContext);
+    
+        const routes: ProjectRoute[] = [{
+            projectId: 'client-work',
+            classification: {
+                context_type: 'work',
+                associated_companies: ['acme-corp'],
+            },
+            destination: { path: '~/work', structure: 'month', filename_options: ['date', 'subject'] },
+        }];
+    
+        // Provide pre-detected companies in the routing context
+        const results = classifier.classify({
+            transcriptText: 'Some random text without company names',
+            audioDate: new Date(),
+            sourceFile: 'recording.m4a',
+            detectedCompanies: ['acme-corp'],
+        }, routes);
+    
+        expect(results.length).toBe(1);
+        expect(results[0].signals.some(s => s.type === 'associated_company')).toBe(true);
+    });
+
+    it('should handle routes with missing classification fields gracefully', () => {
+        const classifier = Classifier.create(mockContext);
+    
+        const routes: ProjectRoute[] = [{
+            projectId: 'minimal-route',
+            classification: {
+                context_type: 'work',
+                // No explicit_phrases, associated_people, associated_companies, or topics
+            },
+            destination: { path: '~/work', structure: 'month', filename_options: ['date', 'subject'] },
+        }];
+    
+        const results = classifier.classify({
+            transcriptText: 'Team meeting about the project deadline',
+            audioDate: new Date(),
+            sourceFile: 'recording.m4a',
+        }, routes);
+    
+        // Should still detect context_type
+        expect(results.length).toBe(1);
+        expect(results[0].signals.some(s => s.type === 'context_type')).toBe(true);
+    });
+
+    it('should handle person lookup when person not found in context', () => {
+        const contextWithMissingPerson = {
+            ...mockContext,
+            getPerson: vi.fn(() => undefined), // Person not found
+        } as Context.ContextInstance;
+        
+        const classifier = Classifier.create(contextWithMissingPerson);
+    
+        const routes: ProjectRoute[] = [{
+            projectId: 'team-project',
+            classification: {
+                context_type: 'work',
+                associated_people: ['unknown-person'],
+            },
+            destination: { path: '~/work', structure: 'month', filename_options: ['date', 'subject'] },
+        }];
+    
+        const results = classifier.classify({
+            transcriptText: 'Working on something',
+            audioDate: new Date(),
+            sourceFile: 'recording.m4a',
+            detectedPeople: ['unknown-person'],
+        }, routes);
+    
+        expect(results.length).toBe(1);
+        // Should use the ID as fallback for name
+        expect(results[0].signals.some(s => s.type === 'associated_person' && s.value === 'unknown-person')).toBe(true);
+    });
+
+    it('should handle company lookup when company not found in context', () => {
+        const contextWithMissingCompany = {
+            ...mockContext,
+            getCompany: vi.fn(() => undefined), // Company not found
+        } as Context.ContextInstance;
+        
+        const classifier = Classifier.create(contextWithMissingCompany);
+    
+        const routes: ProjectRoute[] = [{
+            projectId: 'client-work',
+            classification: {
+                context_type: 'work',
+                associated_companies: ['unknown-company'],
+            },
+            destination: { path: '~/work', structure: 'month', filename_options: ['date', 'subject'] },
+        }];
+    
+        const results = classifier.classify({
+            transcriptText: 'Working on client stuff',
+            audioDate: new Date(),
+            sourceFile: 'recording.m4a',
+            detectedCompanies: ['unknown-company'],
+        }, routes);
+    
+        expect(results.length).toBe(1);
+        // Should use the ID as fallback for name
+        expect(results[0].signals.some(s => s.type === 'associated_company' && s.value === 'unknown-company')).toBe(true);
+    });
+
+    it('should handle mixed context type when neither work nor personal dominates', () => {
+        const classifier = Classifier.create(mockContext);
+    
+        const routes: ProjectRoute[] = [{
+            projectId: 'mixed-notes',
+            classification: {
+                context_type: 'mixed',
+            },
+            destination: { path: '~/notes', structure: 'month', filename_options: ['date', 'subject'] },
+        }];
+    
+        // Text with balanced work/personal indicators
+        const results = classifier.classify({
+            transcriptText: 'Meeting today, also planning weekend activities',
+            audioDate: new Date(),
+            sourceFile: 'recording.m4a',
+        }, routes);
+    
+        expect(results.length).toBe(1);
+        expect(results[0].signals.some(s => s.type === 'context_type' && s.value === 'mixed')).toBe(true);
+    });
 });
 

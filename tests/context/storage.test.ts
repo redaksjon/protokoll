@@ -290,5 +290,133 @@ sounds_like:
       expect(storage.getAll('person').length).toBe(0);
     });
   });
-});
 
+  describe('branch coverage edge cases', () => {
+    it('should handle entity without sounds_like in findBySoundsLike', async () => {
+      const peopleDir = path.join(tempDir, 'context', 'people');
+      await fs.mkdir(peopleDir, { recursive: true });
+      await fs.writeFile(
+        path.join(peopleDir, 'john.yaml'),
+        'id: john\nname: John Smith'
+      );
+      
+      await storage.load([path.join(tempDir, 'context')]);
+      
+      const result = storage.findBySoundsLike('jon');
+      expect(result).toBeUndefined();
+    });
+
+    it('should handle whitespace in phonetic variant matching', async () => {
+      const peopleDir = path.join(tempDir, 'context', 'people');
+      await fs.mkdir(peopleDir, { recursive: true });
+      await fs.writeFile(
+        path.join(peopleDir, 'priya.yaml'),
+        `id: priya
+name: Priya Sharma
+sounds_like:
+  - "pria"
+  - "preya"`
+      );
+      
+      await storage.load([path.join(tempDir, 'context')]);
+      
+      // Test with extra whitespace
+      const result = storage.findBySoundsLike('  pria  ');
+      expect(result?.name).toBe('Priya Sharma');
+    });
+
+    it('should handle case variations in findBySoundsLike', async () => {
+      const peopleDir = path.join(tempDir, 'context', 'people');
+      await fs.mkdir(peopleDir, { recursive: true });
+      await fs.writeFile(
+        path.join(peopleDir, 'priya.yaml'),
+        `id: priya
+name: Priya Sharma
+sounds_like:
+  - "pria"`
+      );
+      
+      await storage.load([path.join(tempDir, 'context')]);
+      
+      // Test uppercase phonetic
+      const result = storage.findBySoundsLike('PRIA');
+      expect(result?.name).toBe('Priya Sharma');
+    });
+
+    it('should get undefined for non-existent entity', () => {
+      const result = storage.get('person', 'nonexistent');
+      expect(result).toBeUndefined();
+    });
+
+    it('should get all entities of a type when empty', () => {
+      const result = storage.getAll('person');
+      expect(result).toEqual([]);
+    });
+
+    it('should handle loading from multiple directories', async () => {
+      const dir1 = path.join(tempDir, 'context1', 'people');
+      const dir2 = path.join(tempDir, 'context2', 'people');
+      await fs.mkdir(dir1, { recursive: true });
+      await fs.mkdir(dir2, { recursive: true });
+      
+      await fs.writeFile(path.join(dir1, 'a.yaml'), 'id: a\nname: Person A');
+      await fs.writeFile(path.join(dir2, 'b.yaml'), 'id: b\nname: Person B');
+      
+      await storage.load([path.join(tempDir, 'context1'), path.join(tempDir, 'context2')]);
+      
+      const people = storage.getAll('person');
+      expect(people.length).toBe(2);
+      expect(people.some(p => p.name === 'Person A')).toBe(true);
+      expect(people.some(p => p.name === 'Person B')).toBe(true);
+    });
+
+    it('should skip files that do not end with yaml or yml', async () => {
+      const peopleDir = path.join(tempDir, 'context', 'people');
+      await fs.mkdir(peopleDir, { recursive: true });
+      await fs.writeFile(path.join(peopleDir, 'a.yaml'), 'id: a\nname: Person A');
+      await fs.writeFile(path.join(peopleDir, 'b.txt'), 'id: b\nname: Person B'); // Non-yaml file
+      
+      await storage.load([path.join(tempDir, 'context')]);
+      
+      const people = storage.getAll('person');
+      expect(people.length).toBe(1);
+      expect(people[0].name).toBe('Person A');
+    });
+
+    it('should handle entities that parse to undefined', async () => {
+      const peopleDir = path.join(tempDir, 'context', 'people');
+      await fs.mkdir(peopleDir, { recursive: true });
+      await fs.writeFile(path.join(peopleDir, 'invalid.yaml'), ''); // Empty file
+      
+      await storage.load([path.join(tempDir, 'context')]);
+      
+      const people = storage.getAll('person');
+      expect(people.length).toBe(0);
+    });
+
+    it('should handle entities without id', async () => {
+      const peopleDir = path.join(tempDir, 'context', 'people');
+      await fs.mkdir(peopleDir, { recursive: true });
+      await fs.writeFile(
+        path.join(peopleDir, 'noid.yaml'),
+        'name: Person Without ID'
+      );
+      
+      await storage.load([path.join(tempDir, 'context')]);
+      
+      const people = storage.getAll('person');
+      expect(people.length).toBe(0);
+    });
+
+    it('should handle yml file extension', async () => {
+      const peopleDir = path.join(tempDir, 'context', 'people');
+      await fs.mkdir(peopleDir, { recursive: true });
+      await fs.writeFile(path.join(peopleDir, 'a.yml'), 'id: a\nname: Person A');
+      
+      await storage.load([path.join(tempDir, 'context')]);
+      
+      const people = storage.getAll('person');
+      expect(people.length).toBe(1);
+    });
+  });
+});

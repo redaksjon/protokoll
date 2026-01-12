@@ -29,17 +29,17 @@ Protokoll transforms audio recordings into intelligent, context-enhanced transcr
 ### Essential Commands
 
 ```bash
-# Basic transcription
+# Basic transcription (self-reflection enabled by default)
 protokoll --input-directory ./recordings
 
-# Interactive mode
+# Interactive mode for learning
 protokoll --input-directory ./recordings --interactive
 
-# With self-reflection
-protokoll --input-directory ./recordings --self-reflection
+# Disable self-reflection
+protokoll --input-directory ./recordings --no-self-reflection
 
 # Full debug mode
-protokoll --input-directory ./recordings --debug --verbose --self-reflection
+protokoll --input-directory ./recordings --debug --verbose
 ```
 
 ### Key Directories
@@ -76,6 +76,16 @@ If you're an AI helping someone use Protokoll:
 1. **Context-Aware Transcription**: Corrects names based on learned context
 2. **Intelligent Routing**: Sends notes to right directories
 3. **Interactive Learning**: Asks questions, remembers answers
-4. **Self-Reflection**: Reports on tool effectiveness
+4. **Self-Reflection**: Reports on tool effectiveness (enabled by default)
 5. **Full Preservation**: Not a summarizer - keeps all content
+
+## Current Defaults
+
+| Setting | Default Value |
+|---------|---------------|
+| Reasoning Model | `gpt-5.2` |
+| Transcription Model | `whisper-1` |
+| Self-Reflection | `true` (enabled) |
+| Interactive Mode | `false` (disabled) |
+| Output Structure | `month` |
 

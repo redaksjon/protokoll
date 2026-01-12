@@ -66,6 +66,35 @@ const analyzeTranscriptForUnknowns = (
         }
     }
     
+    // ISSUE #3: Detect unknown terms (technical vocabulary, acronyms, domain-specific terms)
+    // Get all known terms to avoid re-asking about them
+    const allEntities = context.search('');
+    const knownTermsSet = new Set(allEntities.map(e => e.name.toLowerCase()));
+    
+    // Pattern for technical terms: hyphenated words, acronyms, CamelCase
+    // Examples: GraphQL, Kubernetes, machine-learning, OAuth, REST-API
+    const termPattern = /\b([A-Z][a-z]+-[A-Z][a-z]+|[A-Z]{2,}\b|[a-z]+-[a-z]+(?:-[a-z]+)*)\b/g;
+    let termMatch;
+    const foundTerms = new Set<string>();
+    
+    while ((termMatch = termPattern.exec(transcriptText)) !== null) {
+        const term = termMatch[1];
+        // Only ask about terms we haven't seen and don't already know
+        if (term.length > 2 && !knownTermsSet.has(term.toLowerCase()) && !foundTerms.has(term.toLowerCase())) {
+            foundTerms.add(term.toLowerCase());
+            const idx = transcriptText.indexOf(term);
+            const start = Math.max(0, idx - 50);
+            const end = Math.min(transcriptText.length, idx + term.length + 50);
+            const context_str = transcriptText.substring(start, end);
+            
+            unknowns.push({
+                term,
+                context: `..."${context_str}"...`,
+                type: 'new_term',
+            });
+        }
+    }
+    
     // Deduplicate by term
     const seen = new Set<string>();
     return unknowns.filter(u => {
@@ -176,6 +205,40 @@ export const create = (config: Config, operator: Dreadcabinet.Operator): Instanc
         logger.debug('Transcribing file %s', audioFile);
         const transcription = await transcribePhase.transcribe(creationTime, outputPath, contextPath, interimPath, transcriptionFilename, hash, audioFile);
 
+        // ISSUE #2: Check routing confidence and ask for confirmation if low
+        let routeDecision: Routing.RouteDecision | null = null;
+        if (routing && context && config.interactive && interactive) {
+            logger.info('Determining routing and checking confidence...');
+            
+            const routingContext: Routing.RoutingContext = {
+                transcriptText: transcription.text,
+                audioDate: creationTime,
+                sourceFile: audioFile,
+                hash,
+            };
+            
+            routeDecision = routing.route(routingContext);
+            
+            // If confidence is low, ask user to confirm routing
+            if (routeDecision.confidence < 0.7) {
+                logger.info('Routing confidence is %.1f%% - asking for confirmation', 
+                    routeDecision.confidence * 100);
+                
+                const signalSummary = routeDecision.signals.length > 0
+                    ? routeDecision.signals.map(s => `${s.value}`).join(', ')
+                    : 'none detected';
+                
+                const routingRequest: Interactive.ClarificationRequest = {
+                    type: 'low_confidence_routing',
+                    term: `${(routeDecision.confidence * 100).toFixed(0)}%`,
+                    context: `This note seems like it should go to:\n"${routeDecision.destination.path}"\n\nDetected signals: ${signalSummary}\n\nReasoning: ${routeDecision.reasoning}`,
+                };
+                
+                await interactive.handleClarification(routingRequest);
+                logger.debug('Routing confirmation handled');
+            }
+        }
+
         // Interactive clarification phase
         if (config.interactive && interactive && context) {
             logger.info('Analyzing transcript for potential clarifications...');
@@ -207,13 +270,19 @@ export const create = (config: Config, operator: Dreadcabinet.Operator): Instanc
                         if (response.shouldRemember && context) {
                             try {
                                 await context.saveEntity({
-                                    type: unknown.type === 'new_person' ? 'person' : 'project',
+                                    type: unknown.type === 'new_person' ? 'person' : unknown.type === 'new_project' ? 'project' : 'term',
                                     id: response.response.toLowerCase().replace(/\s+/g, '-'),
                                     name: response.response,
                                     soundsLike: [unknown.term],
                                 } as Context.Person | Context.Project);
+                                // ISSUE #1: Provide user feedback on successful save
+                                // eslint-disable-next-line no-console
+                                console.log(`\n✓ Remembered! "${response.response}" will be recognized in future transcripts.\n`);
                                 logger.info('Saved new entity to context', { name: response.response });
                             } catch (err) {
+                                // ISSUE #1: Inform user of save failure
+                                // eslint-disable-next-line no-console
+                                console.log(`\n⚠ Could not save "${response.response}" - check file permissions\n`);
                                 logger.warn('Could not save entity to context', { error: err });
                             }
                         }

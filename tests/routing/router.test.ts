@@ -336,6 +336,118 @@ describe('Router', () => {
       
             expect(outputPath).toContain('my-recording-2026');
         });
+
+        it('should build path with day structure and date filename option - no date in filename', () => {
+            const router = Router.create(defaultConfig, mockClassifier);
+      
+            const context: RoutingContext = {
+                transcriptText: 'Daily meeting notes',
+                audioDate: new Date('2026-12-25T14:30:00'),
+                sourceFile: 'test.m4a',
+            };
+      
+            const decision = {
+                projectId: null,
+                destination: {
+                    path: '/tmp/notes',
+                    structure: 'day' as const,
+                    filename_options: ['date', 'subject'] as const, // 'date' with 'day' structure should add nothing
+                },
+                confidence: 1.0,
+                signals: [],
+                reasoning: 'default',
+            };
+      
+            const outputPath = router.buildOutputPath(decision, context);
+      
+            // With day structure, the path already has year/month/day, so date option adds nothing to filename
+            expect(outputPath).toContain('/tmp/notes/2026/12/25/');
+            // Should not have redundant date info in filename
+            expect(outputPath).toContain('daily-meeting-notes');
+        });
+
+        it('should handle all filename options combined', () => {
+            const router = Router.create(defaultConfig, mockClassifier);
+      
+            const context: RoutingContext = {
+                transcriptText: 'Project review meeting notes',
+                audioDate: new Date('2026-06-15T09:45:00'),
+                sourceFile: 'test.m4a',
+            };
+      
+            const decision = {
+                projectId: null,
+                destination: {
+                    path: '/tmp/notes',
+                    structure: 'none' as const,
+                    filename_options: ['date', 'time', 'subject'] as const,
+                },
+                confidence: 1.0,
+                signals: [],
+                reasoning: 'default',
+            };
+      
+            const outputPath = router.buildOutputPath(decision, context);
+      
+            // Should have full date (YYMMDD), time (HHmm), and subject
+            expect(outputPath).toMatch(/260615.*0945.*project-review-meeting-notes/);
+        });
+
+        it('should handle empty subject when extract fails', () => {
+            const router = Router.create(defaultConfig, mockClassifier);
+      
+            const context: RoutingContext = {
+                transcriptText: 'ok', // Too short to extract subject (less than 3 chars after cleaning)
+                audioDate: new Date('2026-01-01T12:00:00'),
+                sourceFile: '.m4a', // No filename to fall back to
+            };
+      
+            const decision = {
+                projectId: null,
+                destination: {
+                    path: '/tmp/notes',
+                    structure: 'none' as const,
+                    filename_options: ['subject'] as const,
+                },
+                confidence: 1.0,
+                signals: [],
+                reasoning: 'default',
+            };
+      
+            const outputPath = router.buildOutputPath(decision, context);
+      
+            // Should still produce a valid path - will use 'm4a' from source file
+            expect(outputPath).toContain('/tmp/notes/');
+            expect(outputPath.endsWith('.md')).toBe(true);
+        });
+
+        it('should handle very long subject extraction (over 50 chars)', () => {
+            const router = Router.create(defaultConfig, mockClassifier);
+      
+            const context: RoutingContext = {
+                // First sentence is way over 50 chars but extractSubject will truncate/skip
+                transcriptText: 'This is an extremely long first sentence that definitely exceeds fifty characters and should not be used as the subject because it is too verbose.',
+                audioDate: new Date('2026-01-01T12:00:00'),
+                sourceFile: 'fallback-file.m4a',
+            };
+      
+            const decision = {
+                projectId: null,
+                destination: {
+                    path: '/tmp/notes',
+                    structure: 'none' as const,
+                    filename_options: ['subject'] as const,
+                },
+                confidence: 1.0,
+                signals: [],
+                reasoning: 'default',
+            };
+      
+            const outputPath = router.buildOutputPath(decision, context);
+      
+            // Should fall back to source file name since sentence is too long
+            expect(outputPath).toContain('fallback-file');
+        });
     });
 });
 

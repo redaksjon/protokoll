@@ -7,7 +7,7 @@
  * THIS IS THE MAIN ENTRY POINT - USE Pipeline.create() IN protokoll.ts
  */
 
-import { PipelineConfig, PipelineInput, PipelineResult } from './types';
+import { PipelineInput, PipelineResult } from './types';
 import * as Orchestrator from './orchestrator';
 
 export interface PipelineInstance {

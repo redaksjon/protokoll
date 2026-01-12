@@ -9,6 +9,7 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { OutputConfig, IntermediateFiles, OutputPaths } from './types';
 import * as Logging from '../logging';
+import * as Metadata from '../util/metadata';
 
 export interface ManagerInstance {
     createOutputPaths(
@@ -26,7 +27,7 @@ export interface ManagerInstance {
         content: unknown
     ): Promise<string>;
   
-    writeTranscript(paths: OutputPaths, content: string): Promise<string>;
+    writeTranscript(paths: OutputPaths, content: string, metadata?: Metadata.TranscriptMetadata): Promise<string>;
   
     cleanIntermediates(paths: OutputPaths): Promise<void>;
 }
@@ -35,8 +36,14 @@ export const create = (config: OutputConfig): ManagerInstance => {
     const logger = Logging.getLogger();
   
     const formatTimestamp = (date: Date): string => {
+        // Format: YYYY-MM-DD-HHmm (full year, dashes for separation)
         const pad = (n: number) => n.toString().padStart(2, '0');
-        return `${date.getFullYear().toString().slice(2)}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}`;
+        const year = date.getFullYear().toString();
+        const month = pad(date.getMonth() + 1);
+        const day = pad(date.getDate());
+        const hours = pad(date.getHours());
+        const minutes = pad(date.getMinutes());
+        return `${year}-${month}-${day}-${hours}${minutes}`;
     };
   
     const createOutputPaths = (
@@ -47,19 +54,20 @@ export const create = (config: OutputConfig): ManagerInstance => {
     ): OutputPaths => {
         const timestamp = formatTimestamp(date);
         const shortHash = hash.slice(0, 6);
-        const prefix = `${timestamp}-${shortHash}`;
+        // Hash at the end for easier filename correlation
+        const buildFilename = (type: string, ext: string) => `${timestamp}-${type}-${shortHash}${ext}`;
     
         const intermediateDir = config.intermediateDir;
     
         return {
             final: routedDestination,
             intermediate: {
-                transcript: path.join(intermediateDir, `${prefix}-transcript.json`),
-                context: path.join(intermediateDir, `${prefix}-context.json`),
-                request: path.join(intermediateDir, `${prefix}-request.json`),
-                response: path.join(intermediateDir, `${prefix}-response.json`),
-                reflection: path.join(intermediateDir, `${prefix}-reflection.md`),
-                session: path.join(intermediateDir, `${prefix}-session.json`),
+                transcript: path.join(intermediateDir, buildFilename('transcript', '.json')),
+                context: path.join(intermediateDir, buildFilename('context', '.json')),
+                request: path.join(intermediateDir, buildFilename('request', '.json')),
+                response: path.join(intermediateDir, buildFilename('response', '.json')),
+                reflection: path.join(intermediateDir, buildFilename('reflection', '.md')),
+                session: path.join(intermediateDir, buildFilename('session', '.json')),
             },
         };
     };
@@ -99,9 +107,17 @@ export const create = (config: OutputConfig): ManagerInstance => {
   
     const writeTranscript = async (
         paths: OutputPaths,
-        content: string
+        content: string,
+        metadata?: Metadata.TranscriptMetadata
     ): Promise<string> => {
-        await fs.writeFile(paths.final, content, 'utf-8');
+        // Prepend metadata if provided
+        let finalContent = content;
+        if (metadata) {
+            const metadataSection = Metadata.formatMetadataMarkdown(metadata);
+            finalContent = metadataSection + content;
+        }
+        
+        await fs.writeFile(paths.final, finalContent, 'utf-8');
         logger.info('Wrote final transcript', { path: paths.final });
         return paths.final;
     };

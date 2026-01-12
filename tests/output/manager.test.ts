@@ -4,6 +4,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as Output from '../../src/output';
+import * as Metadata from '../../src/util/metadata';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
@@ -34,7 +35,7 @@ describe('Output Manager', () => {
             const output = Output.create({
                 intermediateDir: path.join(tempDir, 'output/protokoll'),
                 keepIntermediates: true,
-                timestampFormat: 'YYMMDD-HHmm',
+                timestampFormat: 'YYYY-MM-DD-HHmm',
             });
       
             const date = new Date('2026-01-11T12:45:00');
@@ -46,15 +47,16 @@ describe('Output Manager', () => {
             );
       
             expect(paths.final).toBe('/notes/2026/01/11-meeting.md');
-            expect(paths.intermediate.transcript).toContain('260111-1245-abc123-transcript.json');
-            expect(paths.intermediate.reflection).toContain('260111-1245-abc123-reflection.md');
+            // New format: YYYY-MM-DD-HHmm-<type>-<hash>.ext (hash at end)
+            expect(paths.intermediate.transcript).toContain('2026-01-11-1245-transcript-abc123.json');
+            expect(paths.intermediate.reflection).toContain('2026-01-11-1245-reflection-abc123.md');
         });
     
         it('should use short hash (6 chars)', () => {
             const output = Output.create({
                 intermediateDir: tempDir,
                 keepIntermediates: true,
-                timestampFormat: 'YYMMDD-HHmm',
+                timestampFormat: 'YYYY-MM-DD-HHmm',
             });
       
             const paths = output.createOutputPaths(
@@ -64,7 +66,8 @@ describe('Output Manager', () => {
                 new Date('2026-01-11T10:30:00')
             );
       
-            expect(paths.intermediate.transcript).toContain('-abcdef-');
+            // Hash is now at the end of filename
+            expect(paths.intermediate.transcript).toContain('-abcdef.json');
             expect(paths.intermediate.transcript).not.toContain('ghijklmnop');
         });
     
@@ -209,6 +212,91 @@ describe('Output Manager', () => {
             expect(writtenPath).toBe(finalPath);
             const written = await fs.readFile(finalPath, 'utf-8');
             expect(written).toBe(content);
+        });
+
+        it('should prepend metadata when provided', async () => {
+            const output = Output.create({
+                intermediateDir: path.join(tempDir, 'output/protokoll'),
+                keepIntermediates: true,
+                timestampFormat: 'YYMMDD-HHmm',
+            });
+      
+            const finalPath = path.join(tempDir, 'notes/2026/01/meeting.md');
+            const paths = output.createOutputPaths(
+                '/audio/recording.m4a',
+                finalPath,
+                'abc123',
+                new Date()
+            );
+      
+            await output.ensureDirectories(paths);
+      
+            const metadata: Metadata.TranscriptMetadata = {
+                title: 'Team Meeting',
+                project: 'Project Alpha',
+                projectId: 'proj-alpha',
+                date: new Date('2026-01-12T14:30:00'),
+                tags: ['meeting', 'Q1-planning'],
+            };
+
+            const content = '# Meeting Notes\n\nThis is the transcript.';
+            await output.writeTranscript(paths, content, metadata);
+      
+            const written = await fs.readFile(finalPath, 'utf-8');
+            
+            // Metadata should be at the beginning
+            expect(written).toContain('# Team Meeting');
+            expect(written).toContain('## Metadata');
+            expect(written).toContain('**Project**: Project Alpha');
+            expect(written).toContain('**Tags**: `meeting`, `Q1-planning`');
+            
+            // Original content should be after metadata
+            expect(written).toContain('---');
+            expect(written).toContain('# Meeting Notes');
+        });
+
+        it('should include routing metadata in transcript', async () => {
+            const output = Output.create({
+                intermediateDir: path.join(tempDir, 'output/protokoll'),
+                keepIntermediates: true,
+                timestampFormat: 'YYMMDD-HHmm',
+            });
+      
+            const finalPath = path.join(tempDir, 'notes/2026/01/meeting.md');
+            const paths = output.createOutputPaths(
+                '/audio/recording.m4a',
+                finalPath,
+                'abc123',
+                new Date()
+            );
+      
+            await output.ensureDirectories(paths);
+      
+            const routing: Metadata.RoutingMetadata = {
+                destination: '/home/user/work/notes',
+                confidence: 0.95,
+                signals: [
+                    { type: 'explicit_phrase', value: 'work meeting', weight: 0.9 },
+                ],
+                reasoning: 'Matched by explicit phrase',
+            };
+
+            const metadata: Metadata.TranscriptMetadata = {
+                title: 'Work Meeting',
+                date: new Date('2026-01-12T14:30:00'),
+                routing,
+            };
+
+            const content = 'Meeting transcript content here.';
+            await output.writeTranscript(paths, content, metadata);
+      
+            const written = await fs.readFile(finalPath, 'utf-8');
+            
+            expect(written).toContain('### Routing');
+            expect(written).toContain('**Destination**: /home/user/work/notes');
+            expect(written).toContain('**Confidence**: 95.0%');
+            expect(written).toContain('**Classification Signals**:');
+            expect(written).toContain('explicit phrase');
         });
     });
   

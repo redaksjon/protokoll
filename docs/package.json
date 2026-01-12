@@ -1,11 +1,12 @@
 {
-    "name": "matnava-docs",
+    "name": "protokoll-docs",
+    "private": true,
     "version": "1.0.0",
-    "description": "Documentation site for Matnava - a focused transcription tool",
+    "description": "Documentation site for Protokoll - intelligent audio transcription",
     "type": "module",
     "scripts": {
         "dev": "vite",
-        "build": "vite build",
+        "build": "vite build && cp dist/index.html dist/404.html",
         "preview": "vite preview"
     },
     "dependencies": {

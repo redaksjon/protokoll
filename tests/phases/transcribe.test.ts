@@ -269,6 +269,83 @@ describe('Transcribe Phase Tests', () => {
         expect(result.text).toBe('transcribed chunk 1 transcribed chunk 2');
     });
 
+    test('should split and transcribe large audio files with debug mode cleanup', async () => {
+        // Setup
+        const debugConfig = { ...config, debug: false }; // Clean up files in non-debug mode
+        // @ts-ignore
+        mockStorage.exists.mockResolvedValue(false);
+        // @ts-ignore
+        mockMedia.getFileSize.mockResolvedValue(1024 * 1024 * 30); // 30MB (larger than maxAudioSize)
+        // @ts-ignore
+        mockMedia.splitAudioFile.mockResolvedValue(['/tmp/chunk1.mp3', '/tmp/chunk2.mp3']);
+        // @ts-ignore
+        mockOpenAI.transcribeAudio
+            // @ts-ignore
+            .mockResolvedValueOnce({ text: 'transcribed chunk 1' })
+            // @ts-ignore
+            .mockResolvedValueOnce({ text: 'transcribed chunk 2' });
+        // @ts-ignore
+        mockPrompts.createTranscribePrompt.mockResolvedValue({
+            persona: { items: [{ text: 'Persona' }] },
+            instructions: { items: [{ text: 'Instructions' }] },
+            contents: { items: [{ text: 'Content' }] },
+            contexts: { items: [{ text: 'Context' }] },
+        });
+        // @ts-ignore
+        mockOverride.format.mockReturnValue({ messages: [{ role: 'user', content: 'Format this transcript' }] });
+        // @ts-ignore
+        mockOpenAI.createCompletion.mockResolvedValue('# Formatted Transcript\n\nTranscribed text');
+
+        // Execute
+        const transcribe = await importTranscribe();
+        // @ts-ignore
+        const instance = transcribe.create(debugConfig, mockOperator);
+        const result = await instance.transcribe(creation, outputPath, contextPath, interimPath, filename, hash, audioFile);
+
+        // Verify - should delete temporary chunks in non-debug mode
+        expect(mockStorage.deleteFile).toHaveBeenCalledWith('/tmp/chunk1.mp3');
+        expect(mockStorage.deleteFile).toHaveBeenCalledWith('/tmp/chunk2.mp3');
+        expect(result.text).toBe('transcribed chunk 1 transcribed chunk 2');
+    });
+
+    test('should split and transcribe large audio files with debug mode no cleanup', async () => {
+        // Setup
+        const debugConfig = { ...config, debug: true }; // Keep files in debug mode
+        // @ts-ignore
+        mockStorage.exists.mockResolvedValue(false);
+        // @ts-ignore
+        mockMedia.getFileSize.mockResolvedValue(1024 * 1024 * 30); // 30MB (larger than maxAudioSize)
+        // @ts-ignore
+        mockMedia.splitAudioFile.mockResolvedValue(['/tmp/chunk1.mp3', '/tmp/chunk2.mp3']);
+        // @ts-ignore
+        mockOpenAI.transcribeAudio
+            // @ts-ignore
+            .mockResolvedValueOnce({ text: 'transcribed chunk 1' })
+            // @ts-ignore
+            .mockResolvedValueOnce({ text: 'transcribed chunk 2' });
+        // @ts-ignore
+        mockPrompts.createTranscribePrompt.mockResolvedValue({
+            persona: { items: [{ text: 'Persona' }] },
+            instructions: { items: [{ text: 'Instructions' }] },
+            contents: { items: [{ text: 'Content' }] },
+            contexts: { items: [{ text: 'Context' }] },
+        });
+        // @ts-ignore
+        mockOverride.format.mockReturnValue({ messages: [{ role: 'user', content: 'Format this transcript' }] });
+        // @ts-ignore
+        mockOpenAI.createCompletion.mockResolvedValue('# Formatted Transcript\n\nTranscribed text');
+
+        // Execute
+        const transcribe = await importTranscribe();
+        // @ts-ignore
+        const instance = transcribe.create(debugConfig, mockOperator);
+        const result = await instance.transcribe(creation, outputPath, contextPath, interimPath, filename, hash, audioFile);
+
+        // Verify - should NOT delete temporary chunks in debug mode
+        expect(mockStorage.deleteFile).not.toHaveBeenCalled();
+        expect(result.text).toBe('transcribed chunk 1 transcribed chunk 2');
+    });
+
     test('should handle errors when required parameters are missing', async () => {
         // Setup
         const transcribe = await importTranscribe();
@@ -358,5 +435,142 @@ describe('Transcribe Phase Tests', () => {
             expect.stringContaining('Markdown transcription file'),
             expect.any(String)
         );
+    });
+
+    test('should use agentic mode when context and routing instances are provided', async () => {
+        // Setup
+        const mockContext = {
+            search: vi.fn(() => []),
+            saveEntity: vi.fn(),
+        };
+        const mockRouting = {
+            route: vi.fn(() => ({ destination: { path: '/output' } })),
+            buildOutputPath: vi.fn(() => '/output/routed.md'),
+        };
+        
+        // @ts-ignore
+        mockStorage.exists.mockResolvedValue(false);
+        // @ts-ignore
+        mockMedia.getFileSize.mockResolvedValue(1024 * 1024); // 1MB
+        // @ts-ignore
+        mockOpenAI.transcribeAudio.mockResolvedValue({ text: 'transcribed text' });
+
+        // Execute
+        const transcribe = await importTranscribe();
+        // @ts-ignore
+        const instance = transcribe.create(config, mockOperator, {
+            contextInstance: mockContext,
+            routingInstance: mockRouting,
+        });
+        const result = await instance.transcribe(creation, outputPath, contextPath, interimPath, filename, hash, audioFile);
+
+        // Verify agentic processing was used
+        expect(mockAgentic.process).toHaveBeenCalled();
+        expect(mockLogger.info).toHaveBeenCalledWith(
+            'Using agentic mode - model will call tools to look up people, projects, etc.'
+        );
+        expect(result.toolsUsed).toBeDefined();
+        expect(result.agentIterations).toBeDefined();
+    });
+
+    test('should use agentic mode with debug enabled and write debug file', async () => {
+        // Setup
+        const debugConfig = { ...config, debug: true };
+        const mockContext = {
+            search: vi.fn(() => []),
+            saveEntity: vi.fn(),
+        };
+        const mockRouting = {
+            route: vi.fn(() => ({ destination: { path: '/output' } })),
+            buildOutputPath: vi.fn(() => '/output/routed.md'),
+        };
+        
+        // @ts-ignore
+        mockStorage.exists.mockResolvedValue(false);
+        // @ts-ignore
+        mockMedia.getFileSize.mockResolvedValue(1024 * 1024); // 1MB
+        // @ts-ignore
+        mockOpenAI.transcribeAudio.mockResolvedValue({ text: 'transcribed text' });
+        
+        // @ts-ignore
+        mockAgentic.process.mockResolvedValue({
+            enhancedText: '# Formatted Transcript',
+            state: { originalText: 'test', correctedText: 'test', confidence: 0.95 },
+            toolsUsed: ['lookup-person'],
+            iterations: 2,
+        });
+
+        // Execute
+        const transcribe = await importTranscribe();
+        // @ts-ignore
+        const instance = transcribe.create(debugConfig, mockOperator, {
+            contextInstance: mockContext,
+            routingInstance: mockRouting,
+        });
+        await instance.transcribe(creation, outputPath, contextPath, interimPath, filename, hash, audioFile);
+
+        // Verify debug file was written
+        expect(mockStorage.writeFile).toHaveBeenCalledWith(
+            expect.stringContaining('.agentic.session.json'),
+            expect.any(String),
+            'utf8'
+        );
+    });
+
+    test('should handle failed chunk deletion gracefully and log warning', async () => {
+        // Setup non-debug config to trigger cleanup
+        const nonDebugConfig = { ...config, debug: false };
+        // @ts-ignore
+        mockStorage.exists.mockResolvedValue(false);
+        // @ts-ignore
+        mockMedia.getFileSize.mockResolvedValue(1024 * 1024 * 30); // 30MB (larger than maxAudioSize)
+        // @ts-ignore
+        mockMedia.splitAudioFile.mockResolvedValue(['/tmp/chunk1.mp3', '/tmp/chunk2.mp3']);
+        // @ts-ignore
+        mockOpenAI.transcribeAudio
+            // @ts-ignore
+            .mockResolvedValueOnce({ text: 'chunk 1' })
+            // @ts-ignore
+            .mockResolvedValueOnce({ text: 'chunk 2' });
+        
+        // Make delete fail for one chunk
+        // @ts-ignore
+        mockStorage.deleteFile
+            // @ts-ignore
+            .mockResolvedValueOnce(undefined) // First chunk succeeds
+            // @ts-ignore
+            .mockRejectedValueOnce(new Error('Delete failed')); // Second chunk fails
+
+        // Execute
+        const transcribe = await importTranscribe();
+        // @ts-ignore
+        const instance = transcribe.create(nonDebugConfig, mockOperator);
+        const result = await instance.transcribe(creation, outputPath, contextPath, interimPath, filename, hash, audioFile);
+
+        // Verify warning was logged but process continued
+        expect(mockLogger.warn).toHaveBeenCalledWith(
+            expect.stringContaining('Failed to delete temporary chunk')
+        );
+        expect(result.text).toBe('chunk 1 chunk 2');
+    });
+
+    test('should throw error when split audio processing fails', async () => {
+        // Setup
+        // @ts-ignore
+        mockStorage.exists.mockResolvedValue(false);
+        // @ts-ignore
+        mockMedia.getFileSize.mockResolvedValue(1024 * 1024 * 30); // 30MB
+        // @ts-ignore
+        mockMedia.splitAudioFile.mockResolvedValue(['/tmp/chunk1.mp3']);
+        // @ts-ignore
+        mockOpenAI.transcribeAudio.mockRejectedValue(new Error('Transcription API failed'));
+
+        // Execute and verify
+        const transcribe = await importTranscribe();
+        // @ts-ignore
+        const instance = transcribe.create(config, mockOperator);
+
+        await expect(instance.transcribe(creation, outputPath, contextPath, interimPath, filename, hash, audioFile))
+            .rejects.toThrow('Failed to process split audio files');
     });
 });

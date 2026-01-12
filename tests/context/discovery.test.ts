@@ -192,6 +192,28 @@ describe('Hierarchical Discovery', () => {
       // @ts-ignore
       expect(Discovery.deepMerge({ a: 1 }, null)).toEqual({ a: 1 });
     });
+
+    it('should handle when source is a primitive (non-object)', () => {
+      // When source is a primitive (number, string), it should return source
+      // @ts-ignore
+      const result = Discovery.deepMerge({ a: 1 }, 'string value');
+      expect(result).toBe('string value');
+    });
+
+    it('should handle when target is a primitive', () => {
+      // @ts-ignore
+      const result = Discovery.deepMerge('old value', { a: 1 });
+      expect(result).toEqual({ a: 1 });
+    });
+
+    it('should handle when source is an array directly', () => {
+      // When source itself is an array (not a property), it should return a copy
+      // @ts-ignore
+      const source = [1, 2, 3];
+      // @ts-ignore
+      const result = Discovery.deepMerge({}, source);
+      expect(result).toEqual([1, 2, 3]);
+    });
   });
 });
 

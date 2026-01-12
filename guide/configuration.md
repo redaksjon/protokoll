@@ -6,7 +6,7 @@
 
 ```yaml
 # Model settings
-model: "gpt-4o-mini"              # Reasoning model
+model: "gpt-5.2"                   # Reasoning model (default)
 transcriptionModel: "whisper-1"    # Audio transcription
 
 # Context
@@ -40,16 +40,16 @@ output:
 
 # Features
 features:
-  interactive: false
-  selfReflection: false
+  interactive: false               # Disabled by default
+  selfReflection: true            # Enabled by default
 ```
 
 ## Environment Variables
 
 | Variable | Description |
 |----------|-------------|
-| `OPENAI_API_KEY` | OpenAI API key |
-| `ANTHROPIC_API_KEY` | Anthropic API key |
+| `OPENAI_API_KEY` | OpenAI API key (required) |
+| `ANTHROPIC_API_KEY` | Anthropic API key (for Claude models) |
 | `PROTOKOLL_MODEL` | Override default model |
 | `PROTOKOLL_CONFIG_DIR` | Config directory |
 
@@ -61,27 +61,29 @@ features:
 |--------|-------------|---------|
 | `--input-directory <dir>` | Directory with audio files | Required |
 | `--output-directory <dir>` | Default output directory | `~/notes` |
-| `--model <model>` | Reasoning model | `gpt-4o-mini` |
+| `--model <model>` | Reasoning model | `gpt-5.2` |
 | `--transcription-model <model>` | Whisper model | `whisper-1` |
 
 ### Mode Options
 
-| Option | Description |
-|--------|-------------|
-| `--interactive` | Enable interactive clarifications |
-| `--batch` | Disable interactivity |
-| `--self-reflection` | Generate reflection reports |
-| `--dry-run` | Show what would happen |
-| `--verbose` | Enable verbose logging |
-| `--debug` | Enable debug mode |
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--interactive` | Enable interactive clarifications | `false` |
+| `--self-reflection` | Generate reflection reports | `true` |
+| `--no-self-reflection` | Disable reflection reports | - |
+| `--dry-run` | Show what would happen | `false` |
+| `--verbose` | Enable verbose logging | `false` |
+| `--debug` | Enable debug mode | `false` |
 
 ### Advanced Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--context-directory <dir>` | Context storage location | `~/.protokoll` |
-| `--intermediate-dir <dir>` | Intermediate file storage | `./output/protokoll` |
-| `--recursive` | Process subdirectories | `false` |
+| `--context-directories <dirs...>` | Additional context locations | `[]` |
+| `--max-audio-size <bytes>` | Maximum audio file size | `26214400` (25MB) |
+| `--temp-directory <dir>` | Temporary file storage | OS temp dir |
+| `--processed-directory <dir>` | Move processed files here | - |
+| `--overrides` | Allow config overrides | `false` |
 
 ## Routing Structures
 
@@ -98,11 +100,11 @@ Protokoll uses Dreadcabinet structure codenames:
 
 | Option | Example |
 |--------|---------|
-| `date` | `2026-01-11` |
-| `time` | `1430` |
+| `date` | `260111` (YYMMDD format) |
+| `time` | `1430` (HHmm format) |
 | `subject` | `meeting-notes` |
 
-Combined: `2026-01-11-1430-meeting-notes.md`
+Combined: `260111-1430-meeting-notes.md`
 
 ## Hierarchical Configuration
 
@@ -122,24 +124,34 @@ Lower directories take precedence for conflicting settings.
 
 ### Reasoning Models
 
-- `gpt-4o-mini` - Fast, cost-effective (default)
-- `gpt-4o` - Better quality
-- `claude-3-5-sonnet` - Recommended for complex transcripts
-- `claude-3-opus` - Highest quality
-- `gpt-5` - Latest GPT
-- `o1`, `o1-mini` - Reasoning-focused
+| Model | Provider | Notes |
+|-------|----------|-------|
+| `gpt-5.2` | OpenAI | **Default** - High reasoning capability |
+| `gpt-5.1` | OpenAI | High reasoning, balanced |
+| `gpt-5` | OpenAI | Fast and capable |
+| `gpt-4o` | OpenAI | Previous gen, still capable |
+| `gpt-4o-mini` | OpenAI | Fast, lower cost |
+| `o1` | OpenAI | Reasoning-focused |
+| `o1-mini` | OpenAI | Faster reasoning |
+| `claude-3-5-sonnet` | Anthropic | Recommended for complex transcripts |
+| `claude-3-opus` | Anthropic | Highest capability |
+| `claude-3-haiku` | Anthropic | Fast, cost-effective |
 
 ### Transcription Models
 
-- `whisper-1` - Standard Whisper (default)
-- `gpt-4o-transcribe` - Newer model with prompting support
+| Model | Notes |
+|-------|-------|
+| `whisper-1` | Standard Whisper (default) |
+| `gpt-4o-transcribe` | Newer model with prompting support |
+
+> **Note**: Protokoll accepts any model string without restrictions. Model validation happens at the API level, ensuring future compatibility.
 
 ## Example Configurations
 
 ### Personal Notes
 
 ```yaml
-model: "gpt-4o-mini"
+model: "gpt-5.2"
 routing:
   default:
     path: "~/notes"
@@ -175,5 +187,13 @@ routing:
   default:
     path: "./notes"
     structure: "month"
+```
+
+### Batch Processing (No Self-Reflection)
+
+```yaml
+features:
+  selfReflection: false
+  interactive: false
 ```
 

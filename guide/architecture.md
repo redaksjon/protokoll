@@ -80,7 +80,7 @@ interface TranscriptionInstance {
 
 Integrates reasoning models for enhancement:
 
-- **Models**: Claude, GPT-4o, GPT-5, O1
+- **Models**: Claude, GPT-4o, GPT-5, GPT-5.2, O1
 - **Strategies**: Simple, investigate-then-respond, multi-pass, adaptive
 - **Token tracking**: Usage monitoring
 
@@ -143,7 +143,7 @@ interface OutputInstance {
 
 ### 8. Reflection System (`src/reflection/`)
 
-Self-assessment and reporting:
+Self-assessment and reporting (enabled by default):
 
 - **Collector**: Gathers metrics during processing
 - **Reporter**: Generates quality reports
@@ -154,6 +154,19 @@ interface ReflectionInstance {
   collector: CollectorInstance;
   generate(audioFile, outputFile, history?, output?): ReflectionReport;
   save(report, path): Promise<void>;
+}
+```
+
+### 9. Pipeline System (`src/pipeline/`)
+
+Orchestrates the entire processing flow:
+
+- **Orchestrator**: Coordinates all phases
+- **Phases**: locate, transcribe, complete
+
+```typescript
+interface PipelineInstance {
+  process(audioFile: string): Promise<ProcessingResult>;
 }
 ```
 
@@ -178,7 +191,7 @@ interface ReflectionInstance {
    ↓
 9. Output → Write to routed destination
    ↓
-10. Reflection (if enabled) → Generate self-reflection report
+10. Reflection (enabled by default) → Generate self-reflection report
 ```
 
 ## File Locations
@@ -197,7 +210,8 @@ interface ReflectionInstance {
 |---------|---------|
 | `@theunwalked/dreadcabinet` | Filesystem structure patterns |
 | `@theunwalked/cardigantime` | Hierarchical config discovery |
-| `@riotprompt/riotprompt` | Agentic execution system |
+| `@riotprompt/riotprompt` | Prompt building and agentic execution |
 | `openai` | Whisper and GPT APIs |
 | `@anthropic-ai/sdk` | Claude API |
+| `@google/generative-ai` | Gemini API |
 

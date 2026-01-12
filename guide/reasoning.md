@@ -17,9 +17,11 @@ The reasoning system:
 
 | Model | Best For |
 |-------|----------|
-| `gpt-4o-mini` | Fast, cost-effective (default) |
-| `gpt-4o` | Better quality |
-| `gpt-5` | Latest capabilities |
+| `gpt-5.2` | **Default** - High reasoning capability |
+| `gpt-5.1` | High reasoning, balanced |
+| `gpt-5` | Fast and capable |
+| `gpt-4o` | Previous gen, still capable |
+| `gpt-4o-mini` | Fast, lower cost |
 | `o1` | Complex reasoning |
 | `o1-mini` | Reasoning, faster |
 
@@ -31,17 +33,24 @@ The reasoning system:
 | `claude-3-opus` | Highest quality |
 | `claude-3-haiku` | Fast, cost-effective |
 
+### Google Models
+
+| Model | Best For |
+|-------|----------|
+| `gemini-1.5-pro` | High quality |
+| `gemini-1.5-flash` | Fast processing |
+
 ## Configuration
 
 ```yaml
 # ~/.protokoll/config.yaml
-model: "claude-3-5-sonnet"
+model: "gpt-5.2"
 ```
 
 Or via command line:
 
 ```bash
-protokoll --model gpt-4o --input-directory ./recordings
+protokoll --model claude-3-5-sonnet --input-directory ./recordings
 ```
 
 ## Reasoning Strategies
@@ -91,19 +100,19 @@ Best for: General use
 
 ## Self-Reflection
 
-Enable self-reflection to track performance:
-
-```bash
-protokoll --self-reflection --input-directory ./recordings
-```
-
-Generates reports showing:
+Self-reflection is **enabled by default**. It generates reports showing:
 
 - Processing duration
 - Tool call counts
 - Success rates
 - Quality assessment
 - Recommendations
+
+### Disable Self-Reflection
+
+```bash
+protokoll --no-self-reflection --input-directory ./recordings
+```
 
 ### Report Example
 
@@ -156,9 +165,9 @@ interface ReasoningResponse {
 
 ## Best Practices
 
-1. **Start with gpt-4o-mini**: Fast and cost-effective
+1. **Start with gpt-5.2**: Default model with high reasoning capability
 2. **Use claude-3-5-sonnet for quality**: Better name handling
-3. **Enable self-reflection**: Track performance over time
+3. **Review self-reflection reports**: Track performance over time
 4. **Add context**: More context = fewer iterations
 5. **Use adaptive strategy**: Let Protokoll choose
 
@@ -180,5 +189,5 @@ interface ReasoningResponse {
 
 1. Verify API key is set
 2. Check rate limits
-3. Use batch mode for many files
+3. Use batch processing for many files
 
