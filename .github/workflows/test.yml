@@ -1,6 +1,9 @@
 # This workflow runs tests on push and pull requests
 name: Run Tests
 
+permissions:
+  contents: read
+
 on:
   push:
     branches:
