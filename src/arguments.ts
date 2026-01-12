@@ -29,6 +29,10 @@ export const configure = async (dreadcabinet: Dreadcabinet.DreadCabinet, cardiga
         .option('--context-directories [contextDirectories...]', 'directories containing context files to be included in prompts')
         .option('--max-audio-size <maxAudioSize>', 'maximum audio file size in bytes')
         .option('--temp-directory <tempDirectory>', 'temporary directory for processing files')
+        .option('--interactive', 'enable interactive mode for clarification questions')
+        .option('--self-reflection', 'generate self-reflection reports (default: true)')
+        .option('--no-self-reflection', 'disable self-reflection reports')
+        .option('--processed-directory <processedDirectory>', 'directory to move processed audio files to')
 
     await dreadcabinet.configure(program);
     program = await cardigantime.configure(program);
@@ -65,7 +69,7 @@ export const configure = async (dreadcabinet: Dreadcabinet.DreadCabinet, cardiga
     program.parse();
 
     const cliArgs: Args = program.opts<Args>();
-    logger.info('Loaded Command Line Options: %s', JSON.stringify(cliArgs, null, 2));
+    logger.debug('Command Line Options: %s', JSON.stringify(cliArgs, null, 2));
 
     // Get values from config file first using CardiganTime's hierarchical configuration
     const fileValues = await cardigantime.read(cliArgs);
@@ -73,11 +77,31 @@ export const configure = async (dreadcabinet: Dreadcabinet.DreadCabinet, cardiga
     // Read the Raw values from the Dreadcabinet Command Line Arguments
     const dreadcabinetValues = await dreadcabinet.read(cliArgs);
 
-    // Merge configurations: Defaults -> File -> CLI (highest precedence)
+    // Extract protokoll-specific CLI args (only include if explicitly set)
+    const protokollCliArgs: Partial<Config> = {};
+    if (cliArgs.interactive !== undefined) protokollCliArgs.interactive = cliArgs.interactive;
+    if (cliArgs.selfReflection !== undefined) protokollCliArgs.selfReflection = cliArgs.selfReflection;
+    if (cliArgs.debug !== undefined) protokollCliArgs.debug = cliArgs.debug;
+    if (cliArgs.verbose !== undefined) protokollCliArgs.verbose = cliArgs.verbose;
+    if (cliArgs.dryRun !== undefined) protokollCliArgs.dryRun = cliArgs.dryRun;
+    if (cliArgs.model !== undefined) protokollCliArgs.model = cliArgs.model;
+    if (cliArgs.transcriptionModel !== undefined) protokollCliArgs.transcriptionModel = cliArgs.transcriptionModel;
+    if (cliArgs.overrides !== undefined) protokollCliArgs.overrides = cliArgs.overrides;
+    if (cliArgs.contextDirectories !== undefined) protokollCliArgs.contextDirectories = cliArgs.contextDirectories;
+    if (cliArgs.maxAudioSize !== undefined) {
+        protokollCliArgs.maxAudioSize = typeof cliArgs.maxAudioSize === 'string' 
+            ? parseInt(cliArgs.maxAudioSize, 10) 
+            : cliArgs.maxAudioSize;
+    }
+    if (cliArgs.tempDirectory !== undefined) protokollCliArgs.tempDirectory = cliArgs.tempDirectory;
+    if (cliArgs.processedDirectory !== undefined) protokollCliArgs.processedDirectory = cliArgs.processedDirectory;
+
+    // Merge configurations: Defaults -> File -> Dreadcabinet CLI -> Protokoll CLI (highest precedence)
     let mergedConfig: Partial<Config> = {
         ...PROTOKOLL_DEFAULTS,    // Start with Protokoll defaults
-        ...fileValues,          // Apply file values (overwrites defaults)
-        ...dreadcabinetValues,  // Apply all CLI args last (highest precedence)
+        ...fileValues,            // Apply file values (overwrites defaults)
+        ...dreadcabinetValues,    // Apply dreadcabinet CLI args
+        ...protokollCliArgs,      // Apply protokoll-specific CLI args last (highest precedence)
     } as Partial<Config>;
 
     const secureConfig: SecureConfig = {
@@ -110,7 +134,7 @@ export const configure = async (dreadcabinet: Dreadcabinet.DreadCabinet, cardiga
     await validateConfig(config);
     await validateSecureConfig(secureConfig);
 
-    logger.info('Final configuration: %s', JSON.stringify(config, null, 2));
+    logger.debug('Final configuration: %s', JSON.stringify(config, null, 2));
     return [config, secureConfig];
 }
 
@@ -150,7 +174,7 @@ async function validateConfig(config: Config): Promise<void> {
         throw new Error(`Invalid maxAudioSize: ${config.maxAudioSize}. Must be a positive number.`);
     }
 
-    logger.info("Final configuration validated successfully.");
+    logger.debug("Final configuration validated successfully.");
 }
 
 function validateModelPresence(model: string | undefined, required: boolean, modelOptionName: string) {

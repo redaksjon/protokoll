@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import 'dotenv/config';
 import * as Arguments from '@/arguments';
-import { ALLOWED_AUDIO_EXTENSIONS, ALLOWED_OUTPUT_FILENAME_OPTIONS, ALLOWED_OUTPUT_STRUCTURES, DEFAULT_AUDIO_EXTENSIONS, DEFAULT_OUTPUT_FILENAME_OPTIONS, DEFAULT_INPUT_DIRECTORY, DEFAULT_OUTPUT_DIRECTORY, DEFAULT_OUTPUT_STRUCTURE, DEFAULT_TIMEZONE, PROGRAM_NAME, VERSION, DEFAULT_CONFIG_DIR } from '@/constants';
+import { ALLOWED_AUDIO_EXTENSIONS, ALLOWED_OUTPUT_FILENAME_OPTIONS, ALLOWED_OUTPUT_STRUCTURES, DEFAULT_AUDIO_EXTENSIONS, DEFAULT_OUTPUT_FILENAME_OPTIONS, DEFAULT_INPUT_DIRECTORY, DEFAULT_OUTPUT_DIRECTORY, DEFAULT_OUTPUT_STRUCTURE, DEFAULT_TIMEZONE, PROGRAM_NAME, VERSION, DEFAULT_CONFIG_DIR, DEFAULT_INTERMEDIATE_DIRECTORY } from '@/constants';
 import { getLogger, setLogLevel } from '@/logging';
-import * as Processor from './processor';
+import * as Pipeline from './pipeline';
+import * as LocatePhase from './phases/locate';
 import * as Dreadcabinet from '@theunwalked/dreadcabinet';
 import * as Cardigantime from '@theunwalked/cardigantime';
 import { z } from 'zod';
@@ -19,6 +20,9 @@ export interface Args extends Dreadcabinet.Args, Cardigantime.Args {
     contextDirectories?: string[];
     maxAudioSize?: number | string;
     tempDirectory?: string;
+    interactive?: boolean;
+    selfReflection?: boolean;
+    processedDirectory?: string;
 }
 
 export const ConfigSchema = z.object({
@@ -34,6 +38,9 @@ export const ConfigSchema = z.object({
     contextDirectories: z.array(z.string()).optional(),
     maxAudioSize: z.number(),
     tempDirectory: z.string(),
+    interactive: z.boolean(),
+    selfReflection: z.boolean(),
+    processedDirectory: z.string().optional(),
 });
 
 export const SecureConfigSchema = z.object({
@@ -94,10 +101,43 @@ export async function main() {
             ...config,
             ...secureConfig,
         });
-        const processor = Processor.create(config, operator);
+        
+        // Use the locate phase for file discovery and hash generation
+        const locatePhase = LocatePhase.create(config, operator);
+        
+        // Create the intelligent transcription pipeline
+        // This wires together ALL modules: context, routing, transcription,
+        // reasoning, agentic tools, interactive, output, and reflection
+        const pipeline = await Pipeline.create({
+            model: config.model,
+            transcriptionModel: config.transcriptionModel,
+            interactive: config.interactive,
+            selfReflection: config.selfReflection,
+            debug: config.debug,
+            dryRun: config.dryRun,
+            contextDirectory: config.configDirectory,
+            intermediateDir: DEFAULT_INTERMEDIATE_DIRECTORY,
+            keepIntermediates: config.debug,
+            outputDirectory: config.outputDirectory || DEFAULT_OUTPUT_DIRECTORY,
+            outputStructure: config.outputStructure || DEFAULT_OUTPUT_STRUCTURE,
+            outputFilenameOptions: config.outputFilenameOptions || DEFAULT_OUTPUT_FILENAME_OPTIONS,
+            maxAudioSize: config.maxAudioSize,
+            tempDirectory: config.tempDirectory,
+            processedDirectory: config.processedDirectory,
+        });
 
         await operator.process(async (file: string) => {
-            await processor.process(file);
+            // Use locate phase for file metadata
+            const { creationTime, hash } = await locatePhase.locate(file);
+            
+            // Run through the full intelligent pipeline
+            const result = await pipeline.process({
+                audioFile: file,
+                creation: creationTime,
+                hash,
+            });
+            
+            logger.info('Processed: %s -> %s', file, result.outputPath);
         });
     } catch (error: any) {
         logger.error('Exiting due to Error: %s, %s', error.message, error.stack);

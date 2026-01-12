@@ -2,119 +2,447 @@ import React from 'react'
 
 function App() {
     return (
-        <div className="container">
-            <header className="header">
-                <h1 className="title">Matnava</h1>
-                <p className="subtitle">
-                    A focused transcription tool that helps you transcribe audio intelligently using context
-                </p>
+        <div className="site">
+            {/* Hero Section */}
+            <header className="hero">
+                <div className="hero-glow"></div>
+                <div className="hero-content">
+                    <div className="badge">Intelligent Audio Transcription</div>
+                    <h1 className="title">Protokoll</h1>
+                    <p className="tagline">
+                        Transform voice memos into perfectly organized, context-aware notes.
+                        <br />
+                        <span className="highlight">Whisper mishears names. Protokoll fixes them.</span>
+                    </p>
+                    <div className="hero-actions">
+                        <a href="https://www.npmjs.com/package/@redaksjon/protokoll" className="btn btn-primary" target="_blank" rel="noopener noreferrer">
+                            npm install -g @redaksjon/protokoll
+                        </a>
+                        <a href="https://github.com/redaksjon/protokoll" className="btn btn-secondary" target="_blank" rel="noopener noreferrer">
+                            View on GitHub
+                        </a>
+                    </div>
+                </div>
             </header>
 
-            <section className="install-section">
-                <h2>Quick Start</h2>
-                <p>Get started with Matnava in seconds:</p>
-                <div className="code-block">
-                    # Install globally with npm<br />
-                    npm install -g @jankhoj/matnava<br /><br />
-                    # Set up your OpenAI API key<br />
-                    echo "OPENAI_API_KEY=your-api-key" &gt; .env<br /><br />
-                    # Start transcribing!<br />
-                    matnava --input-directory ./recordings --output-directory ./notes
-                </div>
-            </section>
-
-            <section className="feature-grid">
-                <div className="feature-card">
-                    <h3>🎯 Focused</h3>
-                    <p>Designed specifically for intelligent audio transcription with context awareness.</p>
-                </div>
-                <div className="feature-card">
-                    <h3>🤖 AI-Powered</h3>
-                    <p>Uses OpenAI's Whisper for transcription and GPT models for intelligent processing.</p>
-                </div>
-                <div className="feature-card">
-                    <h3>📝 Smart Output</h3>
-                    <p>Generates both structured JSON data and readable Markdown notes.</p>
-                </div>
-                <div className="feature-card">
-                    <h3>🔧 Configurable</h3>
-                    <p>Customize AI instructions, output formats, and processing behavior.</p>
-                </div>
-            </section>
-
-            <section className="example-section">
-                <h2>How It Works</h2>
-                <p>Matnava processes your audio files through intelligent phases:</p>
-
-                <div className="phase">
-                    <h4>1. Locate Phase</h4>
-                    <p>Extracts metadata, calculates unique identifiers, and sets up output structure.</p>
-                </div>
-
-                <div className="phase">
-                    <h4>2. Classify Phase</h4>
-                    <p>Transcribes audio using Whisper, then classifies content type (meeting, call, email, etc.) and extracts key metadata.</p>
-                </div>
-
-                <div className="phase">
-                    <h4>3. Compose Phase</h4>
-                    <p>Creates intelligent, well-structured markdown notes based on the content type and classification.</p>
-                </div>
-            </section>
-
-            <section>
-                <h2>Example Usage</h2>
-                <div className="code-block">
-                    # Basic transcription<br />
-                    matnava --input-directory ./meetings --output-directory ./notes<br /><br />
-                    # Recursive processing with verbose output<br />
-                    matnava --input-directory ./recordings --recursive --verbose<br /><br />
-                    # Custom AI model<br />
-                    matnava --input-directory ./audio --model gpt-4-turbo<br /><br />
-                    # With context from existing notes<br />
-                    matnava --input-directory ./recordings --context-directories ./my-notes
-                </div>
-            </section>
-
-            <section>
-                <h2>Output Files</h2>
-                <p>For each audio file, Matnava generates:</p>
-                <div className="feature-grid">
-                    <div className="feature-card">
-                        <h3>📊 JSON Classification</h3>
-                        <p>Structured data with content type, metadata, attendees, tasks, and original transcript.</p>
-                    </div>
-                    <div className="feature-card">
-                        <h3>📄 Markdown Notes</h3>
-                        <p>Enhanced, formatted notes ready for your knowledge management system.</p>
+            {/* Problem Statement */}
+            <section className="problem-section">
+                <div className="container">
+                    <h2 className="section-title">The Transcription Problem</h2>
+                    <div className="problem-grid">
+                        <div className="problem-card">
+                            <div className="problem-icon">🎤</div>
+                            <h3>Whisper Mishears</h3>
+                            <p>"Priya" becomes "pre a"<br/>"Kubernetes" becomes "cube er net ease"</p>
+                        </div>
+                        <div className="problem-card">
+                            <div className="problem-icon">📁</div>
+                            <h3>Notes Go Everywhere</h3>
+                            <p>Work notes in personal folders<br/>Client calls mixed with internal meetings</p>
+                        </div>
+                        <div className="problem-card">
+                            <div className="problem-icon">⏰</div>
+                            <h3>Manual Organization</h3>
+                            <p>30% of your time fixing and organizing<br/>what transcription services got wrong</p>
+                        </div>
                     </div>
                 </div>
             </section>
 
-            <section>
-                <h2>Key Features</h2>
-                <ul style={{ textAlign: 'left', color: '#ccc', lineHeight: '1.8' }}>
-                    <li>Support for multiple audio formats (mp3, mp4, wav, m4a)</li>
-                    <li>Automatic content classification and type-specific formatting</li>
-                    <li>Configurable output directory structure and filename formats</li>
-                    <li>Context enhancement from existing knowledge bases</li>
-                    <li>Customizable AI instructions and personas</li>
-                    <li>Debug mode for inspecting AI prompts and responses</li>
-                    <li>Recursive directory processing</li>
-                    <li>Timezone-aware date handling</li>
+            {/* Before/After Demo */}
+            <section className="demo-section">
+                <div className="container">
+                    <h2 className="section-title">See the Difference</h2>
+                    <div className="demo-grid">
+                        <div className="demo-card demo-before">
+                            <div className="demo-label">Raw Whisper Output</div>
+                            <div className="demo-content">
+                                <p className="demo-text">
+                                    "Meeting with pre a and john about the cube er net ease deployment. 
+                                    She mentioned that a c m e corp wants to move to the cloud by q one. 
+                                    Need to follow up with dev ops team about the time line."
+                                </p>
+                            </div>
+                        </div>
+                        <div className="demo-arrow">→</div>
+                        <div className="demo-card demo-after">
+                            <div className="demo-label">Protokoll Enhanced</div>
+                            <div className="demo-content">
+                                <p className="demo-text">
+                                    "Meeting with <span className="corrected">Priya Sharma</span> and <span className="corrected">John Chen</span> about the <span className="corrected">Kubernetes</span> deployment. 
+                                    She mentioned that <span className="corrected">Acme Corp</span> wants to move to the cloud by <span className="corrected">Q1</span>. 
+                                    Need to follow up with <span className="corrected">DevOps</span> team about the timeline."
+                                </p>
+                                <div className="demo-meta">
+                                    <span className="meta-item">📂 Routed to: ~/work/acme-corp/notes/</span>
+                                    <span className="meta-item">🏷️ Tags: meeting, kubernetes, acme</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            {/* Context System - Hero Feature */}
+            <section className="context-section">
+                <div className="container">
+                    <div className="context-header">
+                        <h2 className="section-title">The Context System</h2>
+                        <p className="section-subtitle">
+                            Protokoll learns your world. Define people, projects, companies, and technical terms once.
+                            <br/>Every transcription gets smarter automatically.
+                        </p>
+                    </div>
+                    
+                    <div className="context-demo">
+                        <div className="context-files">
+                            <div className="file-card">
+                                <div className="file-header">
+                                    <span className="file-icon">👤</span>
+                                    <span className="file-name">people/priya-sharma.yaml</span>
+                                </div>
+                                <pre className="file-content">{`id: priya-sharma
+name: Priya Sharma
+role: Engineering Manager
+company: acme-corp
+sounds_like:
+  - "pre a"
+  - "pria"
+  - "preeya"`}</pre>
+                            </div>
+                            <div className="file-card">
+                                <div className="file-header">
+                                    <span className="file-icon">🏢</span>
+                                    <span className="file-name">companies/acme-corp.yaml</span>
+                                </div>
+                                <pre className="file-content">{`id: acme-corp
+name: Acme Corporation
+sounds_like:
+  - "acme"
+  - "a c m e"
+  - "acme corp"`}</pre>
+                            </div>
+                            <div className="file-card">
+                                <div className="file-header">
+                                    <span className="file-icon">📋</span>
+                                    <span className="file-name">projects/work.yaml</span>
+                                </div>
+                                <pre className="file-content">{`id: work
+destination: ~/work/notes
+triggers:
+  - "work meeting"
+  - "standup"
+  - "sprint"`}</pre>
+                            </div>
+                            <div className="file-card">
+                                <div className="file-header">
+                                    <span className="file-icon">📚</span>
+                                    <span className="file-name">terms/kubernetes.yaml</span>
+                                </div>
+                                <pre className="file-content">{`id: kubernetes
+term: Kubernetes
+sounds_like:
+  - "cube er net ease"
+  - "kube"
+  - "k8s"`}</pre>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div className="context-features">
+                        <div className="context-feature">
+                            <div className="feature-number">01</div>
+                            <h3>Hierarchical Discovery</h3>
+                            <p>Context files are discovered walking up the directory tree. Project-specific context overrides global settings.</p>
+                        </div>
+                        <div className="context-feature">
+                            <div className="feature-number">02</div>
+                            <h3>Phonetic Matching</h3>
+                            <p>The <code>sounds_like</code> field maps common mishearings to correct spellings automatically.</p>
+                        </div>
+                        <div className="context-feature">
+                            <div className="feature-number">03</div>
+                            <h3>Grows Over Time</h3>
+                            <p>Add new people and terms as you encounter them. Each session makes Protokoll smarter.</p>
+                </div>
+                </div>
+                </div>
+            </section>
+
+            {/* Interactive Mode */}
+            <section className="interactive-section">
+                <div className="container">
+                    <div className="interactive-content">
+                        <div className="interactive-text">
+                            <h2 className="section-title">Interactive Learning Mode</h2>
+                            <p className="section-subtitle">
+                                Don't know who "pre a" is? Protokoll asks. Then remembers forever.
+                            </p>
+                            
+                            <div className="terminal-demo">
+                                <div className="terminal-header">
+                                    <span className="terminal-dot red"></span>
+                                    <span className="terminal-dot yellow"></span>
+                                    <span className="terminal-dot green"></span>
+                                    <span className="terminal-title">protokoll --interactive</span>
+                                </div>
+                                <div className="terminal-body">
+                                    <div className="terminal-line">
+                                        <span className="terminal-prompt">?</span>
+                                        <span className="terminal-question">Name Clarification Needed</span>
+                                    </div>
+                                    <div className="terminal-line indent">
+                                        <span className="terminal-dim">Context: "...meeting with pre a about..."</span>
+                                    </div>
+                                    <div className="terminal-line indent">
+                                        <span className="terminal-dim">Detected: </span>
+                                        <span className="terminal-highlight">"pre a"</span>
+                                    </div>
+                                    <div className="terminal-line">
+                                        <span className="terminal-prompt">→</span>
+                                        <span className="terminal-input">Enter correct spelling: </span>
+                                        <span className="terminal-user">Priya Sharma</span>
+                                    </div>
+                                    <div className="terminal-line">
+                                        <span className="terminal-prompt">?</span>
+                                        <span className="terminal-input">Remember for future? </span>
+                                        <span className="terminal-success">Yes</span>
+                                    </div>
+                                    <div className="terminal-line">
+                                        <span className="terminal-success">✓ Saved to ~/.protokoll/people/priya-sharma.yaml</span>
+                                    </div>
+                                </div>
+                            </div>
+                </div>
+
+                        <div className="interactive-features">
+                            <div className="interactive-feature">
+                                <span className="feature-icon">🔤</span>
+                                <div>
+                                    <h4>Name Corrections</h4>
+                                    <p>Fix misspelled names and save phonetic variants</p>
+                                </div>
+                            </div>
+                            <div className="interactive-feature">
+                                <span className="feature-icon">👥</span>
+                                <div>
+                                    <h4>New People</h4>
+                                    <p>Add company, role, and context for unknown people</p>
+                                </div>
+                            </div>
+                            <div className="interactive-feature">
+                                <span className="feature-icon">📂</span>
+                                <div>
+                                    <h4>Routing Decisions</h4>
+                                    <p>Confirm or override where notes should be saved</p>
+                                </div>
+                            </div>
+                            <div className="interactive-feature">
+                                <span className="feature-icon">📖</span>
+                                <div>
+                                    <h4>Vocabulary</h4>
+                                    <p>Define technical terms and domain-specific language</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            {/* Self-Reflection */}
+            <section className="reflection-section">
+                <div className="container">
+                    <h2 className="section-title">Self-Reflection Reports</h2>
+                    <p className="section-subtitle">
+                        Protokoll tells you how well it's working. Enabled by default.
+                    </p>
+                    
+                    <div className="reflection-demo">
+                        <div className="reflection-card">
+                            <div className="reflection-header">
+                                <span>📊</span> Self-Reflection Report
+                            </div>
+                            <div className="reflection-body">
+                                <div className="reflection-row">
+                                    <span className="reflection-label">Duration</span>
+                                    <span className="reflection-value">8.3s</span>
+                                </div>
+                                <div className="reflection-row">
+                                    <span className="reflection-label">Tool Calls</span>
+                                    <span className="reflection-value">7</span>
+                                </div>
+                                <div className="reflection-row">
+                                    <span className="reflection-label">Confidence</span>
+                                    <span className="reflection-value highlight">92.5%</span>
+                                </div>
+                                <div className="reflection-divider"></div>
+                                <div className="reflection-tools">
+                                    <div className="tool-row">
+                                        <span>lookup_person</span>
+                                        <span className="tool-success">3 calls - 100%</span>
+                                    </div>
+                                    <div className="tool-row">
+                                        <span>lookup_project</span>
+                                        <span className="tool-success">2 calls - 100%</span>
+                                    </div>
+                                    <div className="tool-row">
+                                        <span>route_note</span>
+                                        <span className="tool-success">1 call - 100%</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            {/* Routing System */}
+            <section className="routing-section">
+                <div className="container">
+                    <h2 className="section-title">Intelligent Routing</h2>
+                    <p className="section-subtitle">
+                        Notes automatically go to the right place. Work stays in work folders. Personal stays personal.
+                    </p>
+                    
+                    <div className="routing-demo">
+                        <div className="routing-flow">
+                            <div className="routing-input">
+                                <div className="routing-icon">🎙️</div>
+                                <span>"This is a work meeting about the sprint planning..."</span>
+                            </div>
+                            <div className="routing-arrow">
+                                <div className="arrow-line"></div>
+                                <div className="routing-signals">
+                                    <span className="signal">trigger: "work meeting"</span>
+                                    <span className="signal">trigger: "sprint"</span>
+                                    <span className="signal">confidence: 95%</span>
+                                </div>
+                            </div>
+                            <div className="routing-output">
+                                <div className="routing-icon">📁</div>
+                                <span>~/work/notes/2026/01/sprint-planning.md</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div className="routing-features">
+                        <div className="routing-feature">
+                            <h4>Multi-Signal Classification</h4>
+                            <p>Analyzes trigger phrases, mentioned people, companies, and topic keywords</p>
+                        </div>
+                        <div className="routing-feature">
+                            <h4>Confidence Scoring</h4>
+                            <p>Each signal contributes to a confidence score. Highest confidence wins.</p>
+                        </div>
+                        <div className="routing-feature">
+                            <h4>Flexible Structure</h4>
+                            <p>Organize by year, month, day, or flat. Choose what works for you.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            {/* Quick Start */}
+            <section className="quickstart-section">
+                <div className="container">
+                    <h2 className="section-title">Get Started in 60 Seconds</h2>
+                    
+                    <div className="quickstart-steps">
+                        <div className="step">
+                            <div className="step-number">1</div>
+                            <div className="step-content">
+                                <h4>Install</h4>
+                                <code>npm install -g @redaksjon/protokoll</code>
+                            </div>
+                        </div>
+                        <div className="step">
+                            <div className="step-number">2</div>
+                            <div className="step-content">
+                                <h4>Set API Key</h4>
+                                <code>export OPENAI_API_KEY='sk-...'</code>
+                            </div>
+                        </div>
+                        <div className="step">
+                            <div className="step-number">3</div>
+                            <div className="step-content">
+                                <h4>Transcribe</h4>
+                                <code>protokoll --input-directory ~/recordings</code>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div className="quickstart-examples">
+                        <h3>Common Commands</h3>
+                        <div className="code-block">
+                            <div className="code-line"><span className="code-comment"># Basic transcription (self-reflection enabled by default)</span></div>
+                            <div className="code-line">protokoll --input-directory ~/recordings</div>
+                            <div className="code-line"></div>
+                            <div className="code-line"><span className="code-comment"># Interactive mode - learn as you go</span></div>
+                            <div className="code-line">protokoll --input-directory ~/recordings --interactive</div>
+                            <div className="code-line"></div>
+                            <div className="code-line"><span className="code-comment"># Use Claude for better name recognition</span></div>
+                            <div className="code-line">protokoll --input-directory ~/recordings --model claude-3-5-sonnet</div>
+                            <div className="code-line"></div>
+                            <div className="code-line"><span className="code-comment"># Debug mode with verbose output</span></div>
+                            <div className="code-line">protokoll --input-directory ~/recordings --debug --verbose</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            {/* Supported Models */}
+            <section className="models-section">
+                <div className="container">
+                    <h2 className="section-title">Supported Models</h2>
+                    <div className="models-grid">
+                        <div className="model-group">
+                            <h4>OpenAI</h4>
+                            <ul>
+                                <li><strong>gpt-5.2</strong> <span className="model-badge default">default</span></li>
+                                <li>gpt-5.1, gpt-5, gpt-4o</li>
+                                <li>o1, o1-mini</li>
+                            </ul>
+                        </div>
+                        <div className="model-group">
+                            <h4>Anthropic</h4>
+                            <ul>
+                                <li><strong>claude-3-5-sonnet</strong> <span className="model-badge recommended">recommended</span></li>
+                                <li>claude-3-opus</li>
+                                <li>claude-3-haiku</li>
+                            </ul>
+                        </div>
+                        <div className="model-group">
+                            <h4>Transcription</h4>
+                            <ul>
+                                <li><strong>whisper-1</strong> <span className="model-badge default">default</span></li>
+                                <li>gpt-4o-transcribe</li>
                 </ul>
+                        </div>
+                    </div>
+                </div>
             </section>
 
+            {/* CTA */}
             <section className="cta-section">
-                <h2>Get Started Today</h2>
-                <p>Transform your audio recordings into intelligent, actionable notes.</p>
-                <a href="https://www.npmjs.com/package/@jankhoj/matnava" className="cta-button" target="_blank" rel="noopener noreferrer">
+                <div className="container">
+                    <h2>Stop Fighting Your Transcripts</h2>
+                    <p>Transform your audio recordings into intelligent, perfectly organized notes.</p>
+                    <div className="cta-buttons">
+                        <a href="https://www.npmjs.com/package/@redaksjon/protokoll" className="btn btn-primary btn-large" target="_blank" rel="noopener noreferrer">
                     Install from NPM
                 </a>
-                <a href="https://github.com/jafarisimran/matnava" className="cta-button" target="_blank" rel="noopener noreferrer">
+                        <a href="https://github.com/redaksjon/protokoll" className="btn btn-secondary btn-large" target="_blank" rel="noopener noreferrer">
                     View on GitHub
                 </a>
+                    </div>
+                </div>
             </section>
+
+            <footer className="footer">
+                <div className="container">
+                    <p>Apache 2.0 License | Built by <a href="https://github.com/redaksjon">Redaksjon</a></p>
+                </div>
+            </footer>
         </div>
     )
 }

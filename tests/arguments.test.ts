@@ -103,7 +103,9 @@ const mockCardigantimeInstance = {
     // @ts-ignore
     read: vi.fn().mockResolvedValue({
         configDirectory: 'test-config-dir'
-    } as any)
+    } as any),
+    checkConfig: vi.fn().mockResolvedValue(undefined),
+    generateConfig: vi.fn().mockResolvedValue(undefined),
 };
 
 // Load all dynamic imports before tests
@@ -117,6 +119,7 @@ describe('arguments', () => {
         vi.clearAllMocks();
         process.env.OPENAI_API_KEY = 'test-api-key';
         mockIsDirectoryReadable.mockReturnValue(true);
+        mockIsDirectoryWritable.mockReturnValue(true);
 
         // Reset the mock commander opts value
         defaultCommanderMock.opts.mockReturnValue({
@@ -136,6 +139,8 @@ describe('arguments', () => {
             overrides: false,
             classifyModel: 'gpt-4o-mini',
             composeModel: 'o1-mini',
+            tempDirectory: '/tmp',
+            maxAudioSize: 26214400,
         });
     });
 
@@ -167,6 +172,7 @@ describe('arguments', () => {
                 overrides: false,
                 classifyModel: 'gpt-4o-mini',
                 composeModel: 'o1-mini',
+                tempDirectory: '/tmp',
             });
 
             await expect(configure(mockDreadcabinetInstance, mockCardigantimeInstance)).rejects.toThrow('OpenAI API key is required');
@@ -190,6 +196,7 @@ describe('arguments', () => {
                 overrides: false,
                 classifyModel: 'gpt-4o-mini',
                 composeModel: 'o1-mini',
+                tempDirectory: '/tmp',
                 // configDir is missing
             });
 
@@ -216,6 +223,7 @@ describe('arguments', () => {
                 overrides: false,
                 classifyModel: 'gpt-4o-mini',
                 composeModel: 'o1-mini',
+                tempDirectory: '/tmp',
                 // transcriptionModel is missing
             });
 
@@ -243,7 +251,8 @@ describe('arguments', () => {
                 overrides: false,
                 classifyModel: 'gpt-4o-mini',
                 composeModel: 'o1-mini',
-                contextDirectories: ['invalid-dir']
+                contextDirectories: ['invalid-dir'],
+                tempDirectory: '/tmp',
             });
 
             // Mock the directory check to return false for the invalid directory
@@ -269,6 +278,7 @@ describe('arguments', () => {
                 inputDirectory: 'test-input-directory',
                 outputDirectory: 'test-output-directory',
                 audioExtensions: ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'],
+                tempDirectory: '/tmp',
                 // Following optional parameters are missing
                 // configDir
                 // overrides
@@ -283,6 +293,531 @@ describe('arguments', () => {
             expect(config.configDirectory).toBeDefined();
             expect(config.overrides).toBeDefined();
             expect(config.transcriptionModel).toBeDefined();
+        });
+
+        test('should handle maxAudioSize as string and convert to number', async () => {
+            defaultCommanderMock.opts.mockReturnValue({
+                dryRun: false,
+                verbose: false,
+                debug: false,
+                openaiApiKey: 'test-api-key',
+                timezone: 'America/New_York',
+                transcriptionModel: 'whisper-1',
+                model: 'gpt-4o',
+                contentTypes: ['diff', 'log'],
+                recursive: false,
+                inputDirectory: 'test-input-directory',
+                outputDirectory: 'test-output-directory',
+                audioExtensions: ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'],
+                configDirectory: 'test-config-dir',
+                overrides: false,
+                classifyModel: 'gpt-4o-mini',
+                composeModel: 'o1-mini',
+                tempDirectory: '/tmp',
+                maxAudioSize: '52428800', // 50MB as string
+            });
+
+            const [config] = await configure(mockDreadcabinetInstance, mockCardigantimeInstance);
+
+            expect(typeof config.maxAudioSize).toBe('number');
+            expect(config.maxAudioSize).toBe(52428800);
+        });
+
+        test('should handle invalid maxAudioSize gracefully', async () => {
+            defaultCommanderMock.opts.mockReturnValue({
+                dryRun: false,
+                verbose: false,
+                debug: false,
+                openaiApiKey: 'test-api-key',
+                timezone: 'America/New_York',
+                transcriptionModel: 'whisper-1',
+                model: 'gpt-4o',
+                contentTypes: ['diff', 'log'],
+                recursive: false,
+                inputDirectory: 'test-input-directory',
+                outputDirectory: 'test-output-directory',
+                audioExtensions: ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'],
+                configDirectory: 'test-config-dir',
+                overrides: false,
+                classifyModel: 'gpt-4o-mini',
+                composeModel: 'o1-mini',
+                tempDirectory: '/tmp',
+                maxAudioSize: 'invalid-size', // Invalid string
+            });
+
+            const [config] = await configure(mockDreadcabinetInstance, mockCardigantimeInstance);
+
+            expect(typeof config.maxAudioSize).toBe('number');
+            // Should use default when invalid
+        });
+
+        test('should throw error when temp directory is not writable', async () => {
+            mockIsDirectoryWritable.mockReturnValue(false);
+            defaultCommanderMock.opts.mockReturnValue({
+                dryRun: false,
+                verbose: false,
+                debug: false,
+                openaiApiKey: 'test-api-key',
+                timezone: 'America/New_York',
+                transcriptionModel: 'whisper-1',
+                model: 'gpt-4o',
+                contentTypes: ['diff', 'log'],
+                recursive: false,
+                inputDirectory: 'test-input-directory',
+                outputDirectory: 'test-output-directory',
+                audioExtensions: ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'],
+                configDirectory: 'test-config-dir',
+                overrides: false,
+                classifyModel: 'gpt-4o-mini',
+                composeModel: 'o1-mini',
+                tempDirectory: '/readonly/tmp',
+            });
+
+            await expect(configure(mockDreadcabinetInstance, mockCardigantimeInstance)).rejects.toThrow('Temp directory does not exist or is not writable');
+        });
+
+        test('should throw error when maxAudioSize is invalid', async () => {
+            defaultCommanderMock.opts.mockReturnValue({
+                dryRun: false,
+                verbose: false,
+                debug: false,
+                openaiApiKey: 'test-api-key',
+                timezone: 'America/New_York',
+                transcriptionModel: 'whisper-1',
+                model: 'gpt-4o',
+                contentTypes: ['diff', 'log'],
+                recursive: false,
+                inputDirectory: 'test-input-directory',
+                outputDirectory: 'test-output-directory',
+                audioExtensions: ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'],
+                configDirectory: 'test-config-dir',
+                overrides: false,
+                classifyModel: 'gpt-4o-mini',
+                composeModel: 'o1-mini',
+                tempDirectory: '/tmp',
+                maxAudioSize: -1, // Negative number
+            });
+
+            await expect(configure(mockDreadcabinetInstance, mockCardigantimeInstance)).rejects.toThrow('Invalid maxAudioSize');
+        });
+
+        test('should handle --check-config flag', async () => {
+            process.argv.push('--check-config');
+            
+            try {
+                const [config, secureConfig] = await configure(mockDreadcabinetInstance, mockCardigantimeInstance);
+                expect(config).toBeDefined();
+                expect(secureConfig).toBeDefined();
+                expect(mockCardigantimeInstance.checkConfig).toHaveBeenCalled();
+            } finally {
+                process.argv = process.argv.filter(arg => arg !== '--check-config');
+            }
+        });
+
+        test('should handle --init-config flag', async () => {
+            process.argv.push('--init-config');
+            
+            try {
+                const [config, secureConfig] = await configure(mockDreadcabinetInstance, mockCardigantimeInstance);
+                expect(config).toBeDefined();
+                expect(secureConfig).toBeDefined();
+                expect(mockCardigantimeInstance.generateConfig).toHaveBeenCalled();
+            } finally {
+                process.argv = process.argv.filter(arg => arg !== '--init-config');
+            }
+        });
+
+        test('should handle interactive flag', async () => {
+            defaultCommanderMock.opts.mockReturnValue({
+                dryRun: false,
+                verbose: false,
+                debug: false,
+                openaiApiKey: 'test-api-key',
+                timezone: 'America/New_York',
+                transcriptionModel: 'whisper-1',
+                model: 'gpt-4o',
+                contentTypes: ['diff', 'log'],
+                recursive: false,
+                inputDirectory: 'test-input-directory',
+                outputDirectory: 'test-output-directory',
+                audioExtensions: ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'],
+                configDirectory: 'test-config-dir',
+                overrides: false,
+                classifyModel: 'gpt-4o-mini',
+                composeModel: 'o1-mini',
+                tempDirectory: '/tmp',
+                interactive: true,
+            });
+
+            const [config] = await configure(mockDreadcabinetInstance, mockCardigantimeInstance);
+            expect(config.interactive).toBe(true);
+        });
+
+        test('should handle selfReflection flag', async () => {
+            defaultCommanderMock.opts.mockReturnValue({
+                dryRun: false,
+                verbose: false,
+                debug: false,
+                openaiApiKey: 'test-api-key',
+                timezone: 'America/New_York',
+                transcriptionModel: 'whisper-1',
+                model: 'gpt-4o',
+                contentTypes: ['diff', 'log'],
+                recursive: false,
+                inputDirectory: 'test-input-directory',
+                outputDirectory: 'test-output-directory',
+                audioExtensions: ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'],
+                configDirectory: 'test-config-dir',
+                overrides: false,
+                classifyModel: 'gpt-4o-mini',
+                composeModel: 'o1-mini',
+                tempDirectory: '/tmp',
+                selfReflection: false,
+            });
+
+            const [config] = await configure(mockDreadcabinetInstance, mockCardigantimeInstance);
+            expect(config.selfReflection).toBe(false);
+        });
+
+        test('should handle processedDirectory option', async () => {
+            defaultCommanderMock.opts.mockReturnValue({
+                dryRun: false,
+                verbose: false,
+                debug: false,
+                openaiApiKey: 'test-api-key',
+                timezone: 'America/New_York',
+                transcriptionModel: 'whisper-1',
+                model: 'gpt-4o',
+                contentTypes: ['diff', 'log'],
+                recursive: false,
+                inputDirectory: 'test-input-directory',
+                outputDirectory: 'test-output-directory',
+                audioExtensions: ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'],
+                configDirectory: 'test-config-dir',
+                overrides: false,
+                classifyModel: 'gpt-4o-mini',
+                composeModel: 'o1-mini',
+                tempDirectory: '/tmp',
+                processedDirectory: '/processed',
+            });
+
+            const [config] = await configure(mockDreadcabinetInstance, mockCardigantimeInstance);
+            expect(config.processedDirectory).toBe('/processed');
+        });
+
+        test('should throw error for empty model name', async () => {
+            defaultCommanderMock.opts.mockReturnValue({
+                dryRun: false,
+                verbose: false,
+                debug: false,
+                openaiApiKey: 'test-api-key',
+                timezone: 'America/New_York',
+                transcriptionModel: 'whisper-1',
+                model: '   ', // Empty/whitespace model
+                contentTypes: ['diff', 'log'],
+                recursive: false,
+                inputDirectory: 'test-input-directory',
+                outputDirectory: 'test-output-directory',
+                audioExtensions: ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'],
+                configDirectory: 'test-config-dir',
+                overrides: false,
+                classifyModel: 'gpt-4o-mini',
+                composeModel: 'o1-mini',
+                tempDirectory: '/tmp',
+            });
+
+            await expect(configure(mockDreadcabinetInstance, mockCardigantimeInstance)).rejects.toThrow('Model for model cannot be empty');
+        });
+
+        test('should successfully configure with all options', async () => {
+            defaultCommanderMock.opts.mockReturnValue({
+                dryRun: false,
+                verbose: false,
+                debug: false,
+                openaiApiKey: 'test-api-key',
+                timezone: 'America/New_York',
+                transcriptionModel: 'whisper-1',
+                model: 'gpt-4o',
+                contentTypes: ['diff', 'log'],
+                recursive: false,
+                inputDirectory: 'test-input-directory',
+                outputDirectory: 'test-output-directory',
+                audioExtensions: ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'],
+                configDirectory: 'test-config-dir',
+                overrides: false,
+                classifyModel: 'gpt-4o-mini',
+                composeModel: 'o1-mini',
+                tempDirectory: '/tmp',
+                maxAudioSize: 26214400,
+            });
+
+            const [config, secureConfig] = await configure(mockDreadcabinetInstance, mockCardigantimeInstance);
+            
+            expect(config).toBeDefined();
+            expect(config.model).toBe('gpt-4o');
+            expect(config.transcriptionModel).toBe('whisper-1');
+            expect(secureConfig.openaiApiKey).toBe('test-api-key');
+        });
+
+        test('should use default model when model is not provided in CLI', async () => {
+            defaultCommanderMock.opts.mockReturnValue({
+                dryRun: false,
+                verbose: false,
+                debug: false,
+                openaiApiKey: 'test-api-key',
+                timezone: 'America/New_York',
+                transcriptionModel: 'whisper-1',
+                // model is missing - should use default
+                contentTypes: ['diff', 'log'],
+                recursive: false,
+                inputDirectory: 'test-input-directory',
+                outputDirectory: 'test-output-directory',
+                audioExtensions: ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'],
+                configDirectory: 'test-config-dir',
+                overrides: false,
+                classifyModel: 'gpt-4o-mini',
+                composeModel: 'o1-mini',
+                tempDirectory: '/tmp',
+            });
+
+            const [config] = await configure(mockDreadcabinetInstance, mockCardigantimeInstance);
+            // Should use default model from PROTOKOLL_DEFAULTS
+            expect(config.model).toBeDefined();
+        });
+
+        test('should use default tempDirectory when not provided in CLI', async () => {
+            defaultCommanderMock.opts.mockReturnValue({
+                dryRun: false,
+                verbose: false,
+                debug: false,
+                openaiApiKey: 'test-api-key',
+                timezone: 'America/New_York',
+                transcriptionModel: 'whisper-1',
+                model: 'gpt-4o',
+                contentTypes: ['diff', 'log'],
+                recursive: false,
+                inputDirectory: 'test-input-directory',
+                outputDirectory: 'test-output-directory',
+                audioExtensions: ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'],
+                configDirectory: 'test-config-dir',
+                overrides: false,
+                classifyModel: 'gpt-4o-mini',
+                composeModel: 'o1-mini',
+                // tempDirectory is missing - should use system default
+            });
+
+            const [config] = await configure(mockDreadcabinetInstance, mockCardigantimeInstance);
+            // Should use default temp directory from system
+            expect(config.tempDirectory).toBeDefined();
+        });
+
+        test('should use API key from environment when not in secure config', async () => {
+            // Set up environment with API key
+            process.env.OPENAI_API_KEY = 'env-api-key';
+            
+            defaultCommanderMock.opts.mockReturnValue({
+                dryRun: false,
+                verbose: false,
+                debug: false,
+                // No openaiApiKey in options - should use env
+                timezone: 'America/New_York',
+                transcriptionModel: 'whisper-1',
+                model: 'gpt-4o',
+                contentTypes: ['diff', 'log'],
+                recursive: false,
+                inputDirectory: 'test-input-directory',
+                outputDirectory: 'test-output-directory',
+                audioExtensions: ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'],
+                configDirectory: 'test-config-dir',
+                overrides: false,
+                classifyModel: 'gpt-4o-mini',
+                composeModel: 'o1-mini',
+                tempDirectory: '/tmp',
+            });
+
+            const [config, secureConfig] = await configure(mockDreadcabinetInstance, mockCardigantimeInstance);
+            
+            expect(secureConfig.openaiApiKey).toBe('env-api-key');
+        });
+
+        test('should handle maxAudioSize as number from CLI', async () => {
+            defaultCommanderMock.opts.mockReturnValue({
+                dryRun: false,
+                verbose: false,
+                debug: false,
+                openaiApiKey: 'test-api-key',
+                timezone: 'America/New_York',
+                transcriptionModel: 'whisper-1',
+                model: 'gpt-4o',
+                contentTypes: ['diff', 'log'],
+                recursive: false,
+                inputDirectory: 'test-input-directory',
+                outputDirectory: 'test-output-directory',
+                audioExtensions: ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'],
+                configDirectory: 'test-config-dir',
+                overrides: false,
+                classifyModel: 'gpt-4o-mini',
+                composeModel: 'o1-mini',
+                tempDirectory: '/tmp',
+                maxAudioSize: 104857600, // 100MB as number
+            });
+
+            const [config] = await configure(mockDreadcabinetInstance, mockCardigantimeInstance);
+
+            expect(typeof config.maxAudioSize).toBe('number');
+            expect(config.maxAudioSize).toBe(104857600);
+        });
+
+        test('should throw error for empty transcription model name', async () => {
+            defaultCommanderMock.opts.mockReturnValue({
+                dryRun: false,
+                verbose: false,
+                debug: false,
+                openaiApiKey: 'test-api-key',
+                timezone: 'America/New_York',
+                transcriptionModel: '   ', // Empty/whitespace
+                model: 'gpt-4o',
+                contentTypes: ['diff', 'log'],
+                recursive: false,
+                inputDirectory: 'test-input-directory',
+                outputDirectory: 'test-output-directory',
+                audioExtensions: ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'],
+                configDirectory: 'test-config-dir',
+                overrides: false,
+                classifyModel: 'gpt-4o-mini',
+                composeModel: 'o1-mini',
+                tempDirectory: '/tmp',
+            });
+
+            await expect(configure(mockDreadcabinetInstance, mockCardigantimeInstance)).rejects.toThrow('Model for transcriptionModel cannot be empty');
+        });
+
+        test('should handle valid context directories', async () => {
+            mockIsDirectoryReadable.mockReturnValue(true);
+            defaultCommanderMock.opts.mockReturnValue({
+                dryRun: false,
+                verbose: false,
+                debug: false,
+                openaiApiKey: 'test-api-key',
+                timezone: 'America/New_York',
+                transcriptionModel: 'whisper-1',
+                model: 'gpt-4o',
+                contentTypes: ['diff', 'log'],
+                recursive: false,
+                inputDirectory: 'test-input-directory',
+                outputDirectory: 'test-output-directory',
+                audioExtensions: ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'],
+                configDirectory: 'test-config-dir',
+                overrides: false,
+                classifyModel: 'gpt-4o-mini',
+                composeModel: 'o1-mini',
+                tempDirectory: '/tmp',
+                contextDirectories: ['/valid/context/dir'],
+            });
+
+            const [config] = await configure(mockDreadcabinetInstance, mockCardigantimeInstance);
+            
+            expect(config.contextDirectories).toContain('/valid/context/dir');
+        });
+
+        test('should handle debug flag', async () => {
+            defaultCommanderMock.opts.mockReturnValue({
+                dryRun: false,
+                verbose: false,
+                debug: true,
+                openaiApiKey: 'test-api-key',
+                timezone: 'America/New_York',
+                transcriptionModel: 'whisper-1',
+                model: 'gpt-4o',
+                contentTypes: ['diff', 'log'],
+                recursive: false,
+                inputDirectory: 'test-input-directory',
+                outputDirectory: 'test-output-directory',
+                audioExtensions: ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'],
+                configDirectory: 'test-config-dir',
+                overrides: false,
+                classifyModel: 'gpt-4o-mini',
+                composeModel: 'o1-mini',
+                tempDirectory: '/tmp',
+            });
+
+            const [config] = await configure(mockDreadcabinetInstance, mockCardigantimeInstance);
+            expect(config.debug).toBe(true);
+        });
+
+        test('should handle verbose flag', async () => {
+            defaultCommanderMock.opts.mockReturnValue({
+                dryRun: false,
+                verbose: true,
+                debug: false,
+                openaiApiKey: 'test-api-key',
+                timezone: 'America/New_York',
+                transcriptionModel: 'whisper-1',
+                model: 'gpt-4o',
+                contentTypes: ['diff', 'log'],
+                recursive: false,
+                inputDirectory: 'test-input-directory',
+                outputDirectory: 'test-output-directory',
+                audioExtensions: ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'],
+                configDirectory: 'test-config-dir',
+                overrides: false,
+                classifyModel: 'gpt-4o-mini',
+                composeModel: 'o1-mini',
+                tempDirectory: '/tmp',
+            });
+
+            const [config] = await configure(mockDreadcabinetInstance, mockCardigantimeInstance);
+            expect(config.verbose).toBe(true);
+        });
+
+        test('should handle dryRun flag', async () => {
+            defaultCommanderMock.opts.mockReturnValue({
+                dryRun: true,
+                verbose: false,
+                debug: false,
+                openaiApiKey: 'test-api-key',
+                timezone: 'America/New_York',
+                transcriptionModel: 'whisper-1',
+                model: 'gpt-4o',
+                contentTypes: ['diff', 'log'],
+                recursive: false,
+                inputDirectory: 'test-input-directory',
+                outputDirectory: 'test-output-directory',
+                audioExtensions: ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'],
+                configDirectory: 'test-config-dir',
+                overrides: false,
+                classifyModel: 'gpt-4o-mini',
+                composeModel: 'o1-mini',
+                tempDirectory: '/tmp',
+            });
+
+            const [config] = await configure(mockDreadcabinetInstance, mockCardigantimeInstance);
+            expect(config.dryRun).toBe(true);
+        });
+
+        test('should handle overrides flag', async () => {
+            defaultCommanderMock.opts.mockReturnValue({
+                dryRun: false,
+                verbose: false,
+                debug: false,
+                openaiApiKey: 'test-api-key',
+                timezone: 'America/New_York',
+                transcriptionModel: 'whisper-1',
+                model: 'gpt-4o',
+                contentTypes: ['diff', 'log'],
+                recursive: false,
+                inputDirectory: 'test-input-directory',
+                outputDirectory: 'test-output-directory',
+                audioExtensions: ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'],
+                configDirectory: 'test-config-dir',
+                overrides: true,
+                classifyModel: 'gpt-4o-mini',
+                composeModel: 'o1-mini',
+                tempDirectory: '/tmp',
+            });
+
+            const [config] = await configure(mockDreadcabinetInstance, mockCardigantimeInstance);
+            expect(config.overrides).toBe(true);
         });
     });
 });  

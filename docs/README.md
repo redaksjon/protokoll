@@ -1,6 +1,6 @@
-# Matnava Documentation Site
+# Protokoll Documentation Site
 
-This is a simple React documentation site for Matnava, deployed automatically to GitHub Pages.
+This is a React documentation site for Protokoll, deployed automatically to GitHub Pages.
 
 ## Local Development
 
@@ -11,27 +11,27 @@ To work on the documentation site locally:
 cd docs
 
 # Install dependencies
-pnpm install
+npm install
 
 # Start the development server
-pnpm run dev
+npm run dev
 
 # Build for production
-pnpm run build
+npm run build
 
 # Preview the production build
-pnpm run preview
+npm run preview
 ```
 
 ## Deployment
 
 The site is automatically deployed to GitHub Pages via a GitHub workflow whenever commits are pushed to the `main` branch. The workflow:
 
-1. Installs dependencies using pnpm
+1. Installs dependencies using npm
 2. Builds the React app
 3. Deploys to GitHub Pages
 
-The site will be available at: `https://[username].github.io/matnava/`
+The site will be available at: `https://redaksjon.github.io/protokoll/`
 
 ## Structure
 
@@ -46,5 +46,5 @@ To update the documentation:
 
 1. Edit `src/App.jsx` to modify content
 2. Edit `src/index.css` to modify styling
-3. Test locally with `pnpm run dev`
-4. Commit and push to trigger automatic deployment 
+3. Test locally with `npm run dev`
+4. Commit and push to trigger automatic deployment

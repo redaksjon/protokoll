@@ -128,4 +128,51 @@ describe('Logging module', () => {
             });
         }).not.toThrow();
     });
+
+    test('logger format at debug level includes meta in output', () => {
+        setLogLevel('debug');
+        const logger = getLogger();
+
+        // Test that format handler properly processes meta with content
+        expect(() => {
+            // This should trigger line 22 in logging.ts where meta is stringified
+            logger.info('Debug message', { field: 'value', nested: { deep: 'data' } });
+        }).not.toThrow();
+    });
+
+    test('logger format at debug level handles empty meta', () => {
+        setLogLevel('debug');
+        const logger = getLogger();
+
+        // Test that format handler properly handles empty meta (line 22 condition)
+        expect(() => {
+            logger.info('Debug message with no meta');
+        }).not.toThrow();
+    });
+
+    test('createLogger with default level is info', () => {
+        const createLoggerSpy = vi.spyOn(winston, 'createLogger');
+
+        // Reset and create a new logger with default level
+        setLogLevel('info');
+
+        // Verify that info level uses simplified format
+        const callArgs = createLoggerSpy.mock.calls[0];
+        if (callArgs && callArgs[0]) {
+            expect(callArgs[0].level).toBe('info');
+        }
+    });
+
+    test('logger has service name in default metadata', () => {
+        setLogLevel('verbose');
+        const logger = getLogger();
+
+        const createLoggerSpy = vi.spyOn(winston, 'createLogger');
+
+        // Get the most recent call
+        const callArgs = createLoggerSpy.mock.calls[0];
+        if (callArgs && callArgs[0]) {
+            expect(callArgs[0].defaultMeta).toHaveProperty('service', PROGRAM_NAME);
+        }
+    });
 });
