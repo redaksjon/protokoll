@@ -25,19 +25,19 @@ function App() {
 
             <section className="feature-grid">
                 <div className="feature-card">
-                    <h3>🎯 Focused</h3>
+                    <h3>Focused</h3>
                     <p>Designed specifically for intelligent audio transcription with context awareness.</p>
                 </div>
                 <div className="feature-card">
-                    <h3>🤖 AI-Powered</h3>
+                    <h3>AI-Powered</h3>
                     <p>Uses OpenAI's Whisper for transcription and GPT models for intelligent processing.</p>
                 </div>
                 <div className="feature-card">
-                    <h3>📝 Smart Output</h3>
+                    <h3>Smart Output</h3>
                     <p>Generates both structured JSON data and readable Markdown notes.</p>
                 </div>
                 <div className="feature-card">
-                    <h3>🔧 Configurable</h3>
+                    <h3>Configurable</h3>
                     <p>Customize AI instructions, output formats, and processing behavior.</p>
                 </div>
             </section>
@@ -81,11 +81,11 @@ function App() {
                 <p>For each audio file, Matnava generates:</p>
                 <div className="feature-grid">
                     <div className="feature-card">
-                        <h3>📊 JSON Classification</h3>
+                        <h3>JSON Classification</h3>
                         <p>Structured data with content type, metadata, attendees, tasks, and original transcript.</p>
                     </div>
                     <div className="feature-card">
-                        <h3>📄 Markdown Notes</h3>
+                        <h3>Markdown Notes</h3>
                         <p>Enhanced, formatted notes ready for your knowledge management system.</p>
                     </div>
                 </div>
