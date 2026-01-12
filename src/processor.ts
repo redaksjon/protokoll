@@ -3,6 +3,9 @@ import * as TranscribePhase from '@/phases/transcribe';
 import * as LocatePhase from '@/phases/locate';
 import * as Dreadcabinet from '@theunwalked/dreadcabinet';
 import { Config } from '@/protokoll';
+import * as Interactive from '@/interactive';
+import * as Context from '@/context';
+import * as Routing from '@/routing';
 
 export interface Transcription {
     text: string;
@@ -13,14 +16,156 @@ export interface Instance {
     process(file: string): Promise<void>;
 }
 
+/**
+ * Analyze transcript for potential unknown entities that need clarification
+ */
+const analyzeTranscriptForUnknowns = (
+    transcriptText: string, 
+    context: Context.ContextInstance
+): Array<{ term: string; context: string; type: Interactive.ClarificationType }> => {
+    const unknowns: Array<{ term: string; context: string; type: Interactive.ClarificationType }> = [];
+    
+    // Extract potential names (capitalized words that aren't at sentence start)
+    const namePattern = /(?<=[.!?]\s+|\n|^)(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/g;
+    const potentialNames = transcriptText.match(namePattern) || [];
+    
+    // Check each potential name against context
+    for (const name of potentialNames) {
+        const normalizedName = name.trim();
+        const searchResults = context.search(normalizedName);
+        
+        if (searchResults.length === 0) {
+            // This name isn't in our context - might need clarification
+            // Extract surrounding context (up to 50 chars before and after)
+            const index = transcriptText.indexOf(normalizedName);
+            const start = Math.max(0, index - 50);
+            const end = Math.min(transcriptText.length, index + normalizedName.length + 50);
+            const surroundingContext = transcriptText.substring(start, end);
+            
+            unknowns.push({
+                term: normalizedName,
+                context: `..."${surroundingContext}"...`,
+                type: 'new_person',
+            });
+        }
+    }
+    
+    // Also look for potential project names (things like "the X project" or "working on X")
+    const projectPattern = /(?:the\s+|working\s+on\s+|called\s+)([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)/gi;
+    let match;
+    while ((match = projectPattern.exec(transcriptText)) !== null) {
+        const projectName = match[1];
+        const searchResults = context.search(projectName);
+        
+        if (searchResults.length === 0) {
+            unknowns.push({
+                term: projectName,
+                context: match[0],
+                type: 'new_project',
+            });
+        }
+    }
+    
+    // Deduplicate by term
+    const seen = new Set<string>();
+    return unknowns.filter(u => {
+        if (seen.has(u.term.toLowerCase())) return false;
+        seen.add(u.term.toLowerCase());
+        return true;
+    });
+};
+
+/**
+ * Apply corrections from clarification responses to the transcript
+ */
+const applyCorrections = (
+    transcriptText: string,
+    corrections: Map<string, string>
+): string => {
+    let correctedText = transcriptText;
+    
+    for (const [original, corrected] of corrections) {
+        if (original !== corrected && corrected.trim() !== '') {
+            // Replace all instances of the original with the corrected version
+            const regex = new RegExp(original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+            correctedText = correctedText.replace(regex, corrected);
+        }
+    }
+    
+    return correctedText;
+};
+
 export const create = (config: Config, operator: Dreadcabinet.Operator): Instance => {
     const logger = Logging.getLogger();
+    const currentWorkingDir = globalThis.process.cwd();
 
-    const transcribePhase: TranscribePhase.Instance = TranscribePhase.create(config, operator);
     const locatePhase: LocatePhase.Instance = LocatePhase.create(config, operator);
+
+    // Initialize interactive system if enabled
+    let interactive: Interactive.InteractiveInstance | null = null;
+    let context: Context.ContextInstance | null = null;
+    let routing: Routing.RoutingInstance | null = null;
+    let transcribePhase: TranscribePhase.Instance | null = null;
+
+    const initializeAgenticSystems = async () => {
+        if (!context) {
+            logger.info('Initializing agentic systems...');
+            
+            // Initialize context system for entity lookup via tools
+            context = await Context.create({
+                startingDir: currentWorkingDir,
+            });
+            logger.info('Context system initialized - %d entities loaded', 
+                context.search('').length); // Quick way to count
+            
+            // Initialize routing system with default config
+            const defaultRouteDestination: Routing.RouteDestination = {
+                path: config.outputDirectory || 'output',
+                structure: (config.outputStructure || 'month') as Routing.FilesystemStructure,
+                filename_options: (config.outputFilenameOptions || ['date', 'time']) as Routing.FilenameOption[],
+                createDirectories: true,
+            };
+            
+            const routingConfig: Routing.RoutingConfig = {
+                default: defaultRouteDestination,
+                projects: [],  // Will be populated from context
+                conflict_resolution: 'primary',
+            };
+            
+            routing = Routing.create(routingConfig, context);
+            logger.info('Routing system initialized');
+            
+            // Create transcribe phase with dependencies for agentic mode
+            transcribePhase = TranscribePhase.create(config, operator, {
+                contextInstance: context,
+                routingInstance: routing,
+            });
+            logger.info('Agentic transcription ready - model will query context via tools');
+        }
+
+        if (config.interactive && !interactive && context) {
+            interactive = Interactive.create(
+                { 
+                    enabled: true, 
+                    defaultToSuggestion: true,
+                },
+                context
+            );
+            
+            interactive.startSession();
+            logger.info('Interactive session started');
+        }
+    };
 
     const process = async (audioFile: string) => {
         logger.verbose('Processing file %s', audioFile);
+
+        // Initialize agentic systems (context, routing, interactive)
+        await initializeAgenticSystems();
+        
+        if (!transcribePhase) {
+            throw new Error('Transcribe phase not initialized');
+        }
 
         // Locate the contents in time and on the filesystem
         logger.debug('Locating file %s', audioFile);
@@ -29,10 +174,81 @@ export const create = (config: Config, operator: Dreadcabinet.Operator): Instanc
 
         // Transcribe the audio
         logger.debug('Transcribing file %s', audioFile);
-        await transcribePhase.transcribe(creationTime, outputPath, contextPath, interimPath, transcriptionFilename, hash, audioFile);
+        const transcription = await transcribePhase.transcribe(creationTime, outputPath, contextPath, interimPath, transcriptionFilename, hash, audioFile);
+
+        // Interactive clarification phase
+        if (config.interactive && interactive && context) {
+            logger.info('Analyzing transcript for potential clarifications...');
+            
+            const unknowns = analyzeTranscriptForUnknowns(transcription.text, context);
+            
+            if (unknowns.length > 0) {
+                logger.info(`Found ${unknowns.length} potential unknown entities`);
+                
+                const corrections = new Map<string, string>();
+                
+                for (const unknown of unknowns) {
+                    const request: Interactive.ClarificationRequest = {
+                        type: unknown.type,
+                        term: unknown.term,
+                        context: unknown.context,
+                    };
+                    
+                    const response = await interactive.handleClarification(request);
+                    
+                    if (response.response && response.response !== unknown.term) {
+                        corrections.set(unknown.term, response.response);
+                        logger.debug('Correction recorded', { 
+                            original: unknown.term, 
+                            corrected: response.response 
+                        });
+                        
+                        // If user wants to remember this, save to context
+                        if (response.shouldRemember && context) {
+                            try {
+                                await context.saveEntity({
+                                    type: unknown.type === 'new_person' ? 'person' : 'project',
+                                    id: response.response.toLowerCase().replace(/\s+/g, '-'),
+                                    name: response.response,
+                                    soundsLike: [unknown.term],
+                                } as Context.Person | Context.Project);
+                                logger.info('Saved new entity to context', { name: response.response });
+                            } catch (err) {
+                                logger.warn('Could not save entity to context', { error: err });
+                            }
+                        }
+                    }
+                }
+                
+                // Apply corrections to transcript if any were made
+                if (corrections.size > 0) {
+                    const correctedText = applyCorrections(transcription.text, corrections);
+                    logger.info(`Applied ${corrections.size} corrections to transcript`);
+                    // Note: The corrections are applied in memory but the existing
+                    // transcription files are already written. The markdown file
+                    // would need to be regenerated with corrections for them to persist.
+                    // This is a limitation of the current architecture.
+                    logger.debug('Corrected transcript preview', { 
+                        preview: correctedText.substring(0, 200) 
+                    });
+                }
+            } else {
+                logger.info('No unknown entities detected - transcript looks good');
+            }
+        }
 
         logger.info('Transcription complete for file %s', audioFile);
         logger.info('Transcription saved to: %s', transcriptionFilename);
+        
+        // End interactive session if active
+        if (interactive && config.interactive) {
+            const session = interactive.endSession();
+            logger.debug('Interactive session summary', {
+                questions: session.requests.length,
+                responses: session.responses.length,
+            });
+        }
+        
         return;
     }
 
@@ -40,5 +256,3 @@ export const create = (config: Config, operator: Dreadcabinet.Operator): Instanc
         process,
     }
 }
-
-

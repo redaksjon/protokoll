@@ -6,24 +6,34 @@ import * as Media from '@/util/media';
 import * as OpenAI from '@/util/openai';
 import { stringifyJSON } from '@/util/general';
 import path from 'path';
-import { ChatCompletionMessageParam } from 'openai/resources';
-import { Chat, Formatter } from '@riotprompt/riotprompt';
-import * as TranscribePrompt from '@/prompt/transcribe';
+import * as Agentic from '@/agentic';
+import * as Reasoning from '@/reasoning';
+import * as Context from '@/context';
+import * as Routing from '@/routing';
 
 export interface Transcription {
     text: string;
     audioFileBasename: string;
+    toolsUsed?: string[];
+    agentIterations?: number;
 }
 
 export interface Instance {
     transcribe: (creation: Date, outputPath: string, contextPath: string, interimPath: string, filename: string, hash: string, audioFile: string) => Promise<Transcription>;
 }
 
-export const create = (config: Config, operator: Dreadcabinet.Operator): Instance => {
+export interface TranscribeDependencies {
+    contextInstance?: Context.ContextInstance;
+    routingInstance?: Routing.RoutingInstance;
+}
+
+export const create = (config: Config, operator: Dreadcabinet.Operator, deps?: TranscribeDependencies): Instance => {
     const logger = Logging.getLogger();
     const storage = Storage.create({ log: logger.debug });
     const media = Media.create(logger);
-    const prompts = TranscribePrompt.create(config.model as Chat.Model, config);
+    
+    // Create reasoning instance for agentic processing
+    const reasoning = Reasoning.create({ model: config.model });
 
     const transcribe = async (creation: Date, outputPath: string, contextPath: string, interimPath: string, filename: string, hash: string, audioFile: string): Promise<Transcription> => {
         if (!outputPath) {
@@ -63,6 +73,8 @@ export const create = (config: Config, operator: Dreadcabinet.Operator): Instanc
 
         // Check if audio file exceeds the size limit
         const fileSize = await media.getFileSize(audioFile);
+        const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(1);
+        logger.info('Step 1/2: Transcribing audio (%s MB)...', fileSizeMB);
         logger.debug(`Audio file size: ${fileSize} bytes, max size: ${config.maxAudioSize} bytes`);
 
         let transcription: OpenAI.Transcription;
@@ -136,49 +148,73 @@ export const create = (config: Config, operator: Dreadcabinet.Operator): Instanc
         await storage.writeFile(transcriptOutputPath, stringifyJSON(transcription), 'utf8');
         logger.debug('Wrote transcription to %s', transcriptOutputPath);
 
-        // Create markdown version of the transcript
+        // Create markdown version of the transcript using agentic approach
         const markdownOutputFilename = transcriptOutputFilename.replace('.json', '.md');
         const markdownOutputPath = path.join(outputPath, markdownOutputFilename);
 
+        let toolsUsed: string[] = [];
+        let agentIterations = 0;
+
         // Only create the markdown file if it doesn't already exist
         if (!await storage.exists(markdownOutputPath)) {
-            logger.info('Creating Markdown version of the transcription...');
+            logger.info('Step 2/2: Processing transcript with agentic reasoning...');
+            logger.info('Transcript length: %d characters - model will use tools to query context as needed', transcription.text.length);
 
-            // Create a prompt for the transcription formatting task
-            const prompt = await prompts.createTranscribePrompt(transcription.text);
-
-            // Format the prompt using the override utility
-            const formatter = Formatter.create();
-            const chatRequest: Chat.Request = formatter.formatPrompt(config.model as Chat.Model, prompt);
-
-            // Debug file paths for the request and response
-            const requestDebugFile = config.debug ?
-                path.join(interimPath, `${baseDebugFilename}.markdown.request.json`) :
+            // Debug file for agentic session
+            const agenticDebugFile = config.debug ?
+                path.join(interimPath, `${baseDebugFilename}.agentic.session.json`) :
                 undefined;
 
-            const responseDebugFile = config.debug ?
-                path.join(interimPath, `${baseDebugFilename}.markdown.response.json`) :
-                undefined;
+            let markdownContent: string;
 
-            // Write debug file for the request if in debug mode
-            if (config.debug && requestDebugFile) {
-                await storage.writeFile(requestDebugFile, stringifyJSON(chatRequest), 'utf8');
-                logger.debug('Wrote chat request to %s', requestDebugFile);
-            }
+            // Use agentic executor if we have context/routing instances
+            if (deps?.contextInstance && deps?.routingInstance) {
+                logger.info('Using agentic mode - model will call tools to look up people, projects, etc.');
+                
+                const executor = Agentic.create(reasoning, {
+                    transcriptText: transcription.text,
+                    audioDate: creation,
+                    sourceFile: audioFile,
+                    contextInstance: deps.contextInstance,
+                    routingInstance: deps.routingInstance,
+                    interactiveMode: config.interactive ?? false,
+                });
 
-            // Call the model to convert the transcription to markdown
-            const markdownContent = await OpenAI.createCompletion(
-                chatRequest.messages as ChatCompletionMessageParam[],
-                {
-                    model: config.model,
-                    debug: config.debug,
-                    debugFile: responseDebugFile
+                const result = await executor.process(transcription.text);
+                markdownContent = result.enhancedText;
+                toolsUsed = result.toolsUsed;
+                agentIterations = result.iterations;
+
+                logger.info('Agentic processing complete: %d iterations, tools used: %s', 
+                    agentIterations, 
+                    toolsUsed.length > 0 ? toolsUsed.join(', ') : 'none');
+
+                // Save agentic session debug info
+                if (config.debug && agenticDebugFile) {
+                    await storage.writeFile(agenticDebugFile, stringifyJSON({
+                        toolsUsed,
+                        iterations: agentIterations,
+                        state: result.state,
+                    }), 'utf8');
+                    logger.debug('Wrote agentic session to %s', agenticDebugFile);
                 }
-            );
+            } else {
+                // Fallback to simple completion if no context available
+                logger.info('No context available - using direct completion (non-agentic)');
+                
+                const response = await reasoning.complete({
+                    systemPrompt: `You are a transcript formatter. Convert the following raw transcript into clean, well-structured Markdown. 
+Preserve ALL content - do not summarize. Only fix obvious formatting issues and organize into paragraphs.
+If you see names that might be misspelled, keep them as-is since you don't have context to verify.`,
+                    prompt: transcription.text,
+                });
+                
+                markdownContent = response.content;
+            }
 
             // Save the markdown version
             await storage.writeFile(markdownOutputPath, markdownContent, 'utf8');
-            logger.debug('Wrote markdown transcription to %s', markdownOutputPath);
+            logger.info('Markdown transcription saved to: %s', markdownOutputPath);
         } else {
             logger.info('Markdown transcription file %s already exists, skipping...', markdownOutputPath);
         }
@@ -186,6 +222,8 @@ export const create = (config: Config, operator: Dreadcabinet.Operator): Instanc
         return {
             ...transcription,
             audioFileBasename,
+            toolsUsed,
+            agentIterations,
         };
     }
 

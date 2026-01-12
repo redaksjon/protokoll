@@ -9,7 +9,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /**
- * Creates a prompt for the transcription formatting task
+ * Creates a prompt for the transcription formatting task.
+ * 
+ * NOTE: Context is NOT loaded into the prompt. Instead, the agentic executor
+ * provides tools for the model to query context on-demand. This is the 
+ * agentic approach - the model investigates what it needs rather than
+ * receiving everything upfront.
  */
 export const createTranscribePrompt = async (
     transcriptionText: string,
@@ -20,9 +25,8 @@ export const createTranscribePrompt = async (
     builder = await builder.addPersonaPath(DEFAULT_PERSONA_TRANSCRIBER_FILE);
     builder = await builder.addInstructionPath(DEFAULT_INSTRUCTIONS_TRANSCRIBE_FILE);
     builder = await builder.addContent(transcriptionText);
-    if (config.contextDirectories) {
-        builder = await builder.loadContext(config.contextDirectories);
-    }
+    // Context is NOT loaded here - it's queried via tools in agentic mode
+    // This prevents sending huge context payloads with every request
 
     const prompt = await builder.build();
     return prompt;

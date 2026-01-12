@@ -39,6 +39,19 @@ const mockOverride = {
     format: vi.fn(),
 };
 
+const mockReasoningInstance = {
+    complete: vi.fn(),
+    executeWithStrategy: vi.fn(),
+    isReasoningModel: vi.fn(() => true),
+    getModelFamily: vi.fn(() => 'openai'),
+    getRecommendedStrategy: vi.fn(() => 'simple'),
+};
+
+const mockAgentic = {
+    process: vi.fn(),
+    getAvailableTools: vi.fn(() => []),
+};
+
 // Mock the modules before importing
 // @ts-ignore
 vi.mock('@/logging', () => ({
@@ -71,6 +84,32 @@ vi.mock('@/prompt/transcribe', () => ({
     create: vi.fn(() => mockPrompts),
 }));
 
+// @ts-ignore
+vi.mock('@/reasoning', () => ({
+    create: vi.fn(() => mockReasoningInstance),
+}));
+
+// @ts-ignore
+vi.mock('@/agentic', () => ({
+    create: vi.fn(() => mockAgentic),
+}));
+
+// @ts-ignore
+vi.mock('@/context', () => ({
+    create: vi.fn(() => ({
+        search: vi.fn(() => []),
+        saveEntity: vi.fn(),
+    })),
+}));
+
+// @ts-ignore
+vi.mock('@/routing', () => ({
+    create: vi.fn(() => ({
+        route: vi.fn(() => ({ destination: { path: '/output' } })),
+        buildOutputPath: vi.fn(() => '/output/routed.md'),
+    })),
+}));
+
 // Import the module under test after all mocks are set up
 const importTranscribe = async () => {
     // @ts-ignore
@@ -98,6 +137,23 @@ describe('Transcribe Phase Tests', () => {
         vi.clearAllMocks();
         // @ts-ignore
         mockOperator.constructFilename.mockResolvedValue('transcript_abc123.json');
+        
+        // Setup default reasoning mock response
+        // @ts-ignore
+        mockReasoningInstance.complete.mockResolvedValue({
+            content: '# Formatted Transcript\n\nTranscribed text',
+            model: 'gpt-4',
+            duration: 1000,
+        });
+        
+        // Setup default agentic mock response  
+        // @ts-ignore
+        mockAgentic.process.mockResolvedValue({
+            enhancedText: '# Formatted Transcript\n\nTranscribed text',
+            state: { originalText: '', correctedText: '', confidence: 0.9 },
+            toolsUsed: [],
+            iterations: 1,
+        });
     });
 
     test('should return existing transcription if file exists', async () => {
@@ -161,14 +217,15 @@ describe('Transcribe Phase Tests', () => {
             expect.any(String),
             'utf8'
         );
-        expect(mockPrompts.createTranscribePrompt).toHaveBeenCalledWith('transcribed text');
-        expect(mockOpenAI.createCompletion).toHaveBeenCalled();
+        // Now uses reasoning module instead of old prompt/completion flow
+        expect(mockReasoningInstance.complete).toHaveBeenCalled();
         expect(mockStorage.writeFile).toHaveBeenCalledWith(
             path.join(outputPath, 'transcript_abc123.md'),
             '# Formatted Transcript\n\nTranscribed text',
             'utf8'
         );
-        expect(result).toEqual({ text: 'transcribed text', audioFileBasename: 'audio' });
+        expect(result.text).toBe('transcribed text');
+        expect(result.audioFileBasename).toBe('audio');
     });
 
     test('should split and transcribe large audio files', async () => {
@@ -207,7 +264,8 @@ describe('Transcribe Phase Tests', () => {
         expect(mockMedia.getFileSize).toHaveBeenCalledWith(audioFile);
         expect(mockMedia.splitAudioFile).toHaveBeenCalledWith(audioFile, path.join(config.tempDirectory, `split_audio_${hash}`), config.maxAudioSize);
         expect(mockOpenAI.transcribeAudio).toHaveBeenCalledTimes(2);
-        expect(mockPrompts.createTranscribePrompt).toHaveBeenCalledWith('transcribed chunk 1 transcribed chunk 2');
+        // Now uses reasoning module instead of old prompt/completion flow
+        expect(mockReasoningInstance.complete).toHaveBeenCalled();
         expect(result.text).toBe('transcribed chunk 1 transcribed chunk 2');
     });
 

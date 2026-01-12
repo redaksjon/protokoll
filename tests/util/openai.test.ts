@@ -72,7 +72,13 @@ describe('OpenAI utilities', () => {
             const result = await openAiUtils.transcribeAudio(mockFilePath);
 
             expect(result).toEqual(mockTranscription);
-            expect(mockLogger.debug).toHaveBeenCalledWith('Transcribing audio file: %s', mockFilePath);
+            // Now logs at info level with filename and model
+            expect(mockLogger.info).toHaveBeenCalledWith(
+                'Transcribing audio with %s: %s ... this may take several minutes for long recordings',
+                'whisper-1',
+                'audio.mp3'
+            );
+            expect(mockLogger.debug).toHaveBeenCalledWith('Full path: %s', mockFilePath);
             expect(mockLogger.debug).toHaveBeenCalledWith('Received transcription from OpenAI: %s', mockTranscription);
         });
 

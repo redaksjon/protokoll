@@ -158,15 +158,15 @@ describe('locate', () => {
             const instance = LocatePhase.create(runConfig, mockOperator);
             const result = await instance.locate('/path/to/audio.mp3');
 
-            expect(result).toEqual({
-                creationTime: new Date('2023-01-01T12:00:00Z'),
-                outputPath: '/output/path',
-                contextPath: '/output/path/.context',
-                interimPath: '/output/path/.interim',
-                transcriptionFilename: 'transcription.txt',
-                hash: '12345678',
-                audioFile: '/path/to/audio.mp3',
-            });
+            // Intermediate files now go to output/protokoll instead of polluting output directory
+            expect(result.creationTime).toEqual(new Date('2023-01-01T12:00:00Z'));
+            expect(result.outputPath).toBe('/output/path');
+            expect(result.transcriptionFilename).toBe('transcription.txt');
+            expect(result.hash).toBe('12345678');
+            expect(result.audioFile).toBe('/path/to/audio.mp3');
+            // interimPath should be under output/protokoll with timestamp-hash format
+            expect(result.interimPath).toContain('output/protokoll/');
+            expect(result.contextPath).toContain('output/protokoll/');
 
             expect(mockGetAudioCreationTime).toHaveBeenCalledWith('/path/to/audio.mp3');
             expect(mockHashFile).toHaveBeenCalledWith('/path/to/audio.mp3', 100);

@@ -11,8 +11,9 @@
     "type": "git",
     "url": "git+https://github.com/redaksjon/protokoll.git"
   },
+  "homepage": "https://github.com/redaksjon/protokoll",
   "scripts": {
-    "build": "npm run lint &&tsc --noEmit && vite build && copyfiles -u 1 \"src/**/*.md\" dist",
+    "build": "npm run lint && tsc --noEmit && vite build && copyfiles -u 1 \"src/**/*.md\" dist && chmod +x dist/main.js",
     "dev": "vite",
     "watch": "vite build --watch",
     "test": "vitest run --coverage",
@@ -36,9 +37,11 @@
     "npm": ">=9.0.0"
   },
   "dependencies": {
-    "@riotprompt/riotprompt": "^0.0.8",
-    "@theunwalked/cardigantime": "^0.0.16",
-    "@theunwalked/dreadcabinet": "^0.0.10",
+    "@anthropic-ai/sdk": "^0.71.2",
+    "@google/generative-ai": "^0.24.1",
+    "@riotprompt/riotprompt": "^0.0.19",
+    "@theunwalked/cardigantime": "^0.0.20",
+    "@theunwalked/dreadcabinet": "^0.0.13",
     "@types/fluent-ffmpeg": "^2.1.28",
     "commander": "^14.0.2",
     "dayjs": "^1.11.19",

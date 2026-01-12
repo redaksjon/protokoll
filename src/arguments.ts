@@ -29,6 +29,9 @@ export const configure = async (dreadcabinet: Dreadcabinet.DreadCabinet, cardiga
         .option('--context-directories [contextDirectories...]', 'directories containing context files to be included in prompts')
         .option('--max-audio-size <maxAudioSize>', 'maximum audio file size in bytes')
         .option('--temp-directory <tempDirectory>', 'temporary directory for processing files')
+        .option('--interactive', 'enable interactive mode for clarification questions')
+        .option('--self-reflection', 'generate self-reflection reports (default: true)')
+        .option('--no-self-reflection', 'disable self-reflection reports')
 
     await dreadcabinet.configure(program);
     program = await cardigantime.configure(program);

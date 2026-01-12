@@ -45,6 +45,18 @@ export const ALLOWED_OUTPUT_FILENAME_OPTIONS = ['date', 'time', 'subject'] as Fi
 export const DEFAULT_CONFIG_DIR = `./.${PROGRAM_NAME}`;
 export const DEFAULT_PROCESSED_DIR = './processed';
 
+// Context System Constants
+export const DEFAULT_CONTEXT_DIR_NAME = '.protokoll';
+export const DEFAULT_CONTEXT_CONFIG_FILE_NAME = 'config.yaml';
+export const DEFAULT_MAX_DISCOVERY_LEVELS = 10;
+
+export const CONTEXT_SUBDIRECTORIES = {
+    people: 'people',
+    projects: 'projects',
+    companies: 'companies',
+    terms: 'terms',
+} as const;
+
 export const DEFAULT_PERSONAS_DIR = `/personas`;
 
 export const DEFAULT_PERSONA_TRANSCRIBER_FILE = `${DEFAULT_PERSONAS_DIR}/transcriber.md`;
@@ -58,11 +70,26 @@ export const DEFAULT_INSTRUCTIONS_TRANSCRIBE_FILE = `${DEFAULT_INSTRUCTIONS_DIR}
 // Users can specify any model supported by their OpenAI API
 
 export const DEFAULT_TRANSCRIPTION_MODEL = 'whisper-1';
-export const DEFAULT_MODEL = 'gpt-4o-mini';
+export const DEFAULT_MODEL = 'gpt-5.2';
+export const DEFAULT_REASONING_LEVEL = 'high';
 
 export const DEFAULT_OVERRIDES = false;
 export const DEFAULT_MAX_AUDIO_SIZE = 26214400; // 25MB in bytes
 export const DEFAULT_TEMP_DIRECTORY = os.tmpdir(); // Use OS default temp directory
+export const DEFAULT_INTERACTIVE = false;
+export const DEFAULT_SELF_REFLECTION = true;
+
+// Output Management Constants
+export const DEFAULT_INTERMEDIATE_DIRECTORY = './output/protokoll';
+export const DEFAULT_KEEP_INTERMEDIATES = true;
+export const OUTPUT_FILE_TYPES = [
+    'transcript',
+    'context',
+    'request',
+    'response',
+    'reflection',
+    'session',
+] as const;
 
 // Define Protokoll-specific defaults
 export const PROTOKOLL_DEFAULTS = {
@@ -78,4 +105,6 @@ export const PROTOKOLL_DEFAULTS = {
     maxAudioSize: DEFAULT_MAX_AUDIO_SIZE,
     tempDirectory: DEFAULT_TEMP_DIRECTORY || os.tmpdir(),
     configDirectory: DEFAULT_CONFIG_DIR,
+    interactive: DEFAULT_INTERACTIVE,
+    selfReflection: DEFAULT_SELF_REFLECTION,
 };

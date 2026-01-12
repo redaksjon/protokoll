@@ -4,6 +4,7 @@ import * as Storage from '@/util/storage';
 import * as Dreadcabinet from '@theunwalked/dreadcabinet';
 import * as Dates from '@/util/dates';
 import { Config } from '@/protokoll';
+import { DEFAULT_INTERMEDIATE_DIRECTORY } from '@/constants';
 import path from 'path';
 
 // Helper function to promisify ffmpeg.
@@ -54,11 +55,23 @@ export const create = (config: Config, operator: Dreadcabinet.Operator): Instanc
         // Calculate the hash of file and output directory
         const hash = (await storage.hashFile(audioFile, 100)).substring(0, 8);
         const outputPath: string = await operator.constructOutputDirectory(creationTime);
-        const contextPath: string = path.join(outputPath, '.context');
-        await storage.createDirectory(contextPath);
-        const interimPath: string = path.join(outputPath, '.interim');
-        await storage.createDirectory(interimPath);
         const transcriptionFilename = await operator.constructFilename(creationTime, 'transcription', hash);
+        
+        // Use output/protokoll for intermediate files instead of polluting output directory
+        // This follows the kodrdriv pattern for debugging and intermediate file management
+        const intermediateBase = DEFAULT_INTERMEDIATE_DIRECTORY;
+        const shortHash = hash.substring(0, 6);
+        const pad = (n: number) => n.toString().padStart(2, '0');
+        const timestamp = `${creationTime.getFullYear().toString().slice(2)}${pad(creationTime.getMonth() + 1)}${pad(creationTime.getDate())}-${pad(creationTime.getHours())}${pad(creationTime.getMinutes())}`;
+        const sessionDir = `${timestamp}-${shortHash}`;
+        
+        const interimPath: string = path.join(intermediateBase, sessionDir);
+        await storage.createDirectory(interimPath);
+        
+        const contextPath: string = path.join(interimPath, 'context');
+        await storage.createDirectory(contextPath);
+        
+        logger.debug('Intermediate files will be stored in: %s', interimPath);
 
         return {
             creationTime,
