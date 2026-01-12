@@ -184,6 +184,26 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
             logger.debug('Routing decision: project=%s, confidence=%.2f', 
                 routeResult.projectId || 'default', routeResult.confidence);
       
+            // Record routing decision in reflection
+            if (reflection) {
+                reflection.collector.recordRoutingDecision({
+                    projectId: routeResult.projectId,
+                    destination: routeResult.destination.path,
+                    confidence: routeResult.confidence,
+                    reasoning: routeResult.reasoning,
+                    signals: routeResult.signals.map(s => ({
+                        type: s.type,
+                        value: s.value,
+                        weight: s.weight,
+                    })),
+                    alternativesConsidered: routeResult.alternateMatches?.map(alt => ({
+                        projectId: alt.projectId,
+                        confidence: alt.confidence,
+                        whyNotChosen: `Lower confidence (${(alt.confidence * 100).toFixed(1)}%)`,
+                    })),
+                });
+            }
+      
             // Build output path
             const outputPath = routing.buildOutputPath(routeResult, routingContext);
             logger.debug('Output path: %s', outputPath);
@@ -236,6 +256,12 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
                 // Record token usage from agentic result
                 if (agenticResult.totalTokens) {
                     reflection.collector.recordModelResponse(config.model, agenticResult.totalTokens);
+                }
+                // Record context changes (new projects, entities created)
+                if (agenticResult.contextChanges) {
+                    for (const change of agenticResult.contextChanges) {
+                        reflection.collector.recordContextChange(change);
+                    }
                 }
             }
             

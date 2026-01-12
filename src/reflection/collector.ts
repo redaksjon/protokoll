@@ -4,7 +4,7 @@
  * Collects metrics during transcription for self-reflection reporting.
  */
 
-import { TranscriptionMetrics, ToolEffectiveness } from './types';
+import { TranscriptionMetrics, ToolEffectiveness, ContextChange, RoutingDecisionRecord } from './types';
 import * as Logging from '../logging';
 
 export interface CollectorInstance {
@@ -15,8 +15,12 @@ export interface CollectorInstance {
     recordUnknownEntity(entity: string): void;
     recordResolvedEntity(entity: string, resolved: string): void;
     recordModelResponse(model: string, tokens: number): void;
+    recordContextChange(change: ContextChange): void;
+    recordRoutingDecision(decision: RoutingDecisionRecord): void;
     getMetrics(): TranscriptionMetrics;
     getToolEffectiveness(): ToolEffectiveness[];
+    getContextChanges(): ContextChange[];
+    getRoutingDecision(): RoutingDecisionRecord | undefined;
 }
 
 interface ToolStats {
@@ -40,6 +44,8 @@ export const create = (): CollectorInstance => {
     const unknownEntities: string[] = [];
     const resolvedEntities: Map<string, string> = new Map();
     const toolCalls: Map<string, ToolStats> = new Map();
+    const contextChanges: ContextChange[] = [];
+    let routingDecision: RoutingDecisionRecord | undefined;
   
     const start = () => {
         startTime = new Date();
@@ -86,6 +92,25 @@ export const create = (): CollectorInstance => {
         tokensUsed += tokens;
     };
   
+    const recordContextChange = (change: ContextChange) => {
+        contextChanges.push(change);
+        logger.info('Context change recorded: %s %s "%s"', change.action, change.entityType, change.entityName);
+    };
+
+    const getContextChanges = (): ContextChange[] => {
+        return [...contextChanges];
+    };
+
+    const recordRoutingDecision = (decision: RoutingDecisionRecord) => {
+        routingDecision = decision;
+        logger.debug('Routing decision recorded: project=%s, confidence=%.1f%%', 
+            decision.projectId || 'default', decision.confidence * 100);
+    };
+
+    const getRoutingDecision = (): RoutingDecisionRecord | undefined => {
+        return routingDecision;
+    };
+  
     const getMetrics = (): TranscriptionMetrics => {
         const endTime = new Date();
         const totalDuration = endTime.getTime() - startTime.getTime();
@@ -129,8 +154,12 @@ export const create = (): CollectorInstance => {
         recordUnknownEntity,
         recordResolvedEntity,
         recordModelResponse,
+        recordContextChange,
+        recordRoutingDecision,
         getMetrics,
         getToolEffectiveness,
+        getContextChanges,
+        getRoutingDecision,
     };
 };
 

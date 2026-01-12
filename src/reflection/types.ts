@@ -53,6 +53,46 @@ export interface Recommendation {
     suggestion?: string;
 }
 
+export interface ContextChange {
+    entityType: 'person' | 'project' | 'company' | 'term';
+    entityId: string;
+    entityName: string;
+    action: 'created' | 'updated';
+    details?: Record<string, unknown>;
+}
+
+export interface RoutingDecisionRecord {
+    // What was decided
+    projectId: string | null;
+    destination: string;
+    confidence: number;
+    
+    // Why it was decided - the reasoning trace
+    reasoning: string;
+    
+    // What signals contributed to the decision
+    signals: Array<{
+        type: string;
+        value: string;
+        weight: number;
+        source?: string;  // Where this signal came from (e.g., "context/projects/wagner.yaml")
+    }>;
+    
+    // Other projects that were considered
+    alternativesConsidered?: Array<{
+        projectId: string;
+        confidence: number;
+        whyNotChosen: string;
+    }>;
+    
+    // Was this decision confirmed by user? (interactive mode)
+    userConfirmed?: boolean;
+    
+    // Was this decision later corrected via feedback?
+    feedbackProvided?: boolean;
+    feedbackCorrection?: string;
+}
+
 export interface ReflectionReport {
     id: string;
     generated: Date;
@@ -79,6 +119,12 @@ export interface ReflectionReport {
   
     // Recommendations
     recommendations: Recommendation[];
+  
+    // Routing decision with full reasoning trace
+    routingDecision?: RoutingDecisionRecord;
+  
+    // Context changes made during session
+    contextChanges?: ContextChange[];
   
     // Optional: Include conversation history
     conversationHistory?: unknown[];
