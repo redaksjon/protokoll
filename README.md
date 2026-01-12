@@ -23,10 +23,56 @@ Protokoll is an intelligent audio transcription system that uses advanced reason
 - **📚 Improves Over Time**: The more you use it, the smarter it gets. Build context incrementally and watch transcription quality improve session after session
 - **⚡ Zero Configuration Start**: Works out of the box with sensible defaults. No API wrestling, no complex setup—just transcribe
 
+## The Core Philosophy: Context You Own and Control
+
+**The most important feature of Protokoll is not transcription—it's learning.**
+
+When you first start using Protokoll, it doesn't know anything about you. It doesn't know that "Wagner" is a project you're working on, that "Priya" is your colleague, or that notes about "skiing" should go to your personal folder while notes about "Walmart" should go to a work project.
+
+**But that's the point.** Protokoll is designed to learn from you:
+
+1. **Interactive Discovery**: When you run `protokoll --interactive` and mention "Wagner" for the first time, the system recognizes it doesn't know what Wagner is. It asks: *"Is Wagner a new project? Where should notes about it be stored?"* You tell it, and from that moment forward, every note mentioning Wagner routes correctly.
+
+2. **Context Files You Own**: Unlike cloud transcription services that keep your data in their black box, Protokoll stores everything it learns in simple YAML files in your `.protokoll/context/` directory:
+
+   ```yaml
+   # .protokoll/context/projects/wagner.yaml
+   id: wagner
+   name: Wagner
+   classification:
+     context_type: work
+     explicit_phrases: ["wagner", "update on wagner"]
+     topics: ["customer interactions", "shopify"]
+   routing:
+     destination: ~/notes/projects/wagner
+     structure: month
+   ```
+
+   **You can read these files. You can edit them. You can version control them.** This is YOUR context, not a proprietary model hidden in someone else's cloud.
+
+3. **Feedback That Teaches**: Made a mistake? Run `protokoll feedback --recent` to review recent classifications. Tell the system "this note should have gone to the Wagner project because I said 'update on Wagner' at the beginning." Protokoll uses AI to analyze your feedback and automatically update its classification rules.
+
+4. **Transparent Reasoning**: Every routing decision includes a reasoning trace. You can see exactly WHY a note was classified the way it was—which phrases matched, which signals contributed, what the confidence level was. No black boxes.
+
+### Why This Matters
+
+Most AI tools are black boxes. They work (or don't), and you have no visibility into why. When they make mistakes, you can't fix them—you just have to hope the next model update is better.
+
+Protokoll takes a different approach: **AI-assisted learning with human control**. The reasoning models help discover patterns and suggest classifications, but the knowledge lives in files you control. When the system makes mistakes, you correct them, and those corrections persist in your context files forever.
+
+This means:
+- **Your context travels with you**: Switch computers? Copy your `.protokoll` directory.
+- **Team sharing**: Work on a team? Share context files so everyone's notes route correctly.
+- **Auditability**: Need to know why something was classified a certain way? Check the context files.
+- **No vendor lock-in**: Your knowledge isn't trapped in someone else's database.
+
+The goal is simple: **After a few weeks of use, Protokoll should understand your world well enough to route notes perfectly with minimal intervention.**
+
 ## Table of Contents
 
 - [The Problem](#the-problem)
 - [What Makes Protokoll Different](#what-makes-protokoll-different)
+- [The Core Philosophy: Context You Own and Control](#the-core-philosophy-context-you-own-and-control)
 - [Why Protokoll](#why-protokoll)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
