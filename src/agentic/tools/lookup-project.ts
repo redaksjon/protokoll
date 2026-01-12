@@ -2,6 +2,7 @@
  * Lookup Project Tool
  * 
  * Looks up project information for routing and context.
+ * In interactive mode, prompts to create unknown projects.
  */
 
 import { TranscriptionTool, ToolContext, ToolResult } from '../types';
@@ -59,6 +60,27 @@ export const create = (ctx: ToolContext): TranscriptionTool => ({
             }
         }
     
+        // Project not found - in interactive mode, ask about creating it
+        if (ctx.interactiveMode) {
+            return {
+                success: true,
+                needsUserInput: true,
+                userPrompt: `Unknown project: "${args.name}"
+${args.triggerPhrase ? `Trigger phrase: "${args.triggerPhrase}"` : ''}
+
+Is "${args.name}" a new project? If yes, where should notes about it be stored?
+Enter a path (e.g., ~/notes/projects/wagner) or press Enter to use default routing:`,
+                data: {
+                    found: false,
+                    clarificationType: 'new_project',
+                    term: args.name,
+                    triggerPhrase: args.triggerPhrase,
+                    message: `Project "${args.name}" not found. Asking user if this is a new project.`,
+                },
+            };
+        }
+    
+        // Non-interactive mode - just use default
         return {
             success: true,
             data: {

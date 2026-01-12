@@ -10,6 +10,14 @@ import * as Registry from './registry';
 import * as Reasoning from '../reasoning';
 import * as Logging from '../logging';
 
+export interface ContextChangeRecord {
+    entityType: 'person' | 'project' | 'company' | 'term';
+    entityId: string;
+    entityName: string;
+    action: 'created' | 'updated';
+    details?: Record<string, unknown>;
+}
+
 export interface ExecutorInstance {
     process(transcriptText: string): Promise<{
         enhancedText: string;
@@ -17,6 +25,7 @@ export interface ExecutorInstance {
         toolsUsed: string[];
         iterations: number;
         totalTokens?: number;
+        contextChanges?: ContextChangeRecord[];
     }>;
 }
 
@@ -45,6 +54,7 @@ export const create = (
         };
     
         const toolsUsed: string[] = [];
+        const contextChanges: ContextChangeRecord[] = [];
         let iterations = 0;
         let totalTokens = 0;
         const maxIterations = 15;
@@ -158,6 +168,59 @@ Remember: preserve ALL content, only fix transcription errors.`;
                             if (clarification.response) {
                                 state.resolvedEntities.set(termName, clarification.response);
                                 logger.info('Clarified: %s -> %s', termName, clarification.response);
+                                
+                                // Handle new project creation
+                                if (result.data?.clarificationType === 'new_project' && clarification.response.trim()) {
+                                    const projectPath = clarification.response.trim();
+                                    // Only create if user provided a path (not just pressed Enter)
+                                    if (projectPath && projectPath !== termName) {
+                                        const projectId = termName.toLowerCase().replace(/\s+/g, '-');
+                                        const newProject = {
+                                            id: projectId,
+                                            name: termName,
+                                            type: 'project' as const,
+                                            description: `Auto-created from transcript mentioning "${termName}"`,
+                                            classification: {
+                                                context_type: 'work' as const,
+                                                explicit_phrases: [termName.toLowerCase()],
+                                            },
+                                            routing: {
+                                                destination: projectPath,
+                                                structure: 'month' as const,
+                                                filename_options: ['date', 'time', 'subject'] as Array<'date' | 'time' | 'subject'>,
+                                            },
+                                            active: true,
+                                        };
+                                        
+                                        try {
+                                            await ctx.contextInstance.saveEntity(newProject);
+                                            logger.info('Created new project: %s -> %s', termName, projectPath);
+                                            
+                                            // Record the context change
+                                            contextChanges.push({
+                                                entityType: 'project',
+                                                entityId: projectId,
+                                                entityName: termName,
+                                                action: 'created',
+                                                details: {
+                                                    destination: projectPath,
+                                                    routing: newProject.routing,
+                                                },
+                                            });
+                                            
+                                            // Update routing to use new project
+                                            state.routeDecision = {
+                                                projectId,
+                                                destination: { path: projectPath, structure: 'month' },
+                                                confidence: 1.0,
+                                                signals: [{ type: 'explicit_phrase', value: termName, weight: 1.0 }],
+                                                reasoning: `User created new project "${termName}" routing to ${projectPath}`,
+                                            };
+                                        } catch (error) {
+                                            logger.warn('Failed to save new project: %s', error);
+                                        }
+                                    }
+                                }
                             }
                         }
           
@@ -273,6 +336,7 @@ Output the full transcript as clean Markdown. Do NOT summarize.`;
             toolsUsed: [...new Set(toolsUsed)],
             iterations,
             totalTokens: totalTokens > 0 ? totalTokens : undefined,
+            contextChanges: contextChanges.length > 0 ? contextChanges : undefined,
         };
     };
   

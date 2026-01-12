@@ -16,6 +16,14 @@ import * as Executor from './executor';
 import * as Registry from './registry';
 import * as Reasoning from '../reasoning';
 
+export interface ContextChangeRecord {
+    entityType: 'person' | 'project' | 'company' | 'term';
+    entityId: string;
+    entityName: string;
+    action: 'created' | 'updated';
+    details?: Record<string, unknown>;
+}
+
 export interface AgenticInstance {
     process(transcriptText: string): Promise<{
         enhancedText: string;
@@ -23,6 +31,7 @@ export interface AgenticInstance {
         toolsUsed: string[];
         iterations: number;
         totalTokens?: number;
+        contextChanges?: ContextChangeRecord[];
     }>;
     getAvailableTools(): string[];
 }
