@@ -28,11 +28,10 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: 'npm'
+          node-version: 24
         
       - name: Install dependencies
-        run: npm ci
+        run: npm install
         
       - name: Build library
         run: npm run build
@@ -44,7 +43,7 @@ jobs:
         run: |
           # Change to docs directory and install dependencies
           cd docs
-          npm ci
+          npm install
           
           # Build the Vite documentation site
           npm run build

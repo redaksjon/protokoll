@@ -27,30 +27,30 @@ Protokoll is an intelligent audio transcription system that uses advanced reason
 
 **The most important feature of Protokoll is not transcription—it's learning.**
 
-When you first start using Protokoll, it doesn't know anything about you. It doesn't know that "Wagner" is a project you're working on, that "Priya" is your colleague, or that notes about "skiing" should go to your personal folder while notes about "Walmart" should go to a work project.
+When you first start using Protokoll, it doesn't know anything about you. It doesn't know that "Project Alpha" is a client engagement you're working on, that "Priya" is your colleague, or that notes about "skiing" should go to your personal folder while notes about "quarterly planning" should go to a work project.
 
 **But that's the point.** Protokoll is designed to learn from you:
 
-1. **Interactive Discovery**: When you run `protokoll --interactive` and mention "Wagner" for the first time, the system recognizes it doesn't know what Wagner is. It asks: *"Is Wagner a new project? Where should notes about it be stored?"* You tell it, and from that moment forward, every note mentioning Wagner routes correctly.
+1. **Interactive Discovery**: When you run `protokoll --interactive` and mention "Project Alpha" for the first time, the system recognizes it doesn't know what that is. It asks: *"Is Project Alpha a new project? Where should notes about it be stored?"* You tell it, and from that moment forward, every note mentioning Project Alpha routes correctly.
 
 2. **Context Files You Own**: Unlike cloud transcription services that keep your data in their black box, Protokoll stores everything it learns in simple YAML files in your `.protokoll/context/` directory:
 
    ```yaml
-   # .protokoll/context/projects/wagner.yaml
-   id: wagner
-   name: Wagner
+   # .protokoll/context/projects/project-alpha.yaml
+   id: project-alpha
+   name: Project Alpha
    classification:
      context_type: work
-     explicit_phrases: ["wagner", "update on wagner"]
-     topics: ["customer interactions", "shopify"]
+     explicit_phrases: ["project alpha", "update on alpha"]
+     topics: ["client engagement", "Q1 planning"]
    routing:
-     destination: ~/notes/projects/wagner
+     destination: ~/notes/projects/alpha
      structure: month
    ```
 
    **You can read these files. You can edit them. You can version control them.** This is YOUR context, not a proprietary model hidden in someone else's cloud.
 
-3. **Feedback That Teaches**: Made a mistake? Run `protokoll feedback --recent` to review recent classifications. Tell the system "this note should have gone to the Wagner project because I said 'update on Wagner' at the beginning." Protokoll uses AI to analyze your feedback and automatically update its classification rules.
+3. **Feedback That Teaches**: Made a mistake? Run `protokoll feedback --recent` to review recent classifications. Tell the system "this note should have gone to Project Alpha because I said 'update on Alpha' at the beginning." Protokoll uses AI to analyze your feedback and automatically update its classification rules.
 
 4. **Transparent Reasoning**: Every routing decision includes a reasoning trace. You can see exactly WHY a note was classified the way it was—which phrases matched, which signals contributed, what the confidence level was. No black boxes.
 

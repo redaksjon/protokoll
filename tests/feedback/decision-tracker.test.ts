@@ -39,26 +39,26 @@ describe('Decision Tracker', () => {
             });
 
             const decision = tracker.recordDecision({
-                transcriptPreview: 'This is a test transcript about Wagner...',
+                transcriptPreview: 'This is a test transcript about Project Alpha...',
                 audioFile: '/test/audio.m4a',
-                projectId: 'wagner',
-                destination: '~/notes/projects/wagner',
+                projectId: 'project-alpha',
+                destination: '~/notes/projects/alpha',
                 confidence: 0.95,
                 reasoningTrace: {
                     signalsDetected: [
-                        { type: 'explicit_phrase', value: 'wagner', weight: 0.9, source: 'context' }
+                        { type: 'explicit_phrase', value: 'project alpha', weight: 0.9, source: 'context' }
                     ],
                     projectsConsidered: [
-                        { projectId: 'wagner', score: 0.95, matchedSignals: ['wagner'] }
+                        { projectId: 'project-alpha', score: 0.95, matchedSignals: ['project alpha'] }
                     ],
-                    finalReasoning: 'Matched explicit phrase "wagner"',
+                    finalReasoning: 'Matched explicit phrase "project alpha"',
                 },
             });
 
             expect(decision.id).toBeDefined();
             expect(decision.id).toMatch(/^dec-/);
             expect(decision.timestamp).toBeInstanceOf(Date);
-            expect(decision.projectId).toBe('wagner');
+            expect(decision.projectId).toBe('project-alpha');
         });
 
         it('should limit in-memory decisions to maxInMemory', () => {

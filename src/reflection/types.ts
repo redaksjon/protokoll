@@ -75,7 +75,7 @@ export interface RoutingDecisionRecord {
         type: string;
         value: string;
         weight: number;
-        source?: string;  // Where this signal came from (e.g., "context/projects/wagner.yaml")
+        source?: string;  // Where this signal came from (e.g., "context/projects/alpha.yaml")
     }>;
     
     // Other projects that were considered
