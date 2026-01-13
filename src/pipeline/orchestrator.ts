@@ -112,7 +112,7 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
         const filename = outputPath.split('/').pop()?.replace('.md', '');
         if (!filename) return undefined;
         
-        // Remove date prefix (e.g., "27-0716-" from "27-0716-wagner-webhooks")
+        // Remove date prefix (e.g., "27-0716-" from "27-0716-meeting-notes")
         const withoutDate = filename.replace(/^\d{2}-\d{4}-/, '');
         if (!withoutDate) return undefined;
         

@@ -56,16 +56,16 @@ describe('Feedback Analyzer', () => {
         it('should analyze feedback and return suggestions', async () => {
             mockReasoning.complete.mockResolvedValue({
                 content: JSON.stringify({
-                    diagnosis: 'Missing trigger phrase for Wagner project',
+                    diagnosis: 'Missing trigger phrase for Project Alpha',
                     suggestedUpdates: [
                         {
                             type: 'new_project',
                             entityType: 'project',
-                            entityId: 'wagner',
+                            entityId: 'project-alpha',
                             changes: [
-                                { field: 'name', newValue: 'Wagner' },
-                                { field: 'destination', newValue: '~/notes/projects/wagner' },
-                                { field: 'explicit_phrases', newValue: ['wagner', 'update on wagner'] },
+                                { field: 'name', newValue: 'Project Alpha' },
+                                { field: 'destination', newValue: '~/notes/projects/alpha' },
+                                { field: 'explicit_phrases', newValue: ['project alpha', 'update on alpha'] },
                             ],
                             reasoning: 'User indicated this is a new project',
                             confidence: 0.9,
@@ -90,18 +90,18 @@ describe('Feedback Analyzer', () => {
                     reasoning: 'No project matches found',
                 },
                 correction: {
-                    projectId: 'wagner',
-                    destination: '~/notes/projects/wagner',
+                    projectId: 'project-alpha',
+                    destination: '~/notes/projects/alpha',
                 },
-                userReason: 'This was about the Wagner project',
+                userReason: 'This was about Project Alpha',
                 providedAt: new Date(),
             };
 
             const analysis = await analyzer.analyze(feedback);
 
-            expect(analysis.diagnosis).toBe('Missing trigger phrase for Wagner project');
+            expect(analysis.diagnosis).toBe('Missing trigger phrase for Project Alpha');
             expect(analysis.suggestedUpdates.length).toBe(1);
-            expect(analysis.suggestedUpdates[0].entityId).toBe('wagner');
+            expect(analysis.suggestedUpdates[0].entityId).toBe('project-alpha');
             expect(analysis.confidence).toBe(0.85);
         });
 
@@ -147,11 +147,11 @@ describe('Feedback Analyzer', () => {
                 {
                     type: 'new_project' as const,
                     entityType: 'project' as const,
-                    entityId: 'wagner',
+                    entityId: 'project-alpha',
                     changes: [
-                        { field: 'name', newValue: 'Wagner' },
-                        { field: 'destination', newValue: '~/notes/projects/wagner' },
-                        { field: 'explicit_phrases', newValue: ['wagner'] },
+                        { field: 'name', newValue: 'Project Alpha' },
+                        { field: 'destination', newValue: '~/notes/projects/alpha' },
+                        { field: 'explicit_phrases', newValue: ['project alpha'] },
                     ],
                     reasoning: 'New project',
                     confidence: 0.9,
@@ -162,7 +162,7 @@ describe('Feedback Analyzer', () => {
 
             expect(mockContext.saveEntity).toHaveBeenCalled();
             const savedEntity = mockContext.saveEntity.mock.calls[0][0];
-            expect(savedEntity.id).toBe('wagner');
+            expect(savedEntity.id).toBe('project-alpha');
             expect(savedEntity.type).toBe('project');
         });
 

@@ -123,10 +123,10 @@ describe('Feedback Handler', () => {
                     reasoning: 'Default',
                 },
                 correction: {
-                    projectId: 'wagner',
-                    destination: '~/notes/wagner',
+                    projectId: 'project-alpha',
+                    destination: '~/notes/project-alpha',
                 },
-                userReason: 'This was about Wagner',
+                userReason: 'This was about Project Alpha',
                 providedAt: new Date(),
             };
 
