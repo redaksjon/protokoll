@@ -7,7 +7,7 @@
 
 import * as readline from 'readline';
 import * as fs from 'fs/promises';
-import * as path from 'path';
+import * as path from 'node:path';
 import { ClassificationFeedback, ClassificationDecision, FeedbackAnalysis, LearningUpdate } from './types';
 import * as Analyzer from './analyzer';
 import * as Logging from '../logging';

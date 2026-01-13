@@ -1,4 +1,4 @@
-import os from 'os';
+import os from 'node:os';
 import { FilenameOption } from '@theunwalked/dreadcabinet';
 import { FilesystemStructure } from '@theunwalked/dreadcabinet';
 

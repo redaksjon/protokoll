@@ -2,9 +2,9 @@ import { defineConfig } from 'vite';
 import { VitePluginNode } from 'vite-plugin-node';
 import replace from '@rollup/plugin-replace';
 // import { visualizer } from 'rollup-plugin-visualizer';
-import { execSync } from 'child_process';
+import { execSync } from 'node:child_process';
 import shebang from 'rollup-plugin-preserve-shebang';
-import path from 'path';
+import path from 'node:path';
 
 let gitInfo = {
     branch: '',
@@ -71,6 +71,8 @@ export default defineConfig({
         rollupOptions: {
             external: [
                 // Dependencies from package.json
+                '@anthropic-ai/sdk',
+                '@google/generative-ai',
                 '@riotprompt/riotprompt',
                 '@theunwalked/cardigantime',
                 '@theunwalked/dreadcabinet',
@@ -86,17 +88,8 @@ export default defineConfig({
                 'openai',
                 'winston',
                 'zod',
-                // Node.js built-in modules
-                'fs',
-                'path',
-                'os',
-                'util',
-                'child_process',
-                'crypto',
-                'stream',
-                'url',
-                'events',
-                'process'
+                // Node.js built-in modules (node: prefix)
+                /^node:/,
             ],
             input: 'src/main.ts',
             output: {

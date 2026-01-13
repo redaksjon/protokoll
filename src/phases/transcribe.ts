@@ -5,7 +5,7 @@ import * as Storage from '@/util/storage';
 import * as Media from '@/util/media';
 import * as OpenAI from '@/util/openai';
 import { stringifyJSON } from '@/util/general';
-import path from 'path';
+import path from 'node:path';
 import * as Agentic from '@/agentic';
 import * as Reasoning from '@/reasoning';
 import * as Context from '@/context';

@@ -5,7 +5,7 @@
  * Follows the kodrdriv pattern for debugging and intermediate file management.
  */
 
-import * as path from 'path';
+import * as path from 'node:path';
 import * as fs from 'fs/promises';
 import { OutputConfig, IntermediateFiles, OutputPaths } from './types';
 import * as Logging from '../logging';

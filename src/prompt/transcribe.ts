@@ -1,8 +1,8 @@
 import { Builder, Chat, Prompt } from "@riotprompt/riotprompt";
 import { DEFAULT_INSTRUCTIONS_TRANSCRIBE_FILE, DEFAULT_PERSONA_TRANSCRIBER_FILE } from '@/constants';
 import { Config } from '@/protokoll';
-import { fileURLToPath } from "url";
-import path from "path";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 import { getLogger } from "@/logging";
 
 const __filename = fileURLToPath(import.meta.url);

@@ -5,7 +5,7 @@ import * as Dreadcabinet from '@theunwalked/dreadcabinet';
 import * as Dates from '@/util/dates';
 import { Config } from '@/protokoll';
 import { DEFAULT_INTERMEDIATE_DIRECTORY } from '@/constants';
-import path from 'path';
+import path from 'node:path';
 
 // Helper function to promisify ffmpeg.
 

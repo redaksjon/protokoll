@@ -1,6 +1,6 @@
 import ffmpeg from 'fluent-ffmpeg';
 import { Logger } from 'winston';
-import path from 'path';
+import path from 'node:path';
 import * as Storage from '@/util/storage';
 
 export interface Media {
