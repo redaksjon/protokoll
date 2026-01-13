@@ -33,8 +33,7 @@
   "author": "Tim O'Brien <tobrien@discursive.com>",
   "license": "Apache-2.0",
   "engines": {
-    "node": ">=18.0.0",
-    "npm": ">=9.0.0"
+    "node": ">=24.0.0"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
