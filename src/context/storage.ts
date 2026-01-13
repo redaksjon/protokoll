@@ -10,7 +10,7 @@
 
 import * as yaml from 'js-yaml';
 import * as fs from 'fs/promises';
-import * as path from 'path';
+import * as path from 'node:path';
 import { Entity, EntityType } from './types';
 
 export interface StorageInstance {

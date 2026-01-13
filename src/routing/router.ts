@@ -9,8 +9,8 @@
  * extracted for use in other tools (kronologi, observasjon) in the future.
  */
 
-import * as path from 'path';
-import * as os from 'os';
+import * as path from 'node:path';
+import * as os from 'node:os';
 import { 
     RoutingContext, 
     RouteDecision,

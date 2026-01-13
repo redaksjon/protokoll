@@ -1,6 +1,6 @@
 {
   "name": "@redaksjon/protokoll",
-  "version": "0.0.11",
+  "version": "0.0.12",
   "description": "Focused audio transcription with intelligent context integration",
   "main": "dist/main.js",
   "type": "module",
@@ -13,7 +13,7 @@
   },
   "homepage": "https://github.com/redaksjon/protokoll",
   "scripts": {
-    "build": "npm run lint && tsc --noEmit && vite build && copyfiles -u 1 \"src/**/*.md\" dist && chmod +x dist/main.js",
+    "build": "npm run lint && tsc --noEmit && vite build && node scripts/copy-assets.mjs && chmod +x dist/main.js",
     "dev": "vite",
     "watch": "vite build --watch",
     "test": "vitest run --coverage",
@@ -65,7 +65,6 @@
     "@typescript-eslint/eslint-plugin": "^8.46.4",
     "@typescript-eslint/parser": "^8.46.4",
     "@vitest/coverage-v8": "^4.0.8",
-    "copyfiles": "^2.4.1",
     "eslint": "^9.39.1",
     "eslint-plugin-import": "^2.32.0",
     "globals": "^17.0.0",

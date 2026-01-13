@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import child_process, { exec } from 'child_process';
-import util from 'util';
+import child_process, { exec } from 'node:child_process';
+import util from 'node:util';
 
 export async function run(command: string, options: child_process.ExecOptions = {}): Promise<{ stdout: string; stderr: string }> {
     const execPromise = util.promisify(exec);

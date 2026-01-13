@@ -16,7 +16,7 @@
  * extracted for use in other tools (kronologi, observasjon) in the future.
  */
 
-import * as path from 'path';
+import * as path from 'node:path';
 import * as fs from 'fs/promises';
 import * as yaml from 'js-yaml';
 import { ContextDiscoveryOptions, DiscoveredContextDir, HierarchicalContextResult } from './types';

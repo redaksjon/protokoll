@@ -71,7 +71,7 @@ export default defineConfig([
             "no-console": ["error"],
 
             "no-restricted-imports": ["error", {
-                paths: ["dayjs", "fs", "moment-timezone"],
+                paths: ["dayjs", "fs", "node:fs", "moment-timezone"],
                 patterns: [
                     {
                         group: ["src/**"],

@@ -5,7 +5,7 @@
  * after successful transcription.
  */
 
-import * as path from 'path';
+import * as path from 'node:path';
 import * as Logging from '@/logging';
 import * as Storage from '@/util/storage';
 
