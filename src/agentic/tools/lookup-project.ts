@@ -69,7 +69,7 @@ export const create = (ctx: ToolContext): TranscriptionTool => ({
 ${args.triggerPhrase ? `Trigger phrase: "${args.triggerPhrase}"` : ''}
 
 Is "${args.name}" a new project? If yes, where should notes about it be stored?
-Enter a path (e.g., ~/notes/projects/wagner) or press Enter to use default routing:`,
+Enter a path (e.g., ~/notes/projects/${args.name.toLowerCase().replace(/\s+/g, '-')}) or press Enter to use default routing:`,
                 data: {
                     found: false,
                     clarificationType: 'new_project',
