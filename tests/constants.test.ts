@@ -104,7 +104,7 @@ describe('constants', () => {
             expect(DEFAULT_LOG).toBe(false);
             expect(DEFAULT_RECURSIVE).toBe(false);
             expect(DEFAULT_DIFF).toBe(true);
-            expect(DEFAULT_INTERACTIVE).toBe(false);
+            expect(DEFAULT_INTERACTIVE).toBe(true);  // Interactive mode enabled by default
             expect(DEFAULT_SELF_REFLECTION).toBe(true);
             expect(DEFAULT_OVERRIDES).toBe(false);
             expect(DEFAULT_KEEP_INTERMEDIATES).toBe(true);

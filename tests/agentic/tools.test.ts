@@ -142,6 +142,7 @@ describe('Agentic Tools', () => {
                 id: 'quarterly',
                 name: 'Quarterly Planning',
                 type: 'project',
+                active: true,
             }]);
       
             const tool = LookupProject.create(mockContext);
@@ -151,7 +152,10 @@ describe('Agentic Tools', () => {
       
             expect(result.success).toBe(true);
             expect(result.data.found).toBe(false);
-            expect(mockContext.contextInstance.getAllProjects).not.toHaveBeenCalled();
+            // getAllProjects is now always called to provide options to the user
+            expect(mockContext.contextInstance.getAllProjects).toHaveBeenCalled();
+            expect(result.data.knownProjects).toHaveLength(1);
+            expect(result.data.options).toBeDefined();
         });
 
         it('should handle project without explicit_phrases', async () => {
