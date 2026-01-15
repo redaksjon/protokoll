@@ -92,6 +92,8 @@ export interface NewProjectWizardResult {
     termName?: string;
     termExpansion?: string;       // Full form if acronym
     termProjects?: number[];      // Indices of associated projects
+    // If user created a new project inline (when processing a term)
+    createdProject?: NewProjectWizardResult;
 }
 
 /**

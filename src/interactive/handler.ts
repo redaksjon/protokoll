@@ -44,6 +44,38 @@ const askQuestion = (rl: readline.Interface, question: string): Promise<string> 
 // Helper to write to stdout without triggering no-console lint rule
 const write = (text: string) => process.stdout.write(text + '\n');
 
+// Simplified project creation (used when creating project from term/person association)
+const runCreateProjectFlow = async (
+    rl: readline.Interface,
+    contextMessage?: string
+): Promise<NewProjectWizardResult> => {
+    if (contextMessage) {
+        write('');
+        write(contextMessage);
+    }
+    
+    // Step 1: Project name (required)
+    const projectName = await askQuestion(rl, '\nProject name: ');
+    
+    if (!projectName) {
+        write('Project name is required. Skipping project creation.');
+        return { action: 'skip' };
+    }
+    
+    // Step 2: Destination
+    const destination = await askQuestion(rl, '\nWhere should output be routed to? (Enter for default): ');
+    
+    // Step 3: Description
+    const description = await askQuestion(rl, '\nCan you tell me something about this project? (Enter to skip): ');
+    
+    return {
+        action: 'create',
+        projectName: projectName.trim(),
+        destination: destination || undefined,
+        description: description || undefined,
+    };
+};
+
 const runNewProjectWizard = async (
     rl: readline.Interface,
     term: string,
@@ -103,16 +135,27 @@ const runNewProjectWizard = async (
         
         // Step 4: Which project(s) is this term associated with?
         const termProjects: number[] = [];
+        let createdProject: NewProjectWizardResult | undefined;
         
         if (projectOptions && projectOptions.length > 0) {
             write('\nExisting projects:');
             projectOptions.forEach((opt, i) => {
                 write(`  ${i + 1}. ${opt}`);
             });
+            write(`  N. Create a new project`);
             
-            const projectSelection = await askQuestion(rl, `\nWhich project(s) is "${finalTermName}" associated with? (Enter numbers separated by commas, or Enter to skip): `);
+            const projectSelection = await askQuestion(rl, `\nWhich project(s) is "${finalTermName}" associated with? (Enter numbers separated by commas, N for new, or Enter to skip): `);
             
-            if (projectSelection) {
+            if (projectSelection.toLowerCase().includes('n')) {
+                // User wants to create a new project to associate with this term
+                write('');
+                write(`[Create New Project for Term "${finalTermName}"]`);
+                createdProject = await runCreateProjectFlow(rl, `The term "${finalTermName}" will be associated with this new project.`);
+                
+                if (createdProject.action === 'create' && createdProject.projectName) {
+                    write(`\n[Project "${createdProject.projectName}" will be created and associated with term "${finalTermName}"]`);
+                }
+            } else if (projectSelection) {
                 const indices = projectSelection.split(',').map(s => parseInt(s.trim(), 10) - 1);
                 for (const idx of indices) {
                     if (!isNaN(idx) && idx >= 0 && idx < projectOptions.length) {
@@ -125,7 +168,18 @@ const runNewProjectWizard = async (
                 }
             }
         } else {
-            write('\nNo existing projects found to associate with.');
+            // No existing projects - offer to create one
+            const createNew = await askQuestion(rl, `\nNo existing projects found. Create a new project for term "${finalTermName}"? (Y/N, or Enter to skip): `);
+            
+            if (createNew.toLowerCase() === 'y' || createNew.toLowerCase() === 'yes') {
+                write('');
+                write(`[Create New Project for Term "${finalTermName}"]`);
+                createdProject = await runCreateProjectFlow(rl, `The term "${finalTermName}" will be associated with this new project.`);
+                
+                if (createdProject.action === 'create' && createdProject.projectName) {
+                    write(`\n[Project "${createdProject.projectName}" will be created and associated with term "${finalTermName}"]`);
+                }
+            }
         }
         
         // Step 5: Description
@@ -137,6 +191,7 @@ const runNewProjectWizard = async (
             termExpansion: expansion || undefined,
             termProjects: termProjects.length > 0 ? termProjects : undefined,
             termDescription: termDesc || undefined,
+            createdProject,
         };
     }
     
@@ -188,14 +243,16 @@ const runNewPersonWizard = async (
         const projectSelection = await askQuestion(rl, `\nWhich project is ${finalName} related to? (Enter number, N for new, or Enter to skip): `);
         
         if (projectSelection.toLowerCase() === 'n') {
-            // User wants to create a new project - invoke project wizard
+            // User wants to create a new project for this person
             write('');
-            // Use organization as default project name if provided
-            const defaultProjectName = organization || finalName;
-            createdProject = await runNewProjectWizard(rl, defaultProjectName, `Creating project for ${finalName}`, projectOptions);
+            write(`[Create New Project for ${finalName}]`);
+            const contextMsg = organization 
+                ? `Creating project for ${finalName} (${organization})`
+                : `Creating project for ${finalName}`;
+            createdProject = await runCreateProjectFlow(rl, contextMsg);
             
             if (createdProject.action === 'create' && createdProject.projectName) {
-                write(`\n[Project "${createdProject.projectName}" will be created]`);
+                write(`\n[Project "${createdProject.projectName}" will be created and linked to ${finalName}]`);
             }
         } else if (projectSelection && /^\d+$/.test(projectSelection)) {
             const idx = parseInt(projectSelection, 10) - 1;
@@ -209,11 +266,15 @@ const runNewPersonWizard = async (
         const createNew = await askQuestion(rl, `\nNo existing projects found. Create a new project for ${finalName}? (Y/N, or Enter to skip): `);
         
         if (createNew.toLowerCase() === 'y' || createNew.toLowerCase() === 'yes') {
-            const defaultProjectName = organization || finalName;
-            createdProject = await runNewProjectWizard(rl, defaultProjectName, `Creating project for ${finalName}`, []);
+            write('');
+            write(`[Create New Project for ${finalName}]`);
+            const contextMsg = organization 
+                ? `Creating project for ${finalName} (${organization})`
+                : `Creating project for ${finalName}`;
+            createdProject = await runCreateProjectFlow(rl, contextMsg);
             
             if (createdProject.action === 'create' && createdProject.projectName) {
-                write(`\n[Project "${createdProject.projectName}" will be created]`);
+                write(`\n[Project "${createdProject.projectName}" will be created and linked to ${finalName}]`);
             }
         }
     }

@@ -186,6 +186,13 @@ Remember: preserve ALL content, only fix transcription errors.`;
                                         termName?: string;
                                         termExpansion?: string;
                                         termProjects?: number[];
+                                        // For nested project creation from term wizard
+                                        createdProject?: {
+                                            action: 'create' | 'link' | 'skip';
+                                            projectName?: string;
+                                            destination?: string;
+                                            description?: string;
+                                        };
                                     };
                                     
                                     const knownProjects = result.data?.knownProjects as Array<{
@@ -327,6 +334,64 @@ Remember: preserve ALL content, only fix transcription errors.`;
                                             }
                                         }
                                         
+                                        // Handle nested project creation from term wizard
+                                        if (wizardResult.createdProject?.action === 'create' && wizardResult.createdProject.projectName) {
+                                            const projectName = wizardResult.createdProject.projectName;
+                                            const projectId = projectName.toLowerCase().replace(/\s+/g, '-');
+                                            const projectPath = wizardResult.createdProject.destination || 'output';
+                                            
+                                            const newProject = {
+                                                id: projectId,
+                                                name: projectName,
+                                                type: 'project' as const,
+                                                description: wizardResult.createdProject.description || `Project for "${projectName}"`,
+                                                classification: {
+                                                    context_type: 'work' as const,
+                                                    explicit_phrases: [projectName.toLowerCase(), termNameFinal.toLowerCase()].filter((v, i, a) => a.indexOf(v) === i),
+                                                },
+                                                routing: {
+                                                    destination: projectPath,
+                                                    structure: 'month' as const,
+                                                    filename_options: ['date', 'time', 'subject'] as Array<'date' | 'time' | 'subject'>,
+                                                },
+                                                active: true,
+                                            };
+                                            
+                                            try {
+                                                await ctx.contextInstance.saveEntity(newProject);
+                                                await ctx.contextInstance.reload();  // Reload so subsequent searches find this entity
+                                                logger.info('Created new project from term wizard: %s -> %s', projectName, projectPath);
+                                                
+                                                // Add the new project to the projectIds list for term association
+                                                projectIds.push(projectId);
+                                                
+                                                contextChanges.push({
+                                                    entityType: 'project',
+                                                    entityId: projectId,
+                                                    entityName: projectName,
+                                                    action: 'created',
+                                                    details: {
+                                                        destination: projectPath,
+                                                        description: wizardResult.createdProject.description,
+                                                        createdForTerm: termNameFinal,
+                                                    },
+                                                });
+                                                
+                                                // Update routing to use the new project
+                                                if (projectPath !== 'output') {
+                                                    state.routeDecision = {
+                                                        projectId,
+                                                        destination: { path: projectPath, structure: 'month' },
+                                                        confidence: 1.0,
+                                                        signals: [{ type: 'explicit_phrase', value: termNameFinal, weight: 1.0 }],
+                                                        reasoning: `User created project "${projectName}" for term "${termNameFinal}"`,
+                                                    };
+                                                }
+                                            } catch (error) {
+                                                logger.warn('Failed to save new project from term wizard: %s', error);
+                                            }
+                                        }
+                                        
                                         const newTerm = {
                                             id: termId,
                                             name: termNameFinal,
@@ -357,20 +422,24 @@ Remember: preserve ALL content, only fix transcription errors.`;
                                                 },
                                             });
                                             
-                                            // If term has associated projects, use the first one for routing
-                                            if (projectIds.length > 0 && knownProjects) {
-                                                const primaryProject = knownProjects.find(p => p.id === projectIds[0]);
-                                                if (primaryProject?.routing?.destination) {
-                                                    state.routeDecision = {
-                                                        projectId: primaryProject.id,
-                                                        destination: { 
-                                                            path: primaryProject.routing.destination, 
-                                                            structure: 'month' 
-                                                        },
-                                                        confidence: 1.0,
-                                                        signals: [{ type: 'explicit_phrase', value: termNameFinal, weight: 1.0 }],
-                                                        reasoning: `User created term "${termNameFinal}" associated with project "${primaryProject.name}"`,
-                                                    };
+                                            // If term has associated projects and we haven't set routing yet, use the first one
+                                            if (projectIds.length > 0 && !state.routeDecision) {
+                                                // For newly created project, we already set routing above
+                                                // For existing projects, look them up
+                                                if (knownProjects) {
+                                                    const primaryProject = knownProjects.find(p => p.id === projectIds[0]);
+                                                    if (primaryProject?.routing?.destination) {
+                                                        state.routeDecision = {
+                                                            projectId: primaryProject.id,
+                                                            destination: { 
+                                                                path: primaryProject.routing.destination, 
+                                                                structure: 'month' 
+                                                            },
+                                                            confidence: 1.0,
+                                                            signals: [{ type: 'explicit_phrase', value: termNameFinal, weight: 1.0 }],
+                                                            reasoning: `User created term "${termNameFinal}" associated with project "${primaryProject.name}"`,
+                                                        };
+                                                    }
                                                 }
                                             }
                                         } catch (error) {
