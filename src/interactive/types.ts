@@ -43,6 +43,7 @@ export interface InteractiveConfig {
     timeout?: number;  // ms to wait for user input
     defaultToSuggestion?: boolean;  // Use suggestion if timeout
     batchQuestions?: boolean;  // Ask all questions at once
+    silent?: boolean;  // Disable sound notifications when prompting
 }
 
 /**
@@ -73,5 +74,39 @@ export interface OnboardingResult {
     defaultStructure?: 'none' | 'year' | 'month' | 'day';
     projects: OnboardingProject[];
     completed: boolean;
+}
+
+/**
+ * Result from the new project/term wizard
+ */
+export interface NewProjectWizardResult {
+    action: 'create' | 'link' | 'term' | 'skip';
+    // For 'create' (new project)
+    projectName?: string;
+    destination?: string;
+    description?: string;
+    // For 'link' (link term to existing project)
+    linkedProjectIndex?: number;
+    termDescription?: string;
+    // For 'term' (create a new term entity)
+    termName?: string;
+    termExpansion?: string;       // Full form if acronym
+    termProjects?: number[];      // Indices of associated projects
+}
+
+/**
+ * Result from the new person wizard
+ */
+export interface NewPersonWizardResult {
+    action: 'create' | 'skip';
+    // Person details
+    personName?: string;
+    organization?: string;
+    notes?: string;
+    // Project association
+    linkedProjectId?: string;
+    linkedProjectIndex?: number;
+    // If user created a new project inline
+    createdProject?: NewProjectWizardResult;
 }
 

@@ -32,6 +32,13 @@ describe('Interactive Handler', () => {
     let handler: Handler.HandlerInstance;
   
     beforeEach(() => {
+        // Mock process.stdin.isTTY to return true so readline interface is created
+        Object.defineProperty(process.stdin, 'isTTY', {
+            value: true,
+            writable: true,
+            configurable: true,
+        });
+        
         const config: InteractiveConfig = {
             enabled: true,
             defaultToSuggestion: true,
@@ -41,6 +48,12 @@ describe('Interactive Handler', () => {
 
     afterEach(() => {
         vi.clearAllMocks();
+        // Reset isTTY
+        Object.defineProperty(process.stdin, 'isTTY', {
+            value: undefined,
+            writable: true,
+            configurable: true,
+        });
     });
   
     describe('session management', () => {
@@ -420,6 +433,22 @@ describe('Interactive Handler', () => {
             handler.startSession();
             mockAnswer = 'John Smith';
             
+            // Use a type that doesn't have a wizard (like 'general') to test raw user input
+            const request: ClarificationRequest = {
+                type: 'general',
+                context: 'General clarification',
+                term: 'Unknown',
+            };
+
+            const response = await handler.handleClarification(request);
+            expect(response.response).toBe('John Smith');
+            expect(response.shouldRemember).toBe(true);
+        });
+        
+        it('should handle new_person wizard with name correction', async () => {
+            handler.startSession();
+            mockAnswer = 'John Smith';
+            
             const request: ClarificationRequest = {
                 type: 'new_person',
                 context: 'New person detected',
@@ -427,8 +456,13 @@ describe('Interactive Handler', () => {
             };
 
             const response = await handler.handleClarification(request);
-            expect(response.response).toBe('John Smith');
+            // Wizard returns action as response
+            expect(response.response).toBe('create');
             expect(response.shouldRemember).toBe(true);
+            // Check wizard result in additionalInfo
+            expect(response.additionalInfo).toBeDefined();
+            const wizardResult = response.additionalInfo as { personName?: string };
+            expect(wizardResult.personName).toBe('John Smith');
         });
 
         it('should handle interactive mode with option index out of bounds on lower end', async () => {

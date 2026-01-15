@@ -2,10 +2,97 @@
  * Lookup Project Tool
  * 
  * Looks up project information for routing and context.
- * In interactive mode, prompts to create unknown projects.
+ * Prompts to create unknown projects when user input is available.
  */
 
 import { TranscriptionTool, ToolContext, ToolResult } from '../types';
+
+/**
+ * Extract context from transcript around where a term is mentioned.
+ * Returns approximately one sentence before and after the term mention.
+ */
+function extractTermContext(transcript: string, term: string): string | null {
+    // Case-insensitive search for the term
+    const lowerTranscript = transcript.toLowerCase();
+    const lowerTerm = term.toLowerCase();
+    const index = lowerTranscript.indexOf(lowerTerm);
+    
+    if (index === -1) {
+        return null;
+    }
+    
+    // Define strong sentence boundaries (., !, ?)
+    const sentenceBoundary = /[.!?]/;
+    
+    // Look backwards for the start (find the sentence boundary 1 sentence before)
+    let startIndex = 0;
+    let boundariesFound = 0;
+    for (let i = index - 1; i >= 0; i--) {
+        if (sentenceBoundary.test(transcript[i])) {
+            boundariesFound++;
+            // After finding first boundary (end of current sentence), 
+            // keep looking for the second (end of previous sentence)
+            if (boundariesFound === 2) {
+                // Start after this boundary
+                startIndex = i + 1;
+                break;
+            }
+        }
+    }
+    
+    // Look forwards for the end (find sentence boundary 1 sentence after)
+    let endIndex = transcript.length;
+    boundariesFound = 0;
+    for (let i = index + term.length; i < transcript.length; i++) {
+        if (sentenceBoundary.test(transcript[i])) {
+            boundariesFound++;
+            // After finding first boundary (end of current sentence),
+            // keep looking for the second (end of next sentence)
+            if (boundariesFound === 2) {
+                // Include this boundary
+                endIndex = i + 1;
+                break;
+            }
+        }
+    }
+    
+    // Extract and clean up the context
+    let context = transcript.substring(startIndex, endIndex).trim();
+    
+    // Limit length to avoid overwhelming the prompt (max ~300 chars)
+    if (context.length > 300) {
+        // Try to cut at a sentence boundary
+        const midPoint = context.indexOf(term);
+        if (midPoint !== -1) {
+            // Keep the sentence with the term, trim around it
+            let sentenceStart = midPoint;
+            let sentenceEnd = midPoint + term.length;
+            
+            // Find sentence start
+            for (let i = midPoint - 1; i >= 0; i--) {
+                if (sentenceBoundary.test(context[i])) {
+                    sentenceStart = i + 1;
+                    break;
+                }
+            }
+            
+            // Find sentence end
+            for (let i = midPoint + term.length; i < context.length; i++) {
+                if (sentenceBoundary.test(context[i])) {
+                    sentenceEnd = i + 1;
+                    break;
+                }
+            }
+            
+            context = context.substring(sentenceStart, sentenceEnd).trim();
+        } else {
+            // Just truncate if term not found in extracted context
+            context = context.substring(0, 300) + '...';
+        }
+    }
+    
+    return context;
+}
 
 export const create = (ctx: ToolContext): TranscriptionTool => ({
     name: 'lookup_project',
@@ -26,6 +113,19 @@ export const create = (ctx: ToolContext): TranscriptionTool => ({
     },
     execute: async (args: { name: string; triggerPhrase?: string }): Promise<ToolResult> => {
         const context = ctx.contextInstance;
+    
+        // First, check if this project/term was already resolved in this session
+        if (ctx.resolvedEntities?.has(args.name)) {
+            const resolvedName = ctx.resolvedEntities.get(args.name);
+            return {
+                success: true,
+                data: {
+                    found: true,
+                    suggestion: `Already resolved: use "${resolvedName}"`,
+                    cached: true,
+                },
+            };
+        }
     
         // Look up project by name
         const projects = context.search(args.name);
@@ -60,32 +160,56 @@ export const create = (ctx: ToolContext): TranscriptionTool => ({
             }
         }
     
-        // Project not found - in interactive mode, ask about creating it
-        if (ctx.interactiveMode) {
-            return {
-                success: true,
-                needsUserInput: true,
-                userPrompt: `Unknown project: "${args.name}"
-${args.triggerPhrase ? `Trigger phrase: "${args.triggerPhrase}"` : ''}
-
-Is "${args.name}" a new project? If yes, where should notes about it be stored?
-Enter a path (e.g., ~/notes/projects/${args.name.toLowerCase().replace(/\s+/g, '-')}) or press Enter to use default routing:`,
-                data: {
-                    found: false,
-                    clarificationType: 'new_project',
-                    term: args.name,
-                    triggerPhrase: args.triggerPhrase,
-                    message: `Project "${args.name}" not found. Asking user if this is a new project.`,
-                },
-            };
+        // Project not found - always signal that we need user input
+        // The executor will decide whether to actually prompt based on handler availability
+        const allProjects = context.getAllProjects();
+        const projectOptions = allProjects
+            .filter(p => p.active !== false)
+            .map(p => `${p.name}${p.description ? ` - ${p.description}` : ''}`);
+        
+        // Extract filename from sourceFile path for cleaner display
+        const fileName = ctx.sourceFile.split('/').pop() || ctx.sourceFile;
+        const fileDate = ctx.audioDate.toLocaleString('en-US', {
+            weekday: 'short',
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+        });
+        
+        // Find context from transcript where the project/term is mentioned
+        const transcriptContext = extractTermContext(ctx.transcriptText, args.name);
+        
+        const contextLines = [
+            `File: ${fileName}`,
+            `Date: ${fileDate}`,
+            '',
+            `Unknown project/term: "${args.name}"`,
+        ];
+        
+        if (transcriptContext) {
+            contextLines.push('');
+            contextLines.push('Context from transcript:');
+            contextLines.push(`"${transcriptContext}"`);
+        } else if (args.triggerPhrase) {
+            contextLines.push('');
+            contextLines.push('Context from transcript:');
+            contextLines.push(`"${args.triggerPhrase}"`);
         }
-    
-        // Non-interactive mode - just use default
+        
         return {
             success: true,
+            needsUserInput: true,
+            userPrompt: contextLines.join('\n'),
             data: {
                 found: false,
-                message: `No project found for "${args.name}". Will use default routing.`,
+                clarificationType: 'new_project',
+                term: args.name,
+                triggerPhrase: args.triggerPhrase,
+                message: `Project "${args.name}" not found. Asking user if this is a new project.`,
+                knownProjects: allProjects.filter(p => p.active !== false),
+                options: projectOptions,
             },
         };
     },

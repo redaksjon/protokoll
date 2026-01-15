@@ -19,6 +19,7 @@ export interface PipelineConfig {
     selfReflection: boolean;
     debug: boolean;
     dryRun?: boolean;
+    silent?: boolean;  // Disable sound notifications
   
     // Paths
     contextDirectory?: string;

@@ -20,8 +20,9 @@ export interface Args extends Dreadcabinet.Args, Cardigantime.Args {
     contextDirectories?: string[];
     maxAudioSize?: number | string;
     tempDirectory?: string;
-    interactive?: boolean;
+    batch?: boolean;  // --batch flag (disables interactive mode)
     selfReflection?: boolean;
+    silent?: boolean;
     processedDirectory?: string;
 }
 
@@ -40,6 +41,7 @@ export const ConfigSchema = z.object({
     tempDirectory: z.string(),
     interactive: z.boolean(),
     selfReflection: z.boolean(),
+    silent: z.boolean(),
     processedDirectory: z.string().optional(),
 });
 
@@ -113,6 +115,7 @@ export async function main() {
             transcriptionModel: config.transcriptionModel,
             interactive: config.interactive,
             selfReflection: config.selfReflection,
+            silent: config.silent,
             debug: config.debug,
             dryRun: config.dryRun,
             contextDirectory: config.configDirectory,

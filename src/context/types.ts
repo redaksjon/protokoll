@@ -72,6 +72,7 @@ export interface Term extends BaseEntity {
   expansion?: string;     // Full form if it's an acronym
   domain?: string;        // E.g., "engineering", "finance"
   sounds_like?: string[];
+  projects?: string[];    // Associated project IDs - triggers routing to these projects
 }
 
 export type Entity = Person | Project | Company | Term;

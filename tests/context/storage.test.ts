@@ -351,9 +351,7 @@ sounds_like:
     it('should get all entities of a type when empty', () => {
       const result = storage.getAll('person');
       expect(result).toEqual([]);
-    });
-
-    it('should handle loading from multiple directories', async () => {
+    });    it('should handle loading from multiple directories', async () => {
       const dir1 = path.join(tempDir, 'context1', 'people');
       const dir2 = path.join(tempDir, 'context2', 'people');
       await fs.mkdir(dir1, { recursive: true });
