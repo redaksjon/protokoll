@@ -155,14 +155,31 @@ export const create = (config: Config, operator: Dreadcabinet.Operator): Instanc
                 createDirectories: true,
             };
             
+            // Convert context projects to routing format
+            const contextProjects = context.getAllProjects();
+            const routingProjects: Routing.ProjectRoute[] = contextProjects
+                .filter(project => project.active !== false)
+                .map(project => ({
+                    projectId: project.id,
+                    destination: {
+                        path: project.routing.destination,
+                        structure: project.routing.structure,
+                        filename_options: project.routing.filename_options,
+                        createDirectories: true,
+                    },
+                    classification: project.classification,
+                    active: project.active,
+                    auto_tags: project.routing.auto_tags,
+                }));
+            
             const routingConfig: Routing.RoutingConfig = {
                 default: defaultRouteDestination,
-                projects: [],  // Will be populated from context
+                projects: routingProjects,
                 conflict_resolution: 'primary',
             };
             
             routing = Routing.create(routingConfig, context);
-            logger.info('Routing system initialized');
+            logger.info('Routing system initialized with %d projects', routingProjects.length);
             
             // Create transcribe phase with dependencies for agentic mode
             transcribePhase = TranscribePhase.create(config, operator, {

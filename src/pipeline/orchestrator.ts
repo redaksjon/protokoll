@@ -45,6 +45,25 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
     });
     logger.debug('Context system initialized - ready to query entities via tools');
   
+    // Convert context projects to routing format
+    const contextProjects = context.getAllProjects();
+    const routingProjects: Routing.ProjectRoute[] = contextProjects
+        .filter(project => project.active !== false)
+        .map(project => ({
+            projectId: project.id,
+            destination: {
+                path: project.routing.destination,
+                structure: project.routing.structure,
+                filename_options: project.routing.filename_options,
+                createDirectories: true,
+            },
+            classification: project.classification,
+            active: project.active,
+            auto_tags: project.routing.auto_tags,
+        }));
+    
+    logger.debug('Loaded %d projects from context for routing', routingProjects.length);
+  
     // Initialize routing with config-based defaults
     const routingConfig: Routing.RoutingConfig = {
         default: {
@@ -53,7 +72,7 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
             filename_options: (config.outputFilenameOptions || ['date', 'time', 'subject']) as Routing.FilenameOption[],
             createDirectories: true,
         },
-        projects: [],
+        projects: routingProjects,
         conflict_resolution: 'primary',
     };
   
@@ -61,7 +80,7 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
     logger.debug('Routing system initialized');
   
     const interactive = Interactive.create(
-        { enabled: config.interactive, defaultToSuggestion: true },
+        { enabled: config.interactive, defaultToSuggestion: true, silent: config.silent },
         context
     );
   
@@ -237,7 +256,8 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
                 contextInstance: context,
                 routingInstance: routing,
                 interactiveMode: config.interactive,
-                interactiveInstance: config.interactive ? interactive : undefined,
+                // Always pass interactive handler - it will handle enabled/disabled internally
+                interactiveInstance: interactive,
             };
             
             const executor = Agentic.create(reasoning, toolContext);
@@ -272,6 +292,45 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
                 state: agenticResult.state,
             });
       
+            // Step 5b: Check if agentic processing found a different route
+            // (e.g., via lookup_project tool finding a project with custom destination)
+            if (agenticResult.state.routeDecision?.destination?.path) {
+                const agenticRoute = agenticResult.state.routeDecision;
+                logger.debug('Agentic processing found route: %s -> %s', 
+                    agenticRoute.projectId || 'unknown', 
+                    agenticRoute.destination.path
+                );
+                
+                // Update routeResult with the agentic decision
+                routeResult.projectId = agenticRoute.projectId || routeResult.projectId;
+                routeResult.destination = {
+                    ...routeResult.destination,
+                    path: agenticRoute.destination.path,
+                    structure: agenticRoute.destination.structure || routeResult.destination.structure,
+                };
+                routeResult.confidence = agenticRoute.confidence || routeResult.confidence;
+                routeResult.reasoning = agenticRoute.reasoning || routeResult.reasoning;
+                if (agenticRoute.signals) {
+                    routeResult.signals = agenticRoute.signals;
+                }
+                
+                // Rebuild output path with the new destination
+                const newOutputPath = routing.buildOutputPath(routeResult, routingContext);
+                logger.debug('Updated output path: %s -> %s', outputPath, newOutputPath);
+                
+                // Recreate output paths with new destination
+                const newPaths = output.createOutputPaths(
+                    input.audioFile,
+                    newOutputPath,
+                    input.hash,
+                    input.creation
+                );
+                await output.ensureDirectories(newPaths);
+                
+                // Update paths reference (reassign properties since paths is const)
+                Object.assign(paths, newPaths);
+            }
+
             // Step 6: Write final output using Output module with metadata
             logger.debug('Writing final transcript...');
             if (state.enhancedText) {

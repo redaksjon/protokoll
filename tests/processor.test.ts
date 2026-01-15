@@ -43,7 +43,8 @@ const mockContextSaveEntity = vi.fn().mockResolvedValue(undefined);
 
 const mockContextInstance = {
     search: mockContextSearch,
-    saveEntity: mockContextSaveEntity
+    saveEntity: mockContextSaveEntity,
+    getAllProjects: vi.fn().mockReturnValue([])
 };
 
 vi.mock('../src/context', () => ({
