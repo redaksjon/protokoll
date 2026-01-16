@@ -603,6 +603,86 @@ sounds_like:
                 </div>
             </section>
 
+            {/* MCP Integration */}
+            <section className="mcp-section">
+                <div className="container">
+                    <h2 className="section-title">AI Assistant Integration (MCP)</h2>
+                    <p className="section-subtitle">
+                        Skip the command line. Let your AI assistant handle transcription directly.
+                    </p>
+                    
+                    <div className="mcp-demo">
+                        <div className="mcp-conversation">
+                            <div className="mcp-message human">
+                                <div className="mcp-label">You</div>
+                                <p>"Can you transcribe ~/recordings/meeting.m4a?"</p>
+                            </div>
+                            <div className="mcp-message ai">
+                                <div className="mcp-label">AI Assistant</div>
+                                <p>"I found your Protokoll config with 3 projects. Based on the file location, I can't determine which project this belongs to. Is this for:<br/>
+                                1. Client Alpha<br/>
+                                2. Internal Notes<br/>
+                                3. Personal"</p>
+                            </div>
+                            <div className="mcp-message human">
+                                <div className="mcp-label">You</div>
+                                <p>"It's for Client Alpha"</p>
+                            </div>
+                            <div className="mcp-message ai">
+                                <div className="mcp-label">AI Assistant</div>
+                                <p>"Done! Transcript saved to ~/notes/client-alpha/2026/01/meeting.md<br/>
+                                <span className="mcp-detail">• Routed to Client Alpha (95% confidence)</span><br/>
+                                <span className="mcp-detail">• Corrected 'San Jay' → 'Sanjay Gupta'</span><br/>
+                                <span className="mcp-detail">• Added WCNP to vocabulary</span>"</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div className="mcp-features">
+                        <div className="mcp-feature">
+                            <span className="feature-icon feature-icon-text">D</span>
+                            <div>
+                                <h4>Project-Aware Discovery</h4>
+                                <p>Automatically finds and uses the right .protokoll configuration</p>
+                            </div>
+                        </div>
+                        <div className="mcp-feature">
+                            <span className="feature-icon feature-icon-text">C</span>
+                            <div>
+                                <h4>Context Management</h4>
+                                <p>"Add Priya as a person - Whisper hears 'pre a'"</p>
+                            </div>
+                        </div>
+                        <div className="mcp-feature">
+                            <span className="feature-icon feature-icon-text">F</span>
+                            <div>
+                                <h4>Natural Feedback</h4>
+                                <p>"WCMP should be WCNP in that transcript"</p>
+                            </div>
+                        </div>
+                        <div className="mcp-feature">
+                            <span className="feature-icon feature-icon-text">M</span>
+                            <div>
+                                <h4>Combine & Edit</h4>
+                                <p>"Merge these three meeting parts into one"</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div className="mcp-setup">
+                        <h3>One-Time Setup</h3>
+                        <div className="code-block">
+                            <div className="code-line"><span className="code-comment"># Add to ~/.cursor/mcp.json or Claude Desktop config</span></div>
+                            <div className="code-line">{`{`}</div>
+                            <div className="code-line">  "mcpServers": {`{`}</div>
+                            <div className="code-line">    "protokoll": {`{`} "command": "protokoll-mcp" {`}`}</div>
+                            <div className="code-line">  {`}`}</div>
+                            <div className="code-line">{`}`}</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
             {/* Supported Models */}
             <section className="models-section">
                 <div className="container">

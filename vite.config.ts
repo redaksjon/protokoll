@@ -1,7 +1,5 @@
 import { defineConfig } from 'vite';
-import { VitePluginNode } from 'vite-plugin-node';
 import replace from '@rollup/plugin-replace';
-// import { visualizer } from 'rollup-plugin-visualizer';
 import { execSync } from 'node:child_process';
 import shebang from 'rollup-plugin-preserve-shebang';
 import path from 'node:path';
@@ -37,20 +35,6 @@ export default defineConfig({
         port: 3000
     },
     plugins: [
-        ...VitePluginNode({
-            adapter: 'express',
-            appPath: './src/main.ts',
-            exportName: 'viteNodeApp',
-            tsCompiler: 'swc',
-            swcOptions: {
-                sourceMaps: true,
-            },
-        }),
-        // visualizer({
-        //     template: 'network',
-        //     filename: 'network.html',
-        //     projectRoot: process.cwd(),
-        // }),
         replace({
             '__VERSION__': process.env.npm_package_version,
             '__GIT_BRANCH__': gitInfo.branch,
@@ -60,19 +44,23 @@ export default defineConfig({
             '__SYSTEM_INFO__': `${process.platform} ${process.arch} ${process.version}`,
             preventAssignment: true,
         }),
+        shebang({
+            shebang: '#!/usr/bin/env node',
+        }),
     ],
     build: {
         target: 'esnext',
         outDir: 'dist',
-        lib: {
-            entry: './src/main.ts',
-            formats: ['es'],
-        },
+        ssr: true,
         rollupOptions: {
             external: [
                 // Dependencies from package.json
                 '@anthropic-ai/sdk',
                 '@google/generative-ai',
+                '@modelcontextprotocol/sdk',
+                '@modelcontextprotocol/sdk/server/index.js',
+                '@modelcontextprotocol/sdk/server/stdio.js',
+                '@modelcontextprotocol/sdk/types.js',
                 '@riotprompt/riotprompt',
                 '@theunwalked/cardigantime',
                 '@theunwalked/dreadcabinet',
@@ -91,19 +79,15 @@ export default defineConfig({
                 // Node.js built-in modules (node: prefix)
                 /^node:/,
             ],
-            input: 'src/main.ts',
+            input: {
+                main: 'src/main.ts',
+                'mcp/server': 'src/mcp/server.ts',
+            },
             output: {
                 format: 'esm',
                 entryFileNames: '[name].js',
-                preserveModules: true,
-                exports: 'named',
+                chunkFileNames: '[name].js',
             },
-            plugins: [
-                shebang({
-                    shebang: '#!/usr/bin/env node',
-                }),
-            ],
-
         },
         modulePreload: false,
         minify: false,

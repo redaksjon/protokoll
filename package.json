@@ -5,7 +5,8 @@
   "main": "dist/main.js",
   "type": "module",
   "bin": {
-    "protokoll": "./dist/main.js"
+    "protokoll": "./dist/main.js",
+    "protokoll-mcp": "./dist/mcp/server.js"
   },
   "repository": {
     "type": "git",
@@ -13,7 +14,7 @@
   },
   "homepage": "https://github.com/redaksjon/protokoll",
   "scripts": {
-    "build": "npm run lint && tsc --noEmit && vite build && node scripts/copy-assets.mjs && chmod +x dist/main.js",
+    "build": "npm run lint && tsc --noEmit && vite build && node scripts/copy-assets.mjs && chmod +x dist/main.js dist/mcp/server.js",
     "dev": "vite",
     "watch": "vite build --watch",
     "test": "vitest run --coverage",
@@ -37,6 +38,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
+    "@modelcontextprotocol/sdk": "^1.25.2",
     "@google/generative-ai": "^0.24.1",
     "@riotprompt/riotprompt": "^0.0.19",
     "@theunwalked/cardigantime": "^0.0.20",

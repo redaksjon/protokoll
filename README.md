@@ -94,6 +94,7 @@ The goal is simple: **After a few weeks of use, Protokoll should understand your
 - [Output Structure](#output-structure)
 - [Supported Models](#supported-models)
 - [Troubleshooting](#troubleshooting)
+- [MCP Server Integration](#mcp-server-integration)
 - [Architecture](#architecture)
 - [Examples](#examples)
 
@@ -1262,6 +1263,203 @@ Check `./output/protokoll/` for:
 - Raw transcripts
 - LLM requests/responses
 - Routing decisions
+
+## MCP Server Integration
+
+Protokoll can run as an MCP (Model Context Protocol) server, allowing AI assistants like Cursor and Claude to interact with transcription and context management directly—without needing to understand command-line interfaces.
+
+### Why MCP?
+
+Traditional workflow:
+1. Open terminal
+2. Navigate to directory
+3. Remember command syntax
+4. Copy-paste file paths
+5. Run commands
+
+With MCP, you just talk naturally:
+- *"Can you transcribe this meeting recording?"*
+- *"Add Sanjay Gupta as a person - Whisper mishears him as 'San Jay Grouper'"*  
+- *"This should be in the Quantum Readiness project"*
+
+The AI handles all the details.
+
+### Project-Aware Configuration
+
+**Important**: Protokoll supports multiple project configurations. When you have different `.protokoll` directories for different projects, the MCP server intelligently discovers and uses the right configuration.
+
+#### How It Works
+
+When you ask to transcribe a file, the AI:
+
+1. **Discovers configurations** - Walks up the directory tree to find `.protokoll` directories
+2. **Suggests projects** - Analyzes the file path to determine which project it likely belongs to
+3. **Asks for clarification** - If ambiguous, asks which project to use
+4. **Processes with context** - Uses the appropriate configuration for transcription
+
+#### Example: Ambiguous Location
+
+```
+You: "Can you transcribe ~/Downloads/meeting.m4a?"
+
+AI: "I found your Protokoll configuration with 3 projects configured. 
+     Based on the file location in Downloads, I can't automatically 
+     determine which project this belongs to. Is this for:
+     1. Client Alpha
+     2. Internal Notes
+     3. Personal
+     Which project should I use?"
+
+You: "It's for Client Alpha"
+
+AI: "Got it! Processing with Client Alpha configuration..."
+    [transcribes and routes to ~/notes/client-alpha/]
+```
+
+#### Example: Clear Location
+
+```
+You: "Transcribe ~/work/client-alpha/recordings/standup.m4a"
+
+AI: "Found Client Alpha configuration nearby. Processing..."
+    [automatically uses the right config and routing]
+```
+
+### Available MCP Tools
+
+| Tool | Purpose |
+|------|---------|
+| **Discovery** | |
+| `protokoll_discover_config` | Find .protokoll configurations for a file/directory |
+| `protokoll_suggest_project` | Determine which project a file belongs to |
+| **Transcription** | |
+| `protokoll_process_audio` | Process a single audio file |
+| `protokoll_batch_process` | Process all audio files in a directory |
+| **Context Management** | |
+| `protokoll_context_status` | Get status of the context system |
+| `protokoll_list_projects` | List all configured projects |
+| `protokoll_list_people` | List all people in context |
+| `protokoll_list_terms` | List technical terms |
+| `protokoll_list_companies` | List companies |
+| `protokoll_search_context` | Search across all entity types |
+| `protokoll_get_entity` | Get detailed info about an entity |
+| `protokoll_add_person` | Add a new person to context |
+| `protokoll_add_project` | Add a new project |
+| `protokoll_add_term` | Add a technical term |
+| `protokoll_add_company` | Add a company |
+| `protokoll_delete_entity` | Delete an entity |
+| **Transcript Actions** | |
+| `protokoll_read_transcript` | Read and parse a transcript file |
+| `protokoll_edit_transcript` | Edit title or change project |
+| `protokoll_combine_transcripts` | Combine multiple transcripts |
+| `protokoll_provide_feedback` | Natural language feedback to correct transcripts |
+
+### Setup
+
+Add Protokoll to your MCP configuration:
+
+**For Cursor:**
+
+Add to `~/.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "protokoll": {
+      "command": "protokoll-mcp"
+    }
+  }
+}
+```
+
+**For Claude Desktop:**
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "protokoll": {
+      "command": "protokoll-mcp"
+    }
+  }
+}
+```
+
+### Example Conversations
+
+**Basic Transcription:**
+```
+Human: Transcribe ~/recordings/standup.m4a
+
+AI: [discovers config, suggests project]
+
+AI: Done! Transcript saved to ~/notes/2026/01/16-0900-standup.md
+    Project: Daily Standups (95% confidence)
+    People recognized: Sarah Chen, Mike Johnson
+```
+
+**Add Context:**
+```
+Human: "San Jay" should be "Sanjay Gupta" - he's a product manager at Acme
+
+AI: [calls protokoll_add_person]
+
+AI: Added Sanjay Gupta to your context. Future transcripts will 
+    recognize "San Jay", "Sanjay", and similar variations.
+```
+
+**Provide Feedback:**
+```
+Human: In that last transcript, WCMP should be WCNP
+
+AI: [calls protokoll_provide_feedback]
+
+AI: Fixed! I replaced "WCMP" with "WCNP" (3 occurrences) and added 
+    WCNP to your vocabulary for future transcripts.
+```
+
+**Combine Transcripts:**
+```
+Human: Combine these three meeting parts into one:
+       ~/notes/meeting-part1.md
+       ~/notes/meeting-part2.md
+       ~/notes/meeting-part3.md
+
+AI: [calls protokoll_combine_transcripts]
+
+AI: Combined into ~/notes/16-1400-full-meeting.md
+    The source files have been deleted.
+```
+
+### Configuration Hierarchy
+
+The MCP server respects Protokoll's hierarchical configuration:
+
+```
+~/
+├── .protokoll/              # Global config (shared context)
+│   ├── config.yaml
+│   ├── people/              # People you mention across all projects
+│   └── companies/
+└── work/
+    └── client-alpha/
+        └── .protokoll/      # Project-specific (overrides global)
+            ├── config.yaml  # Client-specific settings
+            ├── people/      # Client Alpha contacts
+            └── projects/    # Routing for this client
+```
+
+When processing a file, the nearest `.protokoll` takes precedence, but inherits from parent directories.
+
+### Best Practices
+
+1. **Create project-specific configs** when you have different routing needs
+2. **Use global config** for shared context (common terms, general contacts)
+3. **Let the AI discover** - it will ask when clarification is needed
+4. **Accept context suggestions** - when the AI offers to add terms/people, say yes
+
+For complete documentation, see the [MCP Integration Guide](./guide/mcp-integration.md).
 
 ## Architecture
 
