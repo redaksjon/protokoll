@@ -628,6 +628,49 @@ section {
 }
 
 /* ========================================
+   Commands Section
+   ======================================== */
+.commands-section {
+    background: var(--color-bg);
+    text-align: center;
+}
+
+.commands-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.5rem;
+    margin: 2rem 0;
+    text-align: left;
+}
+
+.command-group {
+    background: var(--color-bg-elevated);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    transition: all 0.3s ease;
+}
+
+.command-group:hover {
+    border-color: var(--color-primary);
+    transform: translateY(-2px);
+}
+
+.command-group h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    color: var(--color-text);
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.command-group .code-block {
+    padding: 1rem;
+    font-size: 0.75rem;
+}
+
+/* ========================================
    Reflection Section
    ======================================== */
 .reflection-section {

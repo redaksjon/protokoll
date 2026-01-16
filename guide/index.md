@@ -17,6 +17,7 @@ Protokoll transforms audio recordings into intelligent, context-enhanced transcr
 ### Understanding Protokoll
 - [**Architecture**](./architecture.md): System design and data flow
 - [**Context System**](./context-system.md): How context storage works
+- [**Context Commands**](./context-commands.md): CLI for managing entities
 - [**Routing**](./routing.md): Intelligent note routing
 - [**Reasoning**](./reasoning.md): Reasoning model integration
 
@@ -40,6 +41,36 @@ protokoll --input-directory ./recordings --no-self-reflection
 
 # Full debug mode
 protokoll --input-directory ./recordings --debug --verbose
+```
+
+### Context Management Commands
+
+```bash
+# List entities
+protokoll project list
+protokoll person list
+protokoll term list
+protokoll company list
+protokoll ignored list
+
+# Show entity details
+protokoll project show <id>
+protokoll person show <id>
+
+# Add new entities (interactive)
+protokoll project add
+protokoll person add
+protokoll term add
+protokoll company add
+protokoll ignored add
+
+# Delete entities
+protokoll project delete <id>
+protokoll person delete <id> --force
+
+# Context overview
+protokoll context status
+protokoll context search <query>
 ```
 
 ### Key Directories

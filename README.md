@@ -79,6 +79,7 @@ The goal is simple: **After a few weeks of use, Protokoll should understand your
 - [Getting Started](#getting-started)
 - [Configuration](#configuration)
 - [Command Line Options](#command-line-options)
+- [Context Management Commands](#context-management-commands)
 - [Key Features](#key-features)
 - [Context System](#context-system)
 - [Routing System](#routing-system)
@@ -369,6 +370,104 @@ Combined example: `260111-1430-meeting-notes.md`
 | `--recursive` | Process subdirectories | `false` |
 | `--max-audio-size <bytes>` | Max file size before splitting | `25MB` |
 | `--temp-directory <dir>` | Temp files for audio splitting | System temp |
+
+## Context Management Commands
+
+Protokoll includes a complete CLI for managing context entities directly from the command line. Instead of manually editing YAML files, you can use these subcommands to list, view, add, and delete entities.
+
+### Entity Types
+
+| Command | Description |
+|---------|-------------|
+| `project` | Manage projects (routing destinations) |
+| `person` | Manage people (name recognition) |
+| `term` | Manage technical terms |
+| `company` | Manage companies |
+| `ignored` | Manage ignored terms (won't prompt for these) |
+| `context` | Overall context system management |
+
+### Common Actions
+
+Each entity type supports the same actions:
+
+```bash
+# List all entities of a type
+protokoll project list
+protokoll person list
+protokoll term list
+protokoll company list
+protokoll ignored list
+
+# Show details for a specific entity
+protokoll project show <id>
+protokoll person show priya-sharma
+
+# Add a new entity (interactive)
+protokoll project add
+protokoll person add
+protokoll term add
+
+# Delete an entity
+protokoll project delete <id>
+protokoll person delete john-smith --force
+```
+
+### Context Overview
+
+```bash
+# Show context system status (discovered directories, entity counts)
+protokoll context status
+
+# Search across all entity types
+protokoll context search "acme"
+```
+
+### Example: Adding a Person
+
+```bash
+$ protokoll person add
+
+[Add New Person]
+
+Full name: Priya Sharma
+ID (Enter for "priya-sharma"): 
+First name (Enter to skip): Priya
+Last name (Enter to skip): Sharma
+Company ID (Enter to skip): acme-corp
+Role (Enter to skip): Product Manager
+Sounds like (comma-separated, Enter to skip): pre a, pria, preeya
+Context notes (Enter to skip): Colleague from product team
+
+Person "Priya Sharma" saved successfully.
+```
+
+### Example: Adding a Project
+
+```bash
+$ protokoll project add
+
+[Add New Project]
+
+Project name: Client Alpha
+ID (Enter for "client-alpha"): 
+Output destination path: ~/clients/alpha/notes
+Directory structure (none/year/month/day, Enter for month): month
+Context type (work/personal/mixed, Enter for work): work
+Trigger phrases (comma-separated): client alpha, alpha project
+Topic keywords (comma-separated, Enter to skip): client engagement
+Description (Enter to skip): Primary client project
+
+Project "Client Alpha" saved successfully.
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `-v, --verbose` | Show full details (for `list` commands) |
+| `-f, --force` | Skip confirmation (for `delete` commands) |
+
+For complete documentation, see the [Context Commands Guide](./guide/context-commands.md).
 
 ## Key Features
 

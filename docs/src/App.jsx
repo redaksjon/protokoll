@@ -249,6 +249,93 @@ sounds_like:
                 </div>
             </section>
 
+            {/* Context Management Commands */}
+            <section className="commands-section">
+                <div className="container">
+                    <h2 className="section-title">Context Management Commands</h2>
+                    <p className="section-subtitle">
+                        Manage your context entities directly from the command line.
+                        No need to edit YAML files manually.
+                    </p>
+                    
+                    <div className="commands-grid">
+                        <div className="command-group">
+                            <h4>Entity Commands</h4>
+                            <div className="code-block">
+                                <div className="code-line"><span className="code-comment"># List all entities</span></div>
+                                <div className="code-line">protokoll project list</div>
+                                <div className="code-line">protokoll person list</div>
+                                <div className="code-line">protokoll term list</div>
+                                <div className="code-line">protokoll company list</div>
+                                <div className="code-line">protokoll ignored list</div>
+                            </div>
+                        </div>
+                        <div className="command-group">
+                            <h4>View & Manage</h4>
+                            <div className="code-block">
+                                <div className="code-line"><span className="code-comment"># Show entity details</span></div>
+                                <div className="code-line">protokoll person show priya-sharma</div>
+                                <div className="code-line"></div>
+                                <div className="code-line"><span className="code-comment"># Add new entities (interactive)</span></div>
+                                <div className="code-line">protokoll project add</div>
+                                <div className="code-line">protokoll person add</div>
+                                <div className="code-line"></div>
+                                <div className="code-line"><span className="code-comment"># Delete entities</span></div>
+                                <div className="code-line">protokoll person delete john-smith</div>
+                            </div>
+                        </div>
+                        <div className="command-group">
+                            <h4>Context Overview</h4>
+                            <div className="code-block">
+                                <div className="code-line"><span className="code-comment"># Check context status</span></div>
+                                <div className="code-line">protokoll context status</div>
+                                <div className="code-line"></div>
+                                <div className="code-line"><span className="code-comment"># Search across all entities</span></div>
+                                <div className="code-line">protokoll context search "acme"</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="terminal-demo" style={{marginTop: '2rem'}}>
+                        <div className="terminal-header">
+                            <span className="terminal-dot red"></span>
+                            <span className="terminal-dot yellow"></span>
+                            <span className="terminal-dot green"></span>
+                            <span className="terminal-title">protokoll person add</span>
+                        </div>
+                        <div className="terminal-body">
+                            <div className="terminal-line">
+                                <span className="terminal-highlight">[Add New Person]</span>
+                            </div>
+                            <div className="terminal-line"></div>
+                            <div className="terminal-line">
+                                <span className="terminal-dim">Full name: </span>
+                                <span className="terminal-user">Priya Sharma</span>
+                            </div>
+                            <div className="terminal-line">
+                                <span className="terminal-dim">ID (Enter for "priya-sharma"): </span>
+                            </div>
+                            <div className="terminal-line">
+                                <span className="terminal-dim">Company ID: </span>
+                                <span className="terminal-user">acme-corp</span>
+                            </div>
+                            <div className="terminal-line">
+                                <span className="terminal-dim">Role: </span>
+                                <span className="terminal-user">Product Manager</span>
+                            </div>
+                            <div className="terminal-line">
+                                <span className="terminal-dim">Sounds like: </span>
+                                <span className="terminal-user">pre a, pria, preeya</span>
+                            </div>
+                            <div className="terminal-line"></div>
+                            <div className="terminal-line">
+                                <span className="terminal-success">Person "Priya Sharma" saved successfully.</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
             {/* Self-Reflection */}
             <section className="reflection-section">
                 <div className="container">
