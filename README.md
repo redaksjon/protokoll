@@ -1358,9 +1358,20 @@ AI: "Found Client Alpha configuration nearby. Processing..."
 
 Add Protokoll to your MCP configuration:
 
-**For Cursor:**
+**One-Time Setup (works for all projects):**
 
-Add to `~/.cursor/mcp.json`:
+```json
+{
+  "mcpServers": {
+    "protokoll": {
+      "command": "npx",
+      "args": ["-y", "-p", "@redaksjon/protokoll", "protokoll-mcp"]
+    }
+  }
+}
+```
+
+Or if installed globally (`npm install -g @redaksjon/protokoll`):
 
 ```json
 {
@@ -1372,19 +1383,9 @@ Add to `~/.cursor/mcp.json`:
 }
 ```
 
-**For Claude Desktop:**
+**For Cursor:** Add to `~/.cursor/mcp.json`
 
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "protokoll": {
-      "command": "protokoll-mcp"
-    }
-  }
-}
-```
+**For Claude Desktop:** Add to `~/Library/Application Support/Claude/claude_desktop_config.json`
 
 ### Example Conversations
 

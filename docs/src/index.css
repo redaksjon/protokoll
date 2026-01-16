@@ -1325,7 +1325,7 @@ section {
 }
 
 .mcp-setup {
-    max-width: 500px;
+    max-width: 600px;
     margin: 2rem auto 0;
     text-align: left;
 }
@@ -1336,6 +1336,34 @@ section {
     margin-bottom: 1rem;
     color: var(--color-text);
     text-align: center;
+}
+
+.mcp-setup-subtitle {
+    font-size: 0.9rem;
+    color: var(--color-text-muted);
+    margin-bottom: 0.75rem;
+    text-align: center;
+}
+
+.mcp-setup-subtitle code {
+    background: var(--color-bg-muted);
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.85rem;
+}
+
+.mcp-setup-alt {
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+    margin: 1rem 0 0.5rem;
+    text-align: center;
+}
+
+.mcp-setup-alt code {
+    background: var(--color-bg-muted);
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
 }
 
 .mcp-setup .code-block {

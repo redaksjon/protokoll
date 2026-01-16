@@ -671,8 +671,19 @@ sounds_like:
                     
                     <div className="mcp-setup">
                         <h3>One-Time Setup</h3>
+                        <p className="mcp-setup-subtitle">Add to <code>~/.cursor/mcp.json</code> or Claude Desktop config:</p>
                         <div className="code-block">
-                            <div className="code-line"><span className="code-comment"># Add to ~/.cursor/mcp.json or Claude Desktop config</span></div>
+                            <div className="code-line">{`{`}</div>
+                            <div className="code-line">  "mcpServers": {`{`}</div>
+                            <div className="code-line">    "protokoll": {`{`}</div>
+                            <div className="code-line">      "command": "npx",</div>
+                            <div className="code-line">      "args": ["-y", "-p", "@redaksjon/protokoll", "protokoll-mcp"]</div>
+                            <div className="code-line">    {`}`}</div>
+                            <div className="code-line">  {`}`}</div>
+                            <div className="code-line">{`}`}</div>
+                        </div>
+                        <p className="mcp-setup-alt">Or if installed globally (<code>npm install -g @redaksjon/protokoll</code>):</p>
+                        <div className="code-block">
                             <div className="code-line">{`{`}</div>
                             <div className="code-line">  "mcpServers": {`{`}</div>
                             <div className="code-line">    "protokoll": {`{`} "command": "protokoll-mcp" {`}`}</div>
