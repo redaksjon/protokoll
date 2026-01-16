@@ -819,5 +819,98 @@ describe('arguments', () => {
             const [config] = await configure(mockDreadcabinetInstance, mockCardigantimeInstance);
             expect(config.overrides).toBe(true);
         });
+
+        test('should throw error when temp directory is missing', async () => {
+            // Mock so tempDirectory is undefined
+            defaultCommanderMock.opts.mockReturnValue({
+                dryRun: false,
+                verbose: false,
+                debug: false,
+                openaiApiKey: 'test-api-key',
+                timezone: 'America/New_York',
+                transcriptionModel: 'whisper-1',
+                model: 'gpt-4o',
+                contentTypes: ['diff', 'log'],
+                recursive: false,
+                inputDirectory: 'test-input-directory',
+                outputDirectory: 'test-output-directory',
+                audioExtensions: ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'],
+                configDirectory: 'test-config-dir',
+                overrides: false,
+                classifyModel: 'gpt-4o-mini',
+                composeModel: 'o1-mini',
+                tempDirectory: undefined,
+            });
+
+            // Override defaults to not provide tempDirectory
+            mockDreadcabinetInstance.applyDefaults.mockImplementationOnce((config: any) => {
+                delete config.tempDirectory;
+                return config;
+            });
+
+            await expect(configure(mockDreadcabinetInstance, mockCardigantimeInstance)).rejects.toThrow('Temp directory is required');
+        });
+
+        test('should throw error when model is not provided and required', async () => {
+            // Mock so model is undefined
+            defaultCommanderMock.opts.mockReturnValue({
+                dryRun: false,
+                verbose: false,
+                debug: false,
+                openaiApiKey: 'test-api-key',
+                timezone: 'America/New_York',
+                transcriptionModel: 'whisper-1',
+                // model is missing
+                contentTypes: ['diff', 'log'],
+                recursive: false,
+                inputDirectory: 'test-input-directory',
+                outputDirectory: 'test-output-directory',
+                audioExtensions: ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'],
+                configDirectory: 'test-config-dir',
+                overrides: false,
+                classifyModel: 'gpt-4o-mini',
+                composeModel: 'o1-mini',
+                tempDirectory: '/tmp',
+            });
+
+            // Override defaults to not provide model
+            mockDreadcabinetInstance.applyDefaults.mockImplementationOnce((config: any) => {
+                delete config.model;
+                return config;
+            });
+
+            await expect(configure(mockDreadcabinetInstance, mockCardigantimeInstance)).rejects.toThrow('Model for model is required');
+        });
+
+        test('should throw error when transcription model is not provided and required', async () => {
+            // Mock so transcriptionModel is undefined
+            defaultCommanderMock.opts.mockReturnValue({
+                dryRun: false,
+                verbose: false,
+                debug: false,
+                openaiApiKey: 'test-api-key',
+                timezone: 'America/New_York',
+                // transcriptionModel is missing
+                model: 'gpt-4o',
+                contentTypes: ['diff', 'log'],
+                recursive: false,
+                inputDirectory: 'test-input-directory',
+                outputDirectory: 'test-output-directory',
+                audioExtensions: ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'],
+                configDirectory: 'test-config-dir',
+                overrides: false,
+                classifyModel: 'gpt-4o-mini',
+                composeModel: 'o1-mini',
+                tempDirectory: '/tmp',
+            });
+
+            // Override defaults to not provide transcriptionModel
+            mockDreadcabinetInstance.applyDefaults.mockImplementationOnce((config: any) => {
+                delete config.transcriptionModel;
+                return config;
+            });
+
+            await expect(configure(mockDreadcabinetInstance, mockCardigantimeInstance)).rejects.toThrow('Model for transcriptionModel is required');
+        });
     });
 });  

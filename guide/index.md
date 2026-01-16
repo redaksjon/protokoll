@@ -24,6 +24,9 @@ Protokoll transforms audio recordings into intelligent, context-enhanced transcr
 - [**Transcript Actions**](./action.md): Post-processing commands (combine, etc.)
 - [**Feedback**](./feedback.md): Intelligent feedback for corrections
 
+### AI Integration
+- [**MCP Integration**](./mcp-integration.md): Use Protokoll through AI assistants
+
 ### Development
 - [**Development**](./development.md): Building and testing
 - [**Interactive Mode**](./interactive.md): User interaction system
@@ -136,6 +139,19 @@ protokoll feedback /path/to/transcript.md -f "WCMP should be WCNP" --dry-run -v
 # Get help on feedback options
 protokoll feedback --help-me
 ```
+
+### MCP / AI Integration
+
+Instead of CLI commands, you can talk to an AI assistant:
+
+```
+"Can you transcribe ~/Downloads/meeting.m4a?"
+"Add Sanjay Gupta as a person - Whisper mishears it as 'San Jay Grouper'"
+"This transcript should be in the Quantum Readiness project"
+"WCMP should be WCNP in this transcript"
+```
+
+See [MCP Integration Guide](./mcp-integration.md) for setup.
 
 ### Key Directories
 

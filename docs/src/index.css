@@ -1214,6 +1214,135 @@ section {
 }
 
 /* ========================================
+   MCP Section
+   ======================================== */
+.mcp-section {
+    background: var(--color-bg);
+    text-align: center;
+}
+
+.mcp-demo {
+    max-width: 700px;
+    margin: 3rem auto;
+}
+
+.mcp-conversation {
+    background: var(--color-bg-card);
+    border: 1px solid var(--color-border);
+    border-radius: 16px;
+    overflow: hidden;
+}
+
+.mcp-message {
+    padding: 1.25rem 1.5rem;
+    text-align: left;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.mcp-message:last-child {
+    border-bottom: none;
+}
+
+.mcp-message.human {
+    background: var(--color-bg-elevated);
+}
+
+.mcp-message.ai {
+    background: rgba(0, 212, 170, 0.05);
+}
+
+.mcp-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 0.5rem;
+}
+
+.mcp-message.human .mcp-label {
+    color: var(--color-text-dim);
+}
+
+.mcp-message.ai .mcp-label {
+    color: var(--color-primary);
+}
+
+.mcp-message p {
+    font-size: 0.95rem;
+    color: var(--color-text-secondary);
+    line-height: 1.6;
+    margin: 0;
+}
+
+.mcp-detail {
+    font-size: 0.85rem;
+    color: var(--color-text-dim);
+    display: block;
+    margin-top: 0.25rem;
+}
+
+.mcp-features {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.5rem;
+    margin: 3rem 0;
+}
+
+.mcp-feature {
+    display: flex;
+    gap: 1rem;
+    align-items: flex-start;
+    padding: 1.5rem;
+    background: var(--color-bg-elevated);
+    border-radius: 12px;
+    border: 1px solid var(--color-border);
+    text-align: left;
+    transition: all 0.3s ease;
+}
+
+.mcp-feature:hover {
+    border-color: var(--color-primary);
+    transform: translateY(-2px);
+}
+
+.mcp-feature .feature-icon {
+    font-size: 1.5rem;
+    flex-shrink: 0;
+}
+
+.mcp-feature h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--color-text);
+    margin: 0 0 0.5rem 0;
+}
+
+.mcp-feature p {
+    font-size: 0.9rem;
+    color: var(--color-text-secondary);
+    margin: 0;
+    line-height: 1.5;
+}
+
+.mcp-setup {
+    max-width: 500px;
+    margin: 2rem auto 0;
+    text-align: left;
+}
+
+.mcp-setup h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    color: var(--color-text);
+    text-align: center;
+}
+
+.mcp-setup .code-block {
+    font-size: 0.8rem;
+}
+
+/* ========================================
    Responsive
    ======================================== */
 @media (max-width: 768px) {
