@@ -52,8 +52,18 @@ vi.mock('../src/context', () => ({
 }));
 
 // Mock for Routing module
+const mockRoutingInstance = {
+    route: vi.fn().mockReturnValue({
+        destination: { path: '~/notes', structure: 'month', filename_options: ['date'] },
+        projectId: null,
+        confidence: 0.85,
+        signals: [],
+        reasoning: 'Default routing',
+    }),
+};
+
 vi.mock('../src/routing', () => ({
-    create: vi.fn()
+    create: vi.fn().mockReturnValue(mockRoutingInstance)
 }));
 
 // Mock for TranscribePhase
@@ -404,5 +414,244 @@ describe('Processor', () => {
         // Should not start interactive session
         expect(mockLogger.info).not.toHaveBeenCalledWith('Interactive session started');
         expect(mockLogger.info).toHaveBeenCalledWith('Transcription complete for file %s', audioFile);
+    });
+
+    test('should skip unknown entities that are already in context', async () => {
+        const configWithInteractive = { ...mockConfig, interactive: true };
+        const processor = processorModule.create(configWithInteractive, mockOperator);
+        const audioFile = '/path/to/audio.mp3';
+
+        // Mock context search to return matches (names ARE known)
+        mockContextSearch.mockReturnValue([{ id: 'john-smith', name: 'John Smith', type: 'person' }]);
+
+        // Mock transcribe with name that IS in context
+        mockTranscribe.mockResolvedValueOnce({
+            text: 'Meeting with John Smith about the budget.',
+            audioFileBasename: 'test-audio.mp3'
+        });
+
+        await processor.process(audioFile);
+
+        // Should complete without asking for clarifications
+        expect(mockLogger.info).toHaveBeenCalledWith('No unknown entities detected - transcript looks good');
+    });
+
+    test('should handle projects with custom routing configuration', async () => {
+        const configWithInteractive = { ...mockConfig, interactive: true };
+        
+        // Mock context to return projects with routing info
+        mockContextInstance.getAllProjects.mockReturnValue([
+            {
+                id: 'project-alpha',
+                name: 'Project Alpha',
+                type: 'project',
+                active: true,
+                routing: {
+                    destination: '~/notes/alpha',
+                    structure: 'day',
+                    filename_options: ['date', 'subject'],
+                    auto_tags: ['work', 'alpha'],
+                },
+                classification: {
+                    context_type: 'work',
+                    explicit_phrases: ['project alpha'],
+                },
+            },
+            {
+                id: 'project-beta',
+                name: 'Project Beta',
+                type: 'project',
+                active: true,
+                routing: {
+                    destination: null, // Will use default
+                    structure: 'month',
+                    filename_options: ['date'],
+                },
+                classification: {
+                    context_type: 'work',
+                },
+            },
+        ]);
+
+        const processor = processorModule.create(configWithInteractive, mockOperator);
+        await processor.process('/path/to/audio.mp3');
+
+        // Should have initialized routing with projects
+        expect(mockLogger.info).toHaveBeenCalledWith(
+            'Routing system initialized with %d projects', 
+            2
+        );
+    });
+
+    test('should skip inactive projects when setting up routing', async () => {
+        mockContextInstance.getAllProjects.mockReturnValue([
+            {
+                id: 'active-project',
+                name: 'Active Project',
+                type: 'project',
+                active: true,
+                routing: {
+                    destination: '~/notes/active',
+                    structure: 'month',
+                    filename_options: ['date'],
+                },
+                classification: {},
+            },
+            {
+                id: 'inactive-project',
+                name: 'Inactive Project',
+                type: 'project',
+                active: false, // Should be filtered out
+                routing: {
+                    destination: '~/notes/inactive',
+                    structure: 'month',
+                    filename_options: ['date'],
+                },
+                classification: {},
+            },
+        ]);
+
+        const processor = processorModule.create(mockConfig, mockOperator);
+        await processor.process('/path/to/audio.mp3');
+
+        // Only 1 project should be active
+        expect(mockLogger.info).toHaveBeenCalledWith(
+            'Routing system initialized with %d projects',
+            1
+        );
+    });
+
+    test('should apply multiple corrections to transcript', async () => {
+        const configWithInteractive = { ...mockConfig, interactive: true };
+        const processor = processorModule.create(configWithInteractive, mockOperator);
+        const audioFile = '/path/to/audio.mp3';
+
+        mockContextSearch.mockReturnValue([]);
+        
+        // Mock multiple different clarification responses
+        let callCount = 0;
+        mockClarificationHandler.mockImplementation(() => {
+            callCount++;
+            if (callCount === 1) {
+                return Promise.resolve({ response: 'John Corrected', shouldRemember: false });
+            }
+            return Promise.resolve({ response: 'Project Corrected', shouldRemember: false });
+        });
+
+        mockTranscribe.mockResolvedValueOnce({
+            text: 'Meeting with John Smith. Working on the Phoenix project.',
+            audioFileBasename: 'test-audio.mp3'
+        });
+
+        await processor.process(audioFile);
+
+        expect(mockLogger.info).toHaveBeenCalledWith('Transcription complete for file %s', audioFile);
+    });
+
+    test('should handle clarification with empty response', async () => {
+        const configWithInteractive = { ...mockConfig, interactive: true };
+        const processor = processorModule.create(configWithInteractive, mockOperator);
+        const audioFile = '/path/to/audio.mp3';
+
+        mockContextSearch.mockReturnValue([]);
+        
+        // Mock handler to return empty string (user skipped)
+        mockClarificationHandler.mockResolvedValue({
+            response: '',
+            shouldRemember: false
+        });
+
+        mockTranscribe.mockResolvedValueOnce({
+            text: 'Meeting with John Smith about something.',
+            audioFileBasename: 'test-audio.mp3'
+        });
+
+        await processor.process(audioFile);
+
+        // Should complete without applying corrections
+        expect(mockLogger.info).toHaveBeenCalledWith('Transcription complete for file %s', audioFile);
+    });
+
+    test('should ask for routing confirmation when confidence is low', async () => {
+        const configWithInteractive = { ...mockConfig, interactive: true };
+        
+        // Mock low confidence routing
+        mockRoutingInstance.route.mockReturnValue({
+            destination: { path: '~/notes/unknown', structure: 'month', filename_options: ['date'] },
+            projectId: null,
+            confidence: 0.5, // Below 0.7 threshold
+            signals: [{ type: 'context', value: 'meeting', weight: 0.3, source: 'transcript' }],
+            reasoning: 'Low confidence match',
+        });
+
+        const processor = processorModule.create(configWithInteractive, mockOperator);
+        const audioFile = '/path/to/audio.mp3';
+
+        // Mock transcript with no special entities
+        mockTranscribe.mockResolvedValueOnce({
+            text: 'Simple meeting notes.',
+            audioFileBasename: 'test-audio.mp3'
+        });
+
+        await processor.process(audioFile);
+
+        // Should log about low confidence
+        expect(mockLogger.info).toHaveBeenCalledWith(
+            expect.stringContaining('Routing confidence'),
+            expect.any(Number)
+        );
+    });
+
+    test('should include signals in low confidence routing context', async () => {
+        const configWithInteractive = { ...mockConfig, interactive: true };
+        
+        // Mock low confidence with multiple signals
+        mockRoutingInstance.route.mockReturnValue({
+            destination: { path: '~/notes', structure: 'month', filename_options: ['date'] },
+            projectId: 'partial-match',
+            confidence: 0.6,
+            signals: [
+                { type: 'explicit', value: 'partial', weight: 0.4, source: 'context' },
+                { type: 'topic', value: 'meeting', weight: 0.2, source: 'transcript' },
+            ],
+            reasoning: 'Partial match',
+        });
+
+        const processor = processorModule.create(configWithInteractive, mockOperator);
+
+        mockTranscribe.mockResolvedValueOnce({
+            text: 'Simple content.',
+            audioFileBasename: 'test-audio.mp3'
+        });
+
+        await processor.process('/path/to/audio.mp3');
+
+        // Should handle clarification for low confidence
+        expect(mockClarificationHandler).toHaveBeenCalled();
+    });
+
+    test('should handle routing with no signals gracefully', async () => {
+        const configWithInteractive = { ...mockConfig, interactive: true };
+        
+        // Mock low confidence with empty signals
+        mockRoutingInstance.route.mockReturnValue({
+            destination: { path: '~/notes', structure: 'month', filename_options: ['date'] },
+            projectId: null,
+            confidence: 0.3,
+            signals: [], // No signals
+            reasoning: 'Default routing - no matches',
+        });
+
+        const processor = processorModule.create(configWithInteractive, mockOperator);
+
+        mockTranscribe.mockResolvedValueOnce({
+            text: 'Unknown content.',
+            audioFileBasename: 'test-audio.mp3'
+        });
+
+        await processor.process('/path/to/audio.mp3');
+
+        // Should handle without crashing
+        expect(mockLogger.info).toHaveBeenCalledWith('Transcription complete for file %s', '/path/to/audio.mp3');
     });
 });

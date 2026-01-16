@@ -257,6 +257,224 @@ describe('Feedback Analyzer', () => {
             await analyzer.applyUpdates(updates);
             expect(mockContext.saveEntity).not.toHaveBeenCalled();
         });
+
+        it('should apply context_type to new project', async () => {
+            // @ts-ignore - mock context
+            const analyzer = create(mockReasoning, mockContext, {
+                model: 'gpt-5.2',
+                autoApplyThreshold: 0.5,
+            });
+
+            const updates = [
+                {
+                    type: 'new_project' as const,
+                    entityType: 'project' as const,
+                    entityId: 'personal-project',
+                    changes: [
+                        { field: 'name', newValue: 'Personal Project' },
+                        { field: 'context_type', newValue: 'personal' },
+                    ],
+                    reasoning: 'Personal project',
+                    confidence: 0.9,
+                },
+            ];
+
+            await analyzer.applyUpdates(updates);
+
+            expect(mockContext.saveEntity).toHaveBeenCalled();
+            const savedEntity = mockContext.saveEntity.mock.calls[0][0];
+            expect(savedEntity.classification.context_type).toBe('personal');
+        });
+
+        it('should apply topics to new project', async () => {
+            // @ts-ignore - mock context
+            const analyzer = create(mockReasoning, mockContext, {
+                model: 'gpt-5.2',
+                autoApplyThreshold: 0.5,
+            });
+
+            const updates = [
+                {
+                    type: 'new_project' as const,
+                    entityType: 'project' as const,
+                    entityId: 'topic-project',
+                    changes: [
+                        { field: 'name', newValue: 'Topic Project' },
+                        { field: 'topics', newValue: ['ai', 'ml', 'data'] },
+                    ],
+                    reasoning: 'Project with topics',
+                    confidence: 0.9,
+                },
+            ];
+
+            await analyzer.applyUpdates(updates);
+
+            expect(mockContext.saveEntity).toHaveBeenCalled();
+            const savedEntity = mockContext.saveEntity.mock.calls[0][0];
+            expect(savedEntity.classification.topics).toEqual(['ai', 'ml', 'data']);
+        });
+
+        it('should apply topic updates to existing projects', async () => {
+            mockContext.getProject.mockReturnValue({
+                id: 'existing-project',
+                name: 'Existing Project',
+                type: 'project',
+                classification: {
+                    context_type: 'work',
+                    explicit_phrases: ['existing'],
+                    topics: ['original-topic'],
+                },
+                routing: {
+                    destination: '~/notes/existing',
+                    structure: 'month',
+                    filename_options: ['date', 'time', 'subject'],
+                },
+            });
+
+            // @ts-ignore - mock context
+            const analyzer = create(mockReasoning, mockContext, {
+                model: 'gpt-5.2',
+                autoApplyThreshold: 0.5,
+            });
+
+            const updates = [
+                {
+                    type: 'new_topic' as const,
+                    entityType: 'project' as const,
+                    entityId: 'existing-project',
+                    changes: [
+                        { field: 'topics', newValue: ['new-topic', 'another-topic'] },
+                    ],
+                    reasoning: 'Add new topics',
+                    confidence: 0.9,
+                },
+            ];
+
+            await analyzer.applyUpdates(updates);
+
+            expect(mockContext.saveEntity).toHaveBeenCalled();
+            const savedEntity = mockContext.saveEntity.mock.calls[0][0];
+            expect(savedEntity.classification.topics).toContain('original-topic');
+            expect(savedEntity.classification.topics).toContain('new-topic');
+            expect(savedEntity.classification.topics).toContain('another-topic');
+        });
+
+        it('should apply context_type updates to existing projects', async () => {
+            mockContext.getProject.mockReturnValue({
+                id: 'existing-project',
+                name: 'Existing Project',
+                type: 'project',
+                classification: {
+                    context_type: 'work',
+                    explicit_phrases: ['existing'],
+                    topics: [],
+                },
+                routing: {
+                    destination: '~/notes/existing',
+                    structure: 'month',
+                    filename_options: ['date', 'time', 'subject'],
+                },
+            });
+
+            // @ts-ignore - mock context
+            const analyzer = create(mockReasoning, mockContext, {
+                model: 'gpt-5.2',
+                autoApplyThreshold: 0.5,
+            });
+
+            const updates = [
+                {
+                    type: 'context_type' as const,
+                    entityType: 'project' as const,
+                    entityId: 'existing-project',
+                    changes: [
+                        { field: 'context_type', newValue: 'mixed' },
+                    ],
+                    reasoning: 'Change to mixed context',
+                    confidence: 0.9,
+                },
+            ];
+
+            await analyzer.applyUpdates(updates);
+
+            expect(mockContext.saveEntity).toHaveBeenCalled();
+            const savedEntity = mockContext.saveEntity.mock.calls[0][0];
+            expect(savedEntity.classification.context_type).toBe('mixed');
+        });
+
+        it('should handle errors when saving entity fails', async () => {
+            mockContext.saveEntity.mockRejectedValue(new Error('Save failed'));
+
+            // @ts-ignore - mock context
+            const analyzer = create(mockReasoning, mockContext, {
+                model: 'gpt-5.2',
+                autoApplyThreshold: 0.5,
+            });
+
+            const updates = [
+                {
+                    type: 'new_project' as const,
+                    entityType: 'project' as const,
+                    entityId: 'error-project',
+                    changes: [
+                        { field: 'name', newValue: 'Error Project' },
+                    ],
+                    reasoning: 'Will fail',
+                    confidence: 0.9,
+                },
+            ];
+
+            // Should not throw
+            await analyzer.applyUpdates(updates);
+            expect(mockContext.saveEntity).toHaveBeenCalled();
+        });
+
+        it('should not duplicate existing phrases when adding new ones', async () => {
+            mockContext.getProject.mockReturnValue({
+                id: 'existing-project',
+                name: 'Existing Project',
+                type: 'project',
+                classification: {
+                    context_type: 'work',
+                    explicit_phrases: ['phrase-one', 'phrase-two'],
+                    topics: [],
+                },
+                routing: {
+                    destination: '~/notes/existing',
+                    structure: 'month',
+                    filename_options: ['date', 'time', 'subject'],
+                },
+            });
+
+            // @ts-ignore - mock context
+            const analyzer = create(mockReasoning, mockContext, {
+                model: 'gpt-5.2',
+                autoApplyThreshold: 0.5,
+            });
+
+            const updates = [
+                {
+                    type: 'new_phrase' as const,
+                    entityType: 'project' as const,
+                    entityId: 'existing-project',
+                    changes: [
+                        { field: 'explicit_phrases', newValue: ['phrase-two', 'phrase-three'] }, // phrase-two already exists
+                    ],
+                    reasoning: 'Add new phrase',
+                    confidence: 0.9,
+                },
+            ];
+
+            await analyzer.applyUpdates(updates);
+
+            const savedEntity = mockContext.saveEntity.mock.calls[0][0];
+            const phrases = savedEntity.classification.explicit_phrases;
+            // Should have 3 phrases, not 4 (no duplicate)
+            expect(phrases.filter((p: string) => p === 'phrase-two').length).toBe(1);
+            expect(phrases).toContain('phrase-one');
+            expect(phrases).toContain('phrase-two');
+            expect(phrases).toContain('phrase-three');
+        });
     });
 });
 

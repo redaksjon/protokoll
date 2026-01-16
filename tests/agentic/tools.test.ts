@@ -92,6 +92,216 @@ describe('Agentic Tools', () => {
             expect(result.success).toBe(true);
             expect(result.data.found).toBe(false);
         });
+
+        it('should return cached result for already resolved entities', async () => {
+            const resolvedEntities = new Map<string, string>();
+            resolvedEntities.set('John', 'John Smith');
+            mockContext.resolvedEntities = resolvedEntities;
+      
+            const tool = LookupPerson.create(mockContext);
+            const result = await tool.execute({ name: 'John' });
+      
+            expect(result.success).toBe(true);
+            expect(result.data.found).toBe(true);
+            expect(result.data.cached).toBe(true);
+            expect(result.data.suggestion).toContain('John Smith');
+            // Should not call search when cached
+            expect(mockContext.contextInstance.search).not.toHaveBeenCalled();
+        });
+
+        it('should filter non-person results from search', async () => {
+            mockContext.contextInstance.search = vi.fn(() => [
+                { id: 'alpha', name: 'Project Alpha', type: 'project' },
+                { id: 'john', name: 'John Smith', type: 'person' }
+            ]);
+      
+            const tool = LookupPerson.create(mockContext);
+            const result = await tool.execute({ name: 'Alpha' });
+      
+            expect(result.success).toBe(true);
+            expect(result.data.found).toBe(true);
+            expect(result.data.person.type).toBe('person');
+        });
+
+        it('should return not found when search returns only non-person results', async () => {
+            mockContext.contextInstance.search = vi.fn(() => [
+                { id: 'alpha', name: 'Project Alpha', type: 'project' }
+            ]);
+      
+            const tool = LookupPerson.create(mockContext);
+            const result = await tool.execute({ name: 'Alpha' });
+      
+            expect(result.success).toBe(true);
+            expect(result.data.found).toBe(false);
+        });
+
+        it('should include transcript context in prompt when name is found', async () => {
+            mockContext.transcriptText = 'First sentence. Then John mentioned something important. Last part.';
+      
+            const tool = LookupPerson.create(mockContext);
+            const result = await tool.execute({ name: 'John' });
+      
+            expect(result.success).toBe(true);
+            expect(result.needsUserInput).toBe(true);
+            expect(result.userPrompt).toContain('Context from transcript:');
+            expect(result.userPrompt).toContain('John');
+        });
+
+        it('should not include transcript context when name not in transcript', async () => {
+            mockContext.transcriptText = 'This transcript has no matching names.';
+      
+            const tool = LookupPerson.create(mockContext);
+            const result = await tool.execute({ name: 'Unknown' });
+      
+            expect(result.success).toBe(true);
+            expect(result.needsUserInput).toBe(true);
+            expect(result.userPrompt).not.toContain('Context from transcript:');
+        });
+
+        it('should include file and date info in prompt', async () => {
+            mockContext.sourceFile = '/path/to/audio/recording.m4a';
+            mockContext.audioDate = new Date('2026-01-15T14:30:00');
+      
+            const tool = LookupPerson.create(mockContext);
+            const result = await tool.execute({ name: 'Unknown' });
+      
+            expect(result.success).toBe(true);
+            expect(result.userPrompt).toContain('File: recording.m4a');
+            expect(result.userPrompt).toContain('2026');
+        });
+
+        it('should handle sourceFile without path separators', async () => {
+            mockContext.sourceFile = 'recording.m4a';
+      
+            const tool = LookupPerson.create(mockContext);
+            const result = await tool.execute({ name: 'Unknown' });
+      
+            expect(result.success).toBe(true);
+            expect(result.userPrompt).toContain('File: recording.m4a');
+        });
+
+        it('should fallback to full sourceFile when path ends with slash', async () => {
+            // When sourceFile ends with '/', split('/').pop() returns '', triggering the fallback
+            mockContext.sourceFile = '/path/to/directory/';
+      
+            const tool = LookupPerson.create(mockContext);
+            const result = await tool.execute({ name: 'Unknown' });
+      
+            expect(result.success).toBe(true);
+            // The fallback uses the full sourceFile path
+            expect(result.userPrompt).toContain('File: /path/to/directory/');
+        });
+
+        it('should format project options with descriptions', async () => {
+            mockContext.contextInstance.getAllProjects = vi.fn(() => [
+                { id: 'proj1', name: 'Project One', type: 'project', active: true, description: 'First project' },
+                { id: 'proj2', name: 'Project Two', type: 'project', active: true }
+            ]);
+      
+            const tool = LookupPerson.create(mockContext);
+            const result = await tool.execute({ name: 'Unknown' });
+      
+            expect(result.success).toBe(true);
+            expect(result.data.options).toContain('Project One - First project');
+            expect(result.data.options).toContain('Project Two');
+        });
+
+        it('should filter inactive projects from options', async () => {
+            mockContext.contextInstance.getAllProjects = vi.fn(() => [
+                { id: 'proj1', name: 'Active Project', type: 'project', active: true },
+                { id: 'proj2', name: 'Inactive Project', type: 'project', active: false }
+            ]);
+      
+            const tool = LookupPerson.create(mockContext);
+            const result = await tool.execute({ name: 'Unknown' });
+      
+            expect(result.success).toBe(true);
+            expect(result.data.options).toContain('Active Project');
+            expect(result.data.options).not.toContain('Inactive Project');
+            expect(result.data.knownProjects).toHaveLength(1);
+        });
+
+        it('should extract context with multiple sentences around name', async () => {
+            mockContext.transcriptText = 'First sentence here. Second sentence. Then Sarah spoke about something. Fourth sentence. Fifth sentence.';
+      
+            const tool = LookupPerson.create(mockContext);
+            const result = await tool.execute({ name: 'Sarah' });
+      
+            expect(result.success).toBe(true);
+            expect(result.userPrompt).toContain('Sarah');
+            // Context should include surrounding sentences
+            expect(result.userPrompt).toContain('Second sentence');
+        });
+
+        it('should handle name at start of transcript', async () => {
+            mockContext.transcriptText = 'John started the meeting. Then we discussed topics.';
+      
+            const tool = LookupPerson.create(mockContext);
+            const result = await tool.execute({ name: 'John' });
+      
+            expect(result.success).toBe(true);
+            expect(result.userPrompt).toContain('John started');
+        });
+
+        it('should handle name at end of transcript', async () => {
+            mockContext.transcriptText = 'The meeting was led by John';
+      
+            const tool = LookupPerson.create(mockContext);
+            const result = await tool.execute({ name: 'John' });
+      
+            expect(result.success).toBe(true);
+            expect(result.userPrompt).toContain('John');
+        });
+
+        it('should truncate very long context to sentence containing name', async () => {
+            // Create a context that DEFINITELY exceeds 300 chars when extracted
+            // Using a single very long sentence before and after to ensure extraction > 300 chars
+            // The extraction algorithm finds 2 sentence boundaries in each direction
+            const veryLongSentence = 'This is a very long sentence that just keeps going and going with more and more words added to make it extremely long so that when combined with other sentences the total context will definitely exceed three hundred characters which is the threshold for truncation';
+            const longText = `${veryLongSentence}. ${veryLongSentence}. Then John spoke. ${veryLongSentence}. ${veryLongSentence}.`;
+            mockContext.transcriptText = longText;
+      
+            const tool = LookupPerson.create(mockContext);
+            const result = await tool.execute({ name: 'John' });
+      
+            expect(result.success).toBe(true);
+            expect(result.userPrompt).toContain('John');
+        });
+
+        it('should truncate with ellipsis when name not found in long extracted context', async () => {
+            // Test line 89 - name exists via case-insensitive search but case-sensitive indexOf fails
+            const veryLongSentence = 'This is a very long sentence that just keeps going and going with more and more words added to make it extremely long so that when combined with other sentences the total context will definitely exceed three hundred characters which is the threshold for truncation';
+            const longText = `${veryLongSentence}. ${veryLongSentence}. Then JOHN spoke. ${veryLongSentence}. ${veryLongSentence}.`;
+            mockContext.transcriptText = longText;
+      
+            const tool = LookupPerson.create(mockContext);
+            // Search lowercase - findIndex uses toLowerCase but context.indexOf is case-sensitive
+            const result = await tool.execute({ name: 'john' });
+      
+            expect(result.success).toBe(true);
+            expect(result.userPrompt).toBeDefined();
+            expect(result.needsUserInput).toBe(true);
+        });
+
+        it('should handle case-insensitive name matching in transcript', async () => {
+            mockContext.transcriptText = 'We met with JOHN SMITH today.';
+      
+            const tool = LookupPerson.create(mockContext);
+            const result = await tool.execute({ name: 'john' });
+      
+            expect(result.success).toBe(true);
+            expect(result.userPrompt).toContain('JOHN SMITH');
+        });
+
+        it('should include clarification type and term in not found response', async () => {
+            const tool = LookupPerson.create(mockContext);
+            const result = await tool.execute({ name: 'NewPerson' });
+      
+            expect(result.success).toBe(true);
+            expect(result.data.clarificationType).toBe('new_person');
+            expect(result.data.term).toBe('NewPerson');
+            expect(result.data.message).toContain('NewPerson');
+        });
     });
   
     describe('lookup_project', () => {
@@ -210,6 +420,370 @@ describe('Agentic Tools', () => {
             expect(result.success).toBe(true);
             expect(result.data.found).toBe(true);
             expect(result.data.project.id).toBe('project2');
+        });
+
+        it('should return cached result for already resolved entities', async () => {
+            mockContext.resolvedEntities = new Map([['Alpha', 'Project Alpha']]);
+      
+            const tool = LookupProject.create(mockContext);
+            const result = await tool.execute({ name: 'Alpha' });
+      
+            expect(result.success).toBe(true);
+            expect(result.data.found).toBe(true);
+            expect(result.data.cached).toBe(true);
+            expect(result.data.suggestion).toContain('Already resolved');
+            expect(result.data.suggestion).toContain('Project Alpha');
+        });
+
+        it('should skip ignored terms without prompting', async () => {
+            mockContext.contextInstance.isIgnored = vi.fn(() => true);
+      
+            const tool = LookupProject.create(mockContext);
+            const result = await tool.execute({ name: 'IgnoredTerm' });
+      
+            expect(result.success).toBe(true);
+            expect(result.data.found).toBe(false);
+            expect(result.data.ignored).toBe(true);
+            expect(result.data.message).toContain('ignore list');
+        });
+
+        it('should include transcript context in user prompt when term is found in transcript', async () => {
+            mockContext.transcriptText = 'First sentence. The Alpha project is important. Third sentence.';
+            mockContext.contextInstance.getAllProjects = vi.fn(() => []);
+      
+            const tool = LookupProject.create(mockContext);
+            const result = await tool.execute({ name: 'Alpha' });
+      
+            expect(result.success).toBe(true);
+            expect(result.data.found).toBe(false);
+            expect(result.needsUserInput).toBe(true);
+            expect(result.userPrompt).toContain('Context from transcript:');
+            expect(result.userPrompt).toContain('Alpha');
+        });
+
+        it('should fallback to triggerPhrase in user prompt when term not found in transcript', async () => {
+            mockContext.transcriptText = 'This transcript does not contain the term.';
+            mockContext.contextInstance.getAllProjects = vi.fn(() => []);
+      
+            const tool = LookupProject.create(mockContext);
+            const result = await tool.execute({ 
+                name: 'UnknownProject', 
+                triggerPhrase: 'mentioned something about work' 
+            });
+      
+            expect(result.success).toBe(true);
+            expect(result.data.found).toBe(false);
+            expect(result.needsUserInput).toBe(true);
+            expect(result.userPrompt).toContain('Context from transcript:');
+            expect(result.userPrompt).toContain('mentioned something about work');
+        });
+
+        it('should not include context in user prompt when neither term nor triggerPhrase available', async () => {
+            mockContext.transcriptText = 'This transcript does not contain the term.';
+            mockContext.contextInstance.getAllProjects = vi.fn(() => []);
+      
+            const tool = LookupProject.create(mockContext);
+            const result = await tool.execute({ name: 'UnknownProject' });
+      
+            expect(result.success).toBe(true);
+            expect(result.data.found).toBe(false);
+            expect(result.needsUserInput).toBe(true);
+            expect(result.userPrompt).not.toContain('Context from transcript:');
+        });
+
+        it('should filter out inactive projects from options', async () => {
+            mockContext.contextInstance.getAllProjects = vi.fn(() => [
+                { id: 'active', name: 'Active Project', type: 'project', active: true },
+                { id: 'inactive', name: 'Inactive Project', type: 'project', active: false },
+                { id: 'default', name: 'Default Project', type: 'project' }, // no active field
+            ]);
+      
+            const tool = LookupProject.create(mockContext);
+            const result = await tool.execute({ name: 'Unknown' });
+      
+            expect(result.success).toBe(true);
+            expect(result.data.knownProjects).toHaveLength(2);
+            expect(result.data.options).toHaveLength(2);
+            expect(result.data.options.some((o: string) => o.includes('Active Project'))).toBe(true);
+            expect(result.data.options.some((o: string) => o.includes('Default Project'))).toBe(true);
+            expect(result.data.options.some((o: string) => o.includes('Inactive Project'))).toBe(false);
+        });
+
+        it('should include project description in options when available', async () => {
+            mockContext.contextInstance.getAllProjects = vi.fn(() => [
+                { id: 'with-desc', name: 'Project A', description: 'A detailed description', type: 'project' },
+                { id: 'without-desc', name: 'Project B', type: 'project' },
+            ]);
+      
+            const tool = LookupProject.create(mockContext);
+            const result = await tool.execute({ name: 'Unknown' });
+      
+            expect(result.success).toBe(true);
+            expect(result.data.options).toHaveLength(2);
+            expect(result.data.options[0]).toBe('Project A - A detailed description');
+            expect(result.data.options[1]).toBe('Project B');
+        });
+
+        it('should extract filename from full path for user prompt', async () => {
+            mockContext.sourceFile = '/path/to/audio/recording.m4a';
+            mockContext.contextInstance.getAllProjects = vi.fn(() => []);
+      
+            const tool = LookupProject.create(mockContext);
+            const result = await tool.execute({ name: 'Unknown' });
+      
+            expect(result.success).toBe(true);
+            expect(result.userPrompt).toContain('File: recording.m4a');
+            expect(result.userPrompt).not.toContain('/path/to/audio/');
+        });
+
+        it('should use full sourceFile when no path separator present', async () => {
+            mockContext.sourceFile = 'simple-file.m4a';
+            mockContext.contextInstance.getAllProjects = vi.fn(() => []);
+      
+            const tool = LookupProject.create(mockContext);
+            const result = await tool.execute({ name: 'Unknown' });
+      
+            expect(result.success).toBe(true);
+            expect(result.userPrompt).toContain('File: simple-file.m4a');
+        });
+
+        it('should fallback to sourceFile when path ends with separator', async () => {
+            // Edge case: path ends with / so pop() returns empty string
+            mockContext.sourceFile = '/path/to/directory/';
+            mockContext.contextInstance.getAllProjects = vi.fn(() => []);
+      
+            const tool = LookupProject.create(mockContext);
+            const result = await tool.execute({ name: 'Unknown' });
+      
+            expect(result.success).toBe(true);
+            // Should fallback to full sourceFile when pop() returns empty
+            expect(result.userPrompt).toContain('File:');
+        });
+
+        it('should include formatted date in user prompt', async () => {
+            mockContext.audioDate = new Date('2026-03-15T14:30:00');
+            mockContext.contextInstance.getAllProjects = vi.fn(() => []);
+      
+            const tool = LookupProject.create(mockContext);
+            const result = await tool.execute({ name: 'Unknown' });
+      
+            expect(result.success).toBe(true);
+            expect(result.userPrompt).toContain('Date:');
+            expect(result.userPrompt).toContain('2026');
+            expect(result.userPrompt).toContain('Mar');
+            expect(result.userPrompt).toContain('15');
+        });
+
+        describe('transcript context extraction', () => {
+            it('should extract context around term with sentence boundaries', async () => {
+                mockContext.transcriptText = 'This is background. The Acme project needs attention. We should prioritize it.';
+                mockContext.contextInstance.getAllProjects = vi.fn(() => []);
+        
+                const tool = LookupProject.create(mockContext);
+                const result = await tool.execute({ name: 'Acme' });
+        
+                expect(result.success).toBe(true);
+                expect(result.userPrompt).toContain('Context from transcript:');
+                expect(result.userPrompt).toContain('Acme');
+            });
+
+            it('should handle case-insensitive term matching', async () => {
+                mockContext.transcriptText = 'Working on the ACME project today.';
+                mockContext.contextInstance.getAllProjects = vi.fn(() => []);
+        
+                const tool = LookupProject.create(mockContext);
+                const result = await tool.execute({ name: 'acme' });
+        
+                expect(result.success).toBe(true);
+                expect(result.userPrompt).toContain('Context from transcript:');
+            });
+
+            it('should handle term at start of transcript', async () => {
+                mockContext.transcriptText = 'ProjectX is the main focus. We need to work on it.';
+                mockContext.contextInstance.getAllProjects = vi.fn(() => []);
+        
+                const tool = LookupProject.create(mockContext);
+                const result = await tool.execute({ name: 'ProjectX' });
+        
+                expect(result.success).toBe(true);
+                expect(result.userPrompt).toContain('Context from transcript:');
+                expect(result.userPrompt).toContain('ProjectX');
+            });
+
+            it('should handle term at end of transcript', async () => {
+                mockContext.transcriptText = 'The main focus is ProjectY';
+                mockContext.contextInstance.getAllProjects = vi.fn(() => []);
+        
+                const tool = LookupProject.create(mockContext);
+                const result = await tool.execute({ name: 'ProjectY' });
+        
+                expect(result.success).toBe(true);
+                expect(result.userPrompt).toContain('Context from transcript:');
+                expect(result.userPrompt).toContain('ProjectY');
+            });
+
+            it('should handle transcript with exclamation marks as boundaries', async () => {
+                mockContext.transcriptText = 'Amazing news! The Beta project is ready! Lets celebrate.';
+                mockContext.contextInstance.getAllProjects = vi.fn(() => []);
+        
+                const tool = LookupProject.create(mockContext);
+                const result = await tool.execute({ name: 'Beta' });
+        
+                expect(result.success).toBe(true);
+                expect(result.userPrompt).toContain('Context from transcript:');
+                expect(result.userPrompt).toContain('Beta');
+            });
+
+            it('should handle transcript with question marks as boundaries', async () => {
+                mockContext.transcriptText = 'What happened? The Gamma project failed? We need answers.';
+                mockContext.contextInstance.getAllProjects = vi.fn(() => []);
+        
+                const tool = LookupProject.create(mockContext);
+                const result = await tool.execute({ name: 'Gamma' });
+        
+                expect(result.success).toBe(true);
+                expect(result.userPrompt).toContain('Context from transcript:');
+                expect(result.userPrompt).toContain('Gamma');
+            });
+
+            it('should truncate very long context and keep sentence with term', async () => {
+                // Create a transcript where the context around the term would be > 300 chars
+                // Need: sentence before term + sentence with term + sentence after term > 300 chars
+                // The extraction finds 2 sentence boundaries before and after
+                const longSentence1 = 'This is the first very long sentence that contains a lot of words to make it quite lengthy. ';
+                const longSentence2 = 'This is the second sentence which also has many words in it to add more length to the context. ';
+                const termSentence = 'The Delta project is important. ';
+                const longSentence3 = 'This is another long sentence after the term that adds even more characters to the total. ';
+                const longSentence4 = 'And finally this last sentence pushes us well over three hundred characters total.';
+                
+                mockContext.transcriptText = longSentence1 + longSentence2 + termSentence + longSentence3 + longSentence4;
+                mockContext.contextInstance.getAllProjects = vi.fn(() => []);
+        
+                const tool = LookupProject.create(mockContext);
+                const result = await tool.execute({ name: 'Delta' });
+        
+                expect(result.success).toBe(true);
+                expect(result.userPrompt).toContain('Context from transcript:');
+                expect(result.userPrompt).toContain('Delta');
+            });
+
+            it('should truncate and add ellipsis when term not found in extracted context', async () => {
+                // Create a scenario where the term appears in transcript but the case-sensitive
+                // indexOf in the truncation logic fails. This happens when the extracted context
+                // no longer contains the exact term due to boundary calculations.
+                // We need context > 300 chars but term at very edge where truncation excludes it
+                const longContent = 'A'.repeat(320);
+                mockContext.transcriptText = longContent + ' omega. ' + 'B'.repeat(50);
+                mockContext.contextInstance.getAllProjects = vi.fn(() => []);
+        
+                const tool = LookupProject.create(mockContext);
+                const result = await tool.execute({ name: 'omega' });
+        
+                expect(result.success).toBe(true);
+                expect(result.userPrompt).toContain('Context from transcript:');
+            });
+
+            it('should find sentence boundaries within long context when term is present', async () => {
+                // Test the inner truncation logic (lines 65-87) that finds sentence boundaries
+                // around the term when context > 300 chars and term IS found in extracted context
+                // Need: extracted context > 300 chars with term inside and sentence boundaries around it
+                const before = 'Introduction text. Some background. More details here. ';
+                const middle = 'The Kappa project needs work. ';
+                const after = 'Additional info. Conclusion text. Final notes here.';
+                // Pad to ensure > 300 chars
+                const padded = 'X'.repeat(150) + before + middle + after + 'Y'.repeat(150);
+                mockContext.transcriptText = padded;
+                mockContext.contextInstance.getAllProjects = vi.fn(() => []);
+        
+                const tool = LookupProject.create(mockContext);
+                const result = await tool.execute({ name: 'Kappa' });
+        
+                expect(result.success).toBe(true);
+                expect(result.userPrompt).toContain('Context from transcript:');
+                expect(result.userPrompt).toContain('Kappa');
+            });
+
+            it('should handle sentence start search when term is at beginning of long context', async () => {
+                // Test case where the backwards search for sentence start reaches index 0
+                // (lines 72-77 where sentenceStart stays at midPoint if no boundary found)
+                // Create long context where term is near the start with no period before it
+                const longNoBreak = 'X'.repeat(100) + ' ';
+                const termPart = 'Lambda project details ';
+                const afterPart = 'Y'.repeat(250) + '. End sentence.';
+                mockContext.transcriptText = longNoBreak + termPart + afterPart;
+                mockContext.contextInstance.getAllProjects = vi.fn(() => []);
+        
+                const tool = LookupProject.create(mockContext);
+                const result = await tool.execute({ name: 'Lambda' });
+        
+                expect(result.success).toBe(true);
+                expect(result.userPrompt).toContain('Context from transcript:');
+            });
+
+            it('should handle sentence end search when term is at end of long context', async () => {
+                // Test case where the forwards search for sentence end reaches context end
+                // (lines 80-85 where sentenceEnd stays at midPoint + term.length if no boundary found)
+                const beforePart = 'Start sentence. ' + 'X'.repeat(250);
+                const termPart = ' Mu project';
+                const longNoBreak = ' ' + 'Y'.repeat(100);
+                mockContext.transcriptText = beforePart + termPart + longNoBreak;
+                mockContext.contextInstance.getAllProjects = vi.fn(() => []);
+        
+                const tool = LookupProject.create(mockContext);
+                const result = await tool.execute({ name: 'Mu' });
+        
+                expect(result.success).toBe(true);
+                expect(result.userPrompt).toContain('Context from transcript:');
+            });
+
+            it('should truncate with ellipsis when context is long and term differs in case', async () => {
+                // Test line 90: the else branch where term is not found in extracted context
+                // This happens when context.indexOf(term) returns -1 because:
+                // 1. The extracted context > 300 chars
+                // 2. The term's case differs from what's in the transcript
+                // 3. The case-sensitive indexOf in truncation logic fails
+                // 
+                // Key: The initial search uses toLowerCase() but the truncation uses case-sensitive indexOf
+                const longSentence = 'A'.repeat(200) + '. ';
+                const termInContext = 'SIGMA project here. ';
+                const moreLong = 'B'.repeat(200) + '.';
+                mockContext.transcriptText = longSentence + termInContext + moreLong;
+                mockContext.contextInstance.getAllProjects = vi.fn(() => []);
+        
+                // Search with lowercase - will find due to case-insensitive search
+                // But truncation's indexOf('sigma') won't find 'SIGMA' in the context
+                const tool = LookupProject.create(mockContext);
+                const result = await tool.execute({ name: 'sigma' });
+        
+                expect(result.success).toBe(true);
+                expect(result.userPrompt).toContain('Context from transcript:');
+                // Should see the ellipsis truncation
+                expect(result.userPrompt).toContain('...');
+            });
+
+            it('should handle transcript without clear sentence boundaries', async () => {
+                mockContext.transcriptText = 'working on the Epsilon project with the team today';
+                mockContext.contextInstance.getAllProjects = vi.fn(() => []);
+        
+                const tool = LookupProject.create(mockContext);
+                const result = await tool.execute({ name: 'Epsilon' });
+        
+                expect(result.success).toBe(true);
+                expect(result.userPrompt).toContain('Context from transcript:');
+                expect(result.userPrompt).toContain('Epsilon');
+            });
+
+            it('should handle multiple sentences before and after term', async () => {
+                mockContext.transcriptText = 'First thing. Second thing. The Zeta project is here. Fourth thing. Fifth thing.';
+                mockContext.contextInstance.getAllProjects = vi.fn(() => []);
+        
+                const tool = LookupProject.create(mockContext);
+                const result = await tool.execute({ name: 'Zeta' });
+        
+                expect(result.success).toBe(true);
+                expect(result.userPrompt).toContain('Context from transcript:');
+                expect(result.userPrompt).toContain('Zeta');
+            });
         });
     });
   

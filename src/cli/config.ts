@@ -143,6 +143,21 @@ const colors = {
 // eslint-disable-next-line no-console
 const print = (msg: string) => console.log(msg);
 
+// Export internal functions for testing
+export const _internal = {
+    get findConfigPath() { return findConfigPath; },
+    get loadConfig() { return loadConfig; },
+    get saveConfig() { return saveConfig; },
+    get parseValue() { return parseValue; },
+    get formatValue() { return formatValue; },
+    get listConfig() { return listConfig; },
+    get getConfigValue() { return getConfigValue; },
+    get setConfigValue() { return setConfigValue; },
+    get showConfigPath() { return showConfigPath; },
+    print,
+    colors,
+};
+
 /**
  * Find the config file path
  */

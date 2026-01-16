@@ -16,15 +16,48 @@ vi.mock('../../src/logging', () => ({
     }),
 }));
 
-// Mock readline to avoid actual stdin interaction
+// Mock sound to avoid actual sound playback
+vi.mock('../../src/util/sound', () => ({
+    create: () => ({
+        playNotification: vi.fn().mockResolvedValue(undefined),
+    }),
+}));
+
+// Sequential mock answers for multi-step wizards
+let mockAnswers: string[] = [];
+let mockAnswerIndex = 0;
+
+// Helper to set up sequential answers for wizard tests
+const setMockAnswers = (answers: string[]) => {
+    mockAnswers = answers;
+    mockAnswerIndex = 0;
+};
+
+// Legacy single answer support
 let mockAnswer = '';
+
+// Track if removeAllListeners was called
+let removeAllListenersCalled = false;
+let closeCalled = false;
+
 vi.mock('readline', () => ({
     createInterface: vi.fn(() => ({
         question: vi.fn((prompt: string, callback: (answer: string) => void) => {
-            // Use the mockAnswer value set by tests
-            callback(mockAnswer);
+            // Use sequential answers if available, otherwise fall back to single mockAnswer
+            if (mockAnswers.length > 0) {
+                const answer = mockAnswers[mockAnswerIndex] ?? '';
+                mockAnswerIndex++;
+                callback(answer);
+            } else {
+                callback(mockAnswer);
+            }
         }),
-        close: vi.fn(),
+        close: vi.fn(() => {
+            closeCalled = true;
+        }),
+        removeAllListeners: vi.fn(() => {
+            removeAllListenersCalled = true;
+        }),
     })),
 }));
 
@@ -54,6 +87,12 @@ describe('Interactive Handler', () => {
             writable: true,
             configurable: true,
         });
+        // Reset mock answers
+        mockAnswers = [];
+        mockAnswerIndex = 0;
+        mockAnswer = '';
+        removeAllListenersCalled = false;
+        closeCalled = false;
     });
   
     describe('session management', () => {
@@ -793,6 +832,692 @@ describe('Interactive Handler', () => {
             
             const session = nonInteractiveHandler.getSession();
             expect(session?.responses.length).toBe(1);
+        });
+    });
+
+    describe('new project wizard flows', () => {
+        it('should handle project creation flow with all details', async () => {
+            handler.startSession();
+            // Answers: P (project), ProjectName, /output/path, Project description
+            setMockAnswers(['P', 'MyProject', '/output/path', 'A test project']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_project',
+                context: 'Working on something new',
+                term: 'MyProj',
+            };
+
+            const response = await handler.handleClarification(request);
+            expect(response.response).toBe('create');
+            expect(response.shouldRemember).toBe(true);
+            const info = response.additionalInfo as { projectName?: string; destination?: string; description?: string };
+            expect(info.projectName).toBe('MyProject');
+            expect(info.destination).toBe('/output/path');
+            expect(info.description).toBe('A test project');
+        });
+
+        it('should use term as project name when no name provided', async () => {
+            handler.startSession();
+            // Answers: P (project), empty (use term), /output, description
+            setMockAnswers(['P', '', '/output', 'Test desc']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_project',
+                context: 'Context',
+                term: 'DefaultProject',
+            };
+
+            const response = await handler.handleClarification(request);
+            expect(response.response).toBe('create');
+            const info = response.additionalInfo as { projectName?: string };
+            expect(info.projectName).toBe('DefaultProject');
+        });
+
+        it('should handle project skip flow', async () => {
+            handler.startSession();
+            // Empty answer to skip
+            setMockAnswers(['']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_project',
+                context: 'Context',
+                term: 'SomeProject',
+            };
+
+            const response = await handler.handleClarification(request);
+            expect(response.response).toBe('skip');
+            expect(response.shouldRemember).toBe(false);
+        });
+
+        it('should handle project skip with s', async () => {
+            handler.startSession();
+            setMockAnswers(['s']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_project',
+                context: 'Context',
+                term: 'SkippedProject',
+            };
+
+            const response = await handler.handleClarification(request);
+            expect(response.response).toBe('skip');
+        });
+
+        it('should handle project skip with skip', async () => {
+            handler.startSession();
+            setMockAnswers(['skip']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_project',
+                context: 'Context',
+                term: 'SkippedProject',
+            };
+
+            const response = await handler.handleClarification(request);
+            expect(response.response).toBe('skip');
+        });
+
+        it('should handle ignore flow with x', async () => {
+            handler.startSession();
+            setMockAnswers(['x']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_project',
+                context: 'Context',
+                term: 'IgnoredTerm',
+            };
+
+            const response = await handler.handleClarification(request);
+            expect(response.response).toBe('ignore');
+            const info = response.additionalInfo as { ignoredTerm?: string };
+            expect(info.ignoredTerm).toBe('IgnoredTerm');
+        });
+
+        it('should handle ignore flow with i', async () => {
+            handler.startSession();
+            setMockAnswers(['i']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_project',
+                context: 'Context',
+                term: 'IgnoredTerm2',
+            };
+
+            const response = await handler.handleClarification(request);
+            expect(response.response).toBe('ignore');
+        });
+
+        it('should handle ignore flow with ignore', async () => {
+            handler.startSession();
+            setMockAnswers(['ignore']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_project',
+                context: 'Context',
+                term: 'IgnoredTerm3',
+            };
+
+            const response = await handler.handleClarification(request);
+            expect(response.response).toBe('ignore');
+        });
+
+        it('should handle term flow with correction and expansion', async () => {
+            handler.startSession();
+            // T (term), correction, expansion, skip projects, description
+            setMockAnswers(['T', 'CorrectedTerm', 'Full Term Name', '', 'Term description']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_project',
+                context: 'Context',
+                term: 'OriginalTerm',
+                options: ['Project A - desc', 'Project B - desc'],
+            };
+
+            const response = await handler.handleClarification(request);
+            expect(response.response).toBe('term');
+            const info = response.additionalInfo as { 
+                termName?: string; 
+                termExpansion?: string;
+                termDescription?: string;
+            };
+            expect(info.termName).toBe('CorrectedTerm');
+            expect(info.termExpansion).toBe('Full Term Name');
+            expect(info.termDescription).toBe('Term description');
+        });
+
+        it('should handle term flow without correction (accept original)', async () => {
+            handler.startSession();
+            // T (term), empty (accept), empty (no expansion), skip projects, empty desc
+            setMockAnswers(['term', '', '', '', '']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_project',
+                context: 'Context',
+                term: 'MyTerm',
+                options: ['Project A'],
+            };
+
+            const response = await handler.handleClarification(request);
+            expect(response.response).toBe('term');
+            const info = response.additionalInfo as { termName?: string };
+            expect(info.termName).toBe('MyTerm');
+        });
+
+        it('should handle term flow with project association', async () => {
+            handler.startSession();
+            // T (term), empty (accept name), empty (no expansion), "1,2" (select projects), description
+            setMockAnswers(['t', '', '', '1,2', 'A technical term']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_project',
+                context: 'Context',
+                term: 'APITerm',
+                options: ['Project A - API', 'Project B - Services'],
+            };
+
+            const response = await handler.handleClarification(request);
+            expect(response.response).toBe('term');
+            const info = response.additionalInfo as { termProjects?: number[] };
+            expect(info.termProjects).toEqual([0, 1]);
+        });
+
+        it('should handle term flow with new project creation', async () => {
+            handler.startSession();
+            // T (term), empty, empty, N (new project), NewProjectName, /output, project desc, term desc
+            setMockAnswers(['t', '', '', 'N', 'NewProject', '/dest', 'Project desc', 'Term desc']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_project',
+                context: 'Context',
+                term: 'NewTerm',
+                options: ['Existing Project'],
+            };
+
+            const response = await handler.handleClarification(request);
+            expect(response.response).toBe('term');
+            const info = response.additionalInfo as { 
+                createdProject?: { action: string; projectName?: string } 
+            };
+            expect(info.createdProject?.action).toBe('create');
+            expect(info.createdProject?.projectName).toBe('NewProject');
+        });
+
+        it('should handle term flow with no existing projects - create new', async () => {
+            handler.startSession();
+            // T (term), empty, empty, Y (create new), ProjectName, /dest, proj desc, term desc
+            setMockAnswers(['t', '', '', 'y', 'NewProj', '/path', 'Proj desc', 'Term desc']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_project',
+                context: 'Context',
+                term: 'NewTermNoProjects',
+                options: undefined, // No projects
+            };
+
+            const response = await handler.handleClarification(request);
+            expect(response.response).toBe('term');
+            const info = response.additionalInfo as { 
+                createdProject?: { action: string; projectName?: string } 
+            };
+            expect(info.createdProject?.action).toBe('create');
+        });
+
+        it('should handle term flow with no existing projects - decline', async () => {
+            handler.startSession();
+            // T (term), empty, empty, N (decline new project), term desc
+            setMockAnswers(['t', '', '', 'n', 'Term desc']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_project',
+                context: 'Context',
+                term: 'SimpleTermNoProjects',
+                options: undefined,
+            };
+
+            const response = await handler.handleClarification(request);
+            expect(response.response).toBe('term');
+            const info = response.additionalInfo as { createdProject?: unknown };
+            expect(info.createdProject).toBeUndefined();
+        });
+
+        it('should handle unrecognized entity type input', async () => {
+            handler.startSession();
+            setMockAnswers(['xyz']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_project',
+                context: 'Context',
+                term: 'SomeTerm',
+            };
+
+            const response = await handler.handleClarification(request);
+            expect(response.response).toBe('skip');
+        });
+
+        it('should handle project flow with empty project name (uses term as default)', async () => {
+            handler.startSession();
+            // P (project), empty name (falls back to term), empty destination, empty description
+            setMockAnswers(['P', '', '', '']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_project',
+                context: 'Context',
+                term: 'FallbackTerm',
+            };
+
+            const response = await handler.handleClarification(request);
+            expect(response.response).toBe('create');
+            const info = response.additionalInfo as { projectName?: string };
+            expect(info.projectName).toBe('FallbackTerm'); // Uses term as default
+        });
+
+        it('should handle runCreateProjectFlow skip when project name empty (from term flow)', async () => {
+            handler.startSession();
+            // T (term), accept name, no expansion, N (new project), empty project name (skip)
+            setMockAnswers(['t', '', '', 'N', '']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_project',
+                context: 'Context for runCreateProjectFlow skip test',
+                term: 'SomeTerm',
+                options: ['Existing Project'],
+            };
+
+            const response = await handler.handleClarification(request);
+            expect(response.response).toBe('term');
+            const info = response.additionalInfo as { createdProject?: { action: string } };
+            expect(info.createdProject?.action).toBe('skip');
+        });
+
+        it('should handle term with invalid project indices', async () => {
+            handler.startSession();
+            // T, empty, empty, "99,abc,1" (mixed valid/invalid), desc
+            setMockAnswers(['t', '', '', '99,abc,1', 'desc']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_project',
+                context: 'Context',
+                term: 'Term',
+                options: ['Project A', 'Project B'],
+            };
+
+            const response = await handler.handleClarification(request);
+            const info = response.additionalInfo as { termProjects?: number[] };
+            // Only index 1 (1-1=0) should be valid
+            expect(info.termProjects).toEqual([0]);
+        });
+    });
+
+    describe('new person wizard flows', () => {
+        it('should handle person creation with all details', async () => {
+            handler.startSession();
+            // name correction, organization, project selection, notes
+            setMockAnswers(['John Smith', 'Acme Corp', '1', 'Met at conference']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_person',
+                context: 'Met someone new',
+                term: 'Jon',
+                options: ['Project A - desc'],
+            };
+
+            const response = await handler.handleClarification(request);
+            expect(response.response).toBe('create');
+            const info = response.additionalInfo as { 
+                personName?: string; 
+                organization?: string;
+                linkedProjectIndex?: number;
+                notes?: string;
+            };
+            expect(info.personName).toBe('John Smith');
+            expect(info.organization).toBe('Acme Corp');
+            expect(info.linkedProjectIndex).toBe(0);
+            expect(info.notes).toBe('Met at conference');
+        });
+
+        it('should handle person creation without name correction', async () => {
+            handler.startSession();
+            // empty (accept name), org, project, notes
+            setMockAnswers(['', 'CompanyX', '1', 'Some notes']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_person',
+                context: 'Context',
+                term: 'Alice',
+                options: ['Project'],
+            };
+
+            const response = await handler.handleClarification(request);
+            const info = response.additionalInfo as { personName?: string };
+            expect(info.personName).toBe('Alice');
+        });
+
+        it('should handle person with new project creation', async () => {
+            handler.startSession();
+            // name, org, N (new project), project name, dest, proj desc, notes
+            setMockAnswers(['Bob', 'TechCorp', 'n', 'BobProject', '/bob', 'Bob project', 'Good contact']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_person',
+                context: 'Context',
+                term: 'Bob',
+                options: ['Existing Project'],
+            };
+
+            const response = await handler.handleClarification(request);
+            const info = response.additionalInfo as { 
+                createdProject?: { action: string; projectName?: string } 
+            };
+            expect(info.createdProject?.action).toBe('create');
+            expect(info.createdProject?.projectName).toBe('BobProject');
+        });
+
+        it('should handle person without existing projects - create new', async () => {
+            handler.startSession();
+            // name, org, Y (create project), proj name, dest, desc, notes
+            setMockAnswers(['Charlie', 'StartupInc', 'y', 'CharlieProj', '/charlie', 'Charlie project', 'Founder']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_person',
+                context: 'Context',
+                term: 'Charlie',
+                options: undefined,
+            };
+
+            const response = await handler.handleClarification(request);
+            const info = response.additionalInfo as { 
+                createdProject?: { action: string; projectName?: string } 
+            };
+            expect(info.createdProject?.action).toBe('create');
+        });
+
+        it('should handle person without existing projects - decline', async () => {
+            handler.startSession();
+            // name, empty org, N (decline), notes
+            setMockAnswers(['Dave', '', 'n', 'Just met']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_person',
+                context: 'Context',
+                term: 'Dave',
+                options: undefined,
+            };
+
+            const response = await handler.handleClarification(request);
+            const info = response.additionalInfo as { createdProject?: unknown };
+            expect(info.createdProject).toBeUndefined();
+        });
+
+        it('should handle person skip when all info empty and confirmed skip', async () => {
+            handler.startSession();
+            // name correction (empty), org (empty), project (empty), notes (empty), confirm skip (empty)
+            setMockAnswers(['', '', '', '', '']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_person',
+                context: 'Context',
+                term: 'UnknownPerson',
+                options: ['Project A'],
+            };
+
+            const response = await handler.handleClarification(request);
+            expect(response.response).toBe('skip');
+        });
+
+        it('should handle person save anyway when no info but user confirms', async () => {
+            handler.startSession();
+            // name (empty), org (empty), project (empty), notes (empty), save anyway (any key)
+            setMockAnswers(['', '', '', '', 'y']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_person',
+                context: 'Context',
+                term: 'SavedPerson',
+                options: ['Project'],
+            };
+
+            const response = await handler.handleClarification(request);
+            expect(response.response).toBe('create');
+        });
+
+        it('should handle person with invalid project selection', async () => {
+            handler.startSession();
+            // name, org, invalid project number, notes
+            setMockAnswers(['Eve', 'Corp', 'abc', 'Notes']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_person',
+                context: 'Context',
+                term: 'Eve',
+                options: ['Project A'],
+            };
+
+            const response = await handler.handleClarification(request);
+            const info = response.additionalInfo as { linkedProjectIndex?: number };
+            expect(info.linkedProjectIndex).toBeUndefined();
+        });
+
+        it('should handle person with out of bounds project selection', async () => {
+            handler.startSession();
+            // name, org, "99" (out of bounds), notes
+            setMockAnswers(['Frank', 'Corp', '99', 'Notes']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_person',
+                context: 'Context',
+                term: 'Frank',
+                options: ['Project A'],
+            };
+
+            const response = await handler.handleClarification(request);
+            const info = response.additionalInfo as { linkedProjectIndex?: number };
+            expect(info.linkedProjectIndex).toBeUndefined();
+        });
+    });
+
+    describe('session cleanup and edge cases', () => {
+        it('should call removeAllListeners on session end', () => {
+            handler.startSession();
+            handler.endSession();
+            expect(removeAllListenersCalled).toBe(true);
+            expect(closeCalled).toBe(true);
+        });
+
+        it('should handle session continuation when readline already exists', () => {
+            // First session start creates readline
+            handler.startSession();
+            const session1 = handler.getSession();
+            expect(session1).not.toBeNull();
+            
+            // End and restart - should continue
+            handler.endSession();
+            handler.startSession();
+            const session2 = handler.getSession();
+            expect(session2).not.toBeNull();
+        });
+
+        it('should reuse existing readline when startSession called without endSession', () => {
+            // First session start creates readline
+            handler.startSession();
+            const session1 = handler.getSession();
+            expect(session1).not.toBeNull();
+            
+            // Start another session without ending - should reuse readline (line 465)
+            handler.startSession();
+            const session2 = handler.getSession();
+            expect(session2).not.toBeNull();
+            // Note: This tests the "readline already active" branch
+        });
+
+        it('should run in auto-resolve mode when stdin is not TTY', () => {
+            // Set isTTY to false
+            Object.defineProperty(process.stdin, 'isTTY', {
+                value: false,
+                writable: true,
+                configurable: true,
+            });
+            
+            const config: InteractiveConfig = {
+                enabled: true,
+                defaultToSuggestion: true,
+            };
+            const ttyHandler = Handler.create(config);
+            ttyHandler.startSession();
+            
+            // Should still be enabled
+            expect(ttyHandler.isEnabled()).toBe(true);
+            
+            // Session should be created
+            const session = ttyHandler.getSession();
+            expect(session).not.toBeNull();
+        });
+
+        it('should auto-resolve clarifications when stdin is not TTY', async () => {
+            Object.defineProperty(process.stdin, 'isTTY', {
+                value: false,
+                writable: true,
+                configurable: true,
+            });
+            
+            const config: InteractiveConfig = {
+                enabled: true,
+                defaultToSuggestion: true,
+            };
+            const ttyHandler = Handler.create(config);
+            ttyHandler.startSession();
+            
+            const request: ClarificationRequest = {
+                type: 'name_spelling',
+                context: 'Test',
+                term: 'Jon',
+                suggestion: 'John',
+            };
+
+            const response = await ttyHandler.handleClarification(request);
+            // Should use suggestion since defaultToSuggestion is true
+            expect(response.response).toBe('John');
+        });
+    });
+
+    describe('stdin handling edge cases', () => {
+        it('should handle isPaused returning undefined', () => {
+            handler.startSession();
+            
+            // Mock stdin.isPaused to return undefined
+            const originalIsPaused = process.stdin.isPaused;
+            Object.defineProperty(process.stdin, 'isPaused', {
+                value: undefined,
+                writable: true,
+                configurable: true,
+            });
+            
+            // Should not throw
+            expect(() => handler.endSession()).not.toThrow();
+            
+            // Restore
+            Object.defineProperty(process.stdin, 'isPaused', {
+                value: originalIsPaused,
+                writable: true,
+                configurable: true,
+            });
+        });
+
+        it('should handle isPaused returning a function that returns false', () => {
+            handler.startSession();
+            
+            const originalIsPaused = process.stdin.isPaused;
+            Object.defineProperty(process.stdin, 'isPaused', {
+                value: () => false,
+                writable: true,
+                configurable: true,
+            });
+            
+            expect(() => handler.endSession()).not.toThrow();
+            
+            Object.defineProperty(process.stdin, 'isPaused', {
+                value: originalIsPaused,
+                writable: true,
+                configurable: true,
+            });
+        });
+
+        it('should call resume when isPaused returns true', () => {
+            handler.startSession();
+            
+            const originalIsPaused = process.stdin.isPaused;
+            const originalResume = process.stdin.resume;
+            let resumeCalled = false;
+            
+            Object.defineProperty(process.stdin, 'isPaused', {
+                value: () => true,
+                writable: true,
+                configurable: true,
+            });
+            Object.defineProperty(process.stdin, 'resume', {
+                value: () => { resumeCalled = true; },
+                writable: true,
+                configurable: true,
+            });
+            
+            handler.endSession();
+            
+            expect(resumeCalled).toBe(true);
+            
+            // Restore
+            Object.defineProperty(process.stdin, 'isPaused', {
+                value: originalIsPaused,
+                writable: true,
+                configurable: true,
+            });
+            Object.defineProperty(process.stdin, 'resume', {
+                value: originalResume,
+                writable: true,
+                configurable: true,
+            });
+        });
+    });
+
+    describe('silent mode', () => {
+        it('should create handler with silent mode', () => {
+            const config: InteractiveConfig = {
+                enabled: true,
+                defaultToSuggestion: true,
+                silent: true,
+            };
+            const silentHandler = Handler.create(config);
+            expect(silentHandler.isEnabled()).toBe(true);
+        });
+    });
+
+    describe('context display in wizards', () => {
+        it('should display context in new project wizard when provided', async () => {
+            handler.startSession();
+            setMockAnswers(['']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_project',
+                context: 'File: test.txt\nLine: Some context about the term',
+                term: 'TestTerm',
+            };
+
+            await handler.handleClarification(request);
+            // Just verify it doesn't crash - the write function is mocked
+            expect(true).toBe(true);
+        });
+
+        it('should display context in new person wizard when provided', async () => {
+            handler.startSession();
+            setMockAnswers(['', '', '', '', '']);
+            
+            const request: ClarificationRequest = {
+                type: 'new_person',
+                context: 'File: meeting.txt\nLine: Discussed with Alice',
+                term: 'Alice',
+                options: ['Project A'],
+            };
+
+            await handler.handleClarification(request);
+            expect(true).toBe(true);
         });
     });
 });

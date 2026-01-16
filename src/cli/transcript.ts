@@ -14,7 +14,7 @@ import { RawTranscriptData } from '../output/types';
 /**
  * Get the raw transcript path for a given final transcript path
  */
-const getRawTranscriptPath = (finalPath: string): string => {
+export const getRawTranscriptPath = (finalPath: string): string => {
     const dir = path.dirname(finalPath);
     const basename = path.basename(finalPath, path.extname(finalPath));
     return path.join(dir, '.transcript', `${basename}.json`);
@@ -23,7 +23,7 @@ const getRawTranscriptPath = (finalPath: string): string => {
 /**
  * Read raw transcript data from the .transcript/ directory
  */
-const readRawTranscript = async (finalPath: string): Promise<RawTranscriptData | null> => {
+export const readRawTranscript = async (finalPath: string): Promise<RawTranscriptData | null> => {
     const rawPath = getRawTranscriptPath(finalPath);
     try {
         const content = await fs.readFile(rawPath, 'utf-8');
@@ -39,7 +39,7 @@ const readRawTranscript = async (finalPath: string): Promise<RawTranscriptData |
 /**
  * Read final transcript content
  */
-const readFinalTranscript = async (finalPath: string): Promise<string | null> => {
+export const readFinalTranscript = async (finalPath: string): Promise<string | null> => {
     try {
         return await fs.readFile(finalPath, 'utf-8');
     } catch (error: unknown) {
@@ -53,7 +53,7 @@ const readFinalTranscript = async (finalPath: string): Promise<string | null> =>
 /**
  * Format a side-by-side comparison of raw and enhanced transcripts
  */
-const formatComparison = (raw: string, enhanced: string, width: number = 80): string => {
+export const formatComparison = (raw: string, enhanced: string, width: number = 80): string => {
     const halfWidth = Math.floor(width / 2) - 2;
     const lines: string[] = [];
     
@@ -96,7 +96,7 @@ const formatComparison = (raw: string, enhanced: string, width: number = 80): st
 /**
  * Word wrap text to a maximum width
  */
-const wrapText = (text: string, maxWidth: number): string[] => {
+export const wrapText = (text: string, maxWidth: number): string[] => {
     const words = text.replace(/\n/g, ' ').split(' ');
     const lines: string[] = [];
     let currentLine = '';
@@ -118,7 +118,7 @@ const wrapText = (text: string, maxWidth: number): string[] => {
 /**
  * Compare command - show raw vs enhanced side-by-side
  */
-const compareCommand = async (transcriptPath: string, options: { raw?: boolean; enhanced?: boolean; diff?: boolean }): Promise<void> => {
+export const compareCommand = async (transcriptPath: string, options: { raw?: boolean; enhanced?: boolean; diff?: boolean }): Promise<void> => {
     // Resolve the path
     const absolutePath = path.isAbsolute(transcriptPath) 
         ? transcriptPath 
@@ -133,11 +133,13 @@ const compareCommand = async (transcriptPath: string, options: { raw?: boolean; 
         console.error(`Expected at: ${getRawTranscriptPath(absolutePath)}`);
         console.error('\nThe raw transcript may not have been saved during transcription.');
         process.exit(1);
+        return;
     }
     
     if (!finalContent) {
         console.error(`Final transcript not found: ${transcriptPath}`);
         process.exit(1);
+        return;
     }
     
     // Show metadata about the raw transcript
@@ -172,7 +174,7 @@ const compareCommand = async (transcriptPath: string, options: { raw?: boolean; 
 /**
  * Info command - show info about raw transcript
  */
-const infoCommand = async (transcriptPath: string): Promise<void> => {
+export const infoCommand = async (transcriptPath: string): Promise<void> => {
     const absolutePath = path.isAbsolute(transcriptPath) 
         ? transcriptPath 
         : path.resolve(process.cwd(), transcriptPath);
@@ -183,6 +185,7 @@ const infoCommand = async (transcriptPath: string): Promise<void> => {
         console.error(`No raw transcript found for: ${transcriptPath}`);
         console.error(`Expected at: ${getRawTranscriptPath(absolutePath)}`);
         process.exit(1);
+        return;
     }
     
     console.log('\n📋 Raw Transcript Information:');
@@ -204,7 +207,7 @@ const infoCommand = async (transcriptPath: string): Promise<void> => {
 /**
  * List command - list all transcripts with raw transcripts in a directory
  */
-const listCommand = async (directory: string): Promise<void> => {
+export const listCommand = async (directory: string): Promise<void> => {
     const absoluteDir = path.isAbsolute(directory) 
         ? directory 
         : path.resolve(process.cwd(), directory);
