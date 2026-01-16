@@ -40,7 +40,7 @@
     "@anthropic-ai/sdk": "^0.71.2",
     "@modelcontextprotocol/sdk": "^1.25.2",
     "@google/generative-ai": "^0.24.1",
-    "@riotprompt/riotprompt": "^0.0.19",
+    "@riotprompt/riotprompt": "^0.0.21",
     "@theunwalked/cardigantime": "^0.0.20",
     "@theunwalked/dreadcabinet": "^0.0.13",
     "@types/fluent-ffmpeg": "^2.1.28",
