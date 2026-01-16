@@ -13,6 +13,7 @@ export interface PipelineConfig {
     // Model settings
     model: string;
     transcriptionModel: string;
+    reasoningLevel?: 'low' | 'medium' | 'high';
   
     // Feature flags
     interactive: boolean;
@@ -28,10 +29,16 @@ export interface PipelineConfig {
     processedDirectory?: string;
 }
 
+export interface ProgressInfo {
+    current: number;
+    total: number;
+}
+
 export interface PipelineInput {
     audioFile: string;
     creation: Date;
     hash: string;
+    progress?: ProgressInfo;
 }
 
 export interface PipelineResult {

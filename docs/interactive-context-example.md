@@ -37,10 +37,10 @@ Is the name spelled correctly? (Enter to accept, or type correction):
 ```
 
 **Benefits:**
-- 📁 **File context:** See which recording this person was mentioned in
-- 📅 **Date/time:** Know when the recording was made
-- 📝 **Transcript excerpt:** See the sentences around where the name appears
-- ✨ **Clear formatting:** Better visual hierarchy and no duplication
+- **File context:** See which recording this person was mentioned in
+- **Date/time:** Know when the recording was made
+- **Transcript excerpt:** See the sentences around where the name appears
+- **Clear formatting:** Better visual hierarchy and no duplication
 
 Now you can immediately see that Trey is the VP of Engineering at Acme Corp!
 

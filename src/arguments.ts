@@ -4,6 +4,7 @@ import { Command } from "commander";
 import {
     PROTOKOLL_DEFAULTS,
     DEFAULT_MAX_AUDIO_SIZE,
+    DEFAULT_REASONING_LEVEL,
     PROGRAM_NAME,
     VERSION
 } from "@/constants";
@@ -25,6 +26,7 @@ export const configure = async (dreadcabinet: Dreadcabinet.DreadCabinet, cardiga
         .option('--openai-api-key <openaiApiKey>', 'OpenAI API key')
         .option('--transcription-model <transcriptionModel>', 'OpenAI transcription model to use')
         .option('--model <model>', 'OpenAI model to use for transcription enhancement')
+        .option('--reasoning-level <reasoningLevel>', `reasoning effort level: low, medium, or high (default: ${DEFAULT_REASONING_LEVEL})`)
         .option('--overrides', 'allow overrides of the default configuration')
         .option('--context-directories [contextDirectories...]', 'directories containing context files to be included in prompts')
         .option('--max-audio-size <maxAudioSize>', 'maximum audio file size in bytes')
@@ -88,6 +90,7 @@ export const configure = async (dreadcabinet: Dreadcabinet.DreadCabinet, cardiga
     if (cliArgs.dryRun !== undefined) protokollCliArgs.dryRun = cliArgs.dryRun;
     if (cliArgs.model !== undefined) protokollCliArgs.model = cliArgs.model;
     if (cliArgs.transcriptionModel !== undefined) protokollCliArgs.transcriptionModel = cliArgs.transcriptionModel;
+    if (cliArgs.reasoningLevel !== undefined) protokollCliArgs.reasoningLevel = cliArgs.reasoningLevel;
     if (cliArgs.overrides !== undefined) protokollCliArgs.overrides = cliArgs.overrides;
     if (cliArgs.contextDirectories !== undefined) protokollCliArgs.contextDirectories = cliArgs.contextDirectories;
     if (cliArgs.maxAudioSize !== undefined) {

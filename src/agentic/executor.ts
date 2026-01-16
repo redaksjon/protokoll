@@ -209,7 +209,7 @@ Remember: preserve ALL content, only fix transcription errors.`;
                                         // CREATE NEW PROJECT
                                         const projectName = wizardResult.projectName || termName;
                                         const projectId = projectName.toLowerCase().replace(/\s+/g, '-');
-                                        const projectPath = wizardResult.destination || 'output';
+                                        const projectDestination = wizardResult.destination;
                                         
                                         const newProject = {
                                             id: projectId,
@@ -221,7 +221,8 @@ Remember: preserve ALL content, only fix transcription errors.`;
                                                 explicit_phrases: [termName.toLowerCase(), projectName.toLowerCase()].filter((v, i, a) => a.indexOf(v) === i),
                                             },
                                             routing: {
-                                                destination: projectPath,
+                                                // Only include destination if explicitly provided - otherwise uses global default
+                                                ...(projectDestination && { destination: projectDestination }),
                                                 structure: 'month' as const,
                                                 filename_options: ['date', 'time', 'subject'] as Array<'date' | 'time' | 'subject'>,
                                             },
@@ -231,7 +232,7 @@ Remember: preserve ALL content, only fix transcription errors.`;
                                         try {
                                             await ctx.contextInstance.saveEntity(newProject);
                                             await ctx.contextInstance.reload();  // Reload so subsequent searches find this entity
-                                            logger.info('Created new project: %s -> %s', projectName, projectPath);
+                                            logger.info('Created new project: %s%s', projectName, projectDestination ? ` -> ${projectDestination}` : ' (using default destination)');
                                             
                                             contextChanges.push({
                                                 entityType: 'project',
@@ -239,19 +240,20 @@ Remember: preserve ALL content, only fix transcription errors.`;
                                                 entityName: projectName,
                                                 action: 'created',
                                                 details: {
-                                                    destination: projectPath,
+                                                    ...(projectDestination && { destination: projectDestination }),
                                                     description: wizardResult.description,
                                                     triggeredByTerm: termName,
                                                 },
                                             });
                                             
-                                            if (projectPath !== 'output') {
+                                            // Update routing if destination was specified
+                                            if (projectDestination) {
                                                 state.routeDecision = {
                                                     projectId,
-                                                    destination: { path: projectPath, structure: 'month' },
+                                                    destination: { path: projectDestination, structure: 'month' },
                                                     confidence: 1.0,
                                                     signals: [{ type: 'explicit_phrase', value: termName, weight: 1.0 }],
-                                                    reasoning: `User created new project "${projectName}" routing to ${projectPath}`,
+                                                    reasoning: `User created new project "${projectName}" routing to ${projectDestination}`,
                                                 };
                                             }
                                         } catch (error) {
@@ -281,7 +283,8 @@ Remember: preserve ALL content, only fix transcription errors.`;
                                                     explicit_phrases: updatedPhrases,
                                                 },
                                                 routing: {
-                                                    destination: linkedProject.routing?.destination || 'output',
+                                                    // Preserve existing destination (or omit if not set)
+                                                    ...(linkedProject.routing?.destination && { destination: linkedProject.routing.destination }),
                                                     structure: (linkedProject.routing?.structure || 'month') as 'none' | 'year' | 'month' | 'day',
                                                     filename_options: (linkedProject.routing?.filename_options || ['date', 'time']) as Array<'date' | 'time' | 'subject'>,
                                                 },
@@ -340,7 +343,7 @@ Remember: preserve ALL content, only fix transcription errors.`;
                                         if (wizardResult.createdProject?.action === 'create' && wizardResult.createdProject.projectName) {
                                             const projectName = wizardResult.createdProject.projectName;
                                             const projectId = projectName.toLowerCase().replace(/\s+/g, '-');
-                                            const projectPath = wizardResult.createdProject.destination || 'output';
+                                            const projectDestination = wizardResult.createdProject.destination;
                                             
                                             const newProject = {
                                                 id: projectId,
@@ -352,7 +355,8 @@ Remember: preserve ALL content, only fix transcription errors.`;
                                                     explicit_phrases: [projectName.toLowerCase(), termNameFinal.toLowerCase()].filter((v, i, a) => a.indexOf(v) === i),
                                                 },
                                                 routing: {
-                                                    destination: projectPath,
+                                                    // Only include destination if explicitly provided - otherwise uses global default
+                                                    ...(projectDestination && { destination: projectDestination }),
                                                     structure: 'month' as const,
                                                     filename_options: ['date', 'time', 'subject'] as Array<'date' | 'time' | 'subject'>,
                                                 },
@@ -362,7 +366,7 @@ Remember: preserve ALL content, only fix transcription errors.`;
                                             try {
                                                 await ctx.contextInstance.saveEntity(newProject);
                                                 await ctx.contextInstance.reload();  // Reload so subsequent searches find this entity
-                                                logger.info('Created new project from term wizard: %s -> %s', projectName, projectPath);
+                                                logger.info('Created new project from term wizard: %s%s', projectName, projectDestination ? ` -> ${projectDestination}` : ' (using default destination)');
                                                 
                                                 // Add the new project to the projectIds list for term association
                                                 projectIds.push(projectId);
@@ -373,17 +377,17 @@ Remember: preserve ALL content, only fix transcription errors.`;
                                                     entityName: projectName,
                                                     action: 'created',
                                                     details: {
-                                                        destination: projectPath,
+                                                        ...(projectDestination && { destination: projectDestination }),
                                                         description: wizardResult.createdProject.description,
                                                         createdForTerm: termNameFinal,
                                                     },
                                                 });
                                                 
-                                                // Update routing to use the new project
-                                                if (projectPath !== 'output') {
+                                                // Update routing to use the new project (if destination was specified)
+                                                if (projectDestination) {
                                                     state.routeDecision = {
                                                         projectId,
-                                                        destination: { path: projectPath, structure: 'month' },
+                                                        destination: { path: projectDestination, structure: 'month' },
                                                         confidence: 1.0,
                                                         signals: [{ type: 'explicit_phrase', value: termNameFinal, weight: 1.0 }],
                                                         reasoning: `User created project "${projectName}" for term "${termNameFinal}"`,
@@ -515,7 +519,7 @@ Remember: preserve ALL content, only fix transcription errors.`;
                                         if (personWizardResult.createdProject?.action === 'create' && personWizardResult.createdProject.projectName) {
                                             const projectName = personWizardResult.createdProject.projectName;
                                             const projectId = projectName.toLowerCase().replace(/\s+/g, '-');
-                                            const projectPath = personWizardResult.createdProject.destination || 'output';
+                                            const projectDestination = personWizardResult.createdProject.destination;
                                             
                                             const newProject = {
                                                 id: projectId,
@@ -527,7 +531,8 @@ Remember: preserve ALL content, only fix transcription errors.`;
                                                     explicit_phrases: [projectName.toLowerCase()],
                                                 },
                                                 routing: {
-                                                    destination: projectPath,
+                                                    // Only include destination if explicitly provided - otherwise uses global default
+                                                    ...(projectDestination && { destination: projectDestination }),
                                                     structure: 'month' as const,
                                                     filename_options: ['date', 'time', 'subject'] as Array<'date' | 'time' | 'subject'>,
                                                 },
@@ -537,7 +542,7 @@ Remember: preserve ALL content, only fix transcription errors.`;
                                             try {
                                                 await ctx.contextInstance.saveEntity(newProject);
                                                 await ctx.contextInstance.reload();  // Reload so subsequent searches find this entity
-                                                logger.info('Created new project from person wizard: %s -> %s', projectName, projectPath);
+                                                logger.info('Created new project from person wizard: %s%s', projectName, projectDestination ? ` -> ${projectDestination}` : ' (using default destination)');
                                                 linkedProjectId = projectId;
                                                 
                                                 contextChanges.push({
@@ -546,17 +551,17 @@ Remember: preserve ALL content, only fix transcription errors.`;
                                                     entityName: projectName,
                                                     action: 'created',
                                                     details: {
-                                                        destination: projectPath,
+                                                        ...(projectDestination && { destination: projectDestination }),
                                                         description: personWizardResult.createdProject.description,
                                                         createdForPerson: personWizardResult.personName,
                                                     },
                                                 });
                                                 
-                                                // Update routing to use the new project
-                                                if (projectPath !== 'output') {
+                                                // Update routing to use the new project (if destination was specified)
+                                                if (projectDestination) {
                                                     state.routeDecision = {
                                                         projectId,
-                                                        destination: { path: projectPath, structure: 'month' },
+                                                        destination: { path: projectDestination, structure: 'month' },
                                                         confidence: 1.0,
                                                         signals: [{ type: 'explicit_phrase', value: projectName, weight: 1.0 }],
                                                         reasoning: `User created project "${projectName}" for person "${personWizardResult.personName}"`,

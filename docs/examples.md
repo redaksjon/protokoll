@@ -222,3 +222,155 @@ cd ~/work/project-a
 protokoll --input-directory ./recordings
 ```
 
+## Scenario 11: Edit Transcript Title
+
+Rename a transcript with a more meaningful title.
+
+```bash
+# Change title (updates document heading and filename)
+protokoll action --title "Q1 Budget Review Meeting" ~/notes/2026/01/15-1412-meeting.md
+
+# Preview changes first
+protokoll action --title "Q1 Budget Review" ~/notes/file.md --dry-run --verbose
+```
+
+Result:
+- Document heading changes to `# Q1 Budget Review Meeting`
+- File renames to `15-1412-q1-budget-review-meeting.md`
+
+## Scenario 12: Move Transcript to Different Project
+
+Realize a transcript belongs to a different project.
+
+```bash
+# Move to different project (updates metadata and routes to project destination)
+protokoll action --project client-alpha ~/notes/2026/01/15-1412-meeting.md
+
+# Change both title and project
+protokoll action --title "Alpha Kickoff" --project client-alpha ~/notes/file.md
+```
+
+Result:
+- Metadata updated with new project name and ID
+- File moved to project's configured destination
+- Original file removed
+
+## Scenario 13: Combine Multiple Transcripts
+
+Merge several related transcripts from a long meeting.
+
+```bash
+# Combine with a custom title
+protokoll action --title "Full Team Standup" --combine "~/notes/2026/01/15-1412-part1.md
+~/notes/2026/01/15-1421-part2.md
+~/notes/2026/01/15-1435-part3.md"
+
+# Combine and assign to project
+protokoll action --title "Sprint 42 Planning" --project sprint-42 --combine "~/notes/misc1.md
+~/notes/misc2.md"
+
+# Preview what would happen
+protokoll action --combine "~/notes/files..." --dry-run --verbose
+```
+
+Result:
+- Single combined transcript with custom title
+- Sorted chronologically by timestamp
+- Durations summed, tags deduplicated
+- Source files automatically deleted
+
+## Scenario 14: Reorganize Scattered Notes
+
+Consolidate notes that were initially routed to the default location.
+
+```bash
+# Find notes that mention a specific topic
+ls ~/notes/2026/01/*standards*.md
+
+# Combine them into a project
+protokoll action --title "Fellow Standards Discussion" --project fellow-standards --combine "~/notes/2026/01/15-1412-ne-4th-st-0.md
+~/notes/2026/01/15-1421-dimension-talk.md
+~/notes/2026/01/15-1435-standards-continued.md"
+```
+
+Result:
+- All related notes combined into one comprehensive document
+- Routed to the `fellow-standards` project destination
+- Original scattered files cleaned up
+
+## Scenario 15: Fix a Misheard Term
+
+A technical term was transcribed incorrectly.
+
+```bash
+# The transcript has "WCMP" but should be "WCNP"
+protokoll feedback ~/notes/2026/01/15-1412-meeting.md \
+  -f "Everywhere it says WCMP, that should be WCNP - Walmart's Native Cloud Platform"
+```
+
+Result:
+- "WCMP" replaced with "WCNP" throughout the transcript
+- "WCNP" added to your vocabulary with the full expansion
+- Phonetic variants stored so it won't be misheard again
+
+## Scenario 16: Fix a Misheard Name
+
+A person's name was transcribed phonetically.
+
+```bash
+# The transcript has "San Jay Grouper" but should be "Sanjay Gupta"
+protokoll feedback ~/notes/2026/01/15-1412-meeting.md \
+  -f "San Jay Grouper is actually Sanjay Gupta"
+```
+
+Result:
+- Name corrected throughout the transcript
+- Variations like "San Jay" or "Sanjay Grouper" also fixed
+- Person added to context for future recognition
+
+## Scenario 17: Reassign to Different Project via Feedback
+
+A transcript was routed to the wrong project.
+
+```bash
+# Interactive feedback
+protokoll feedback ~/notes/2026/01/15-1412-meeting.md
+
+# When prompted: "This should be in the Quantum Readiness project"
+```
+
+Result:
+- Project metadata updated in the transcript
+- File moved to the project's configured destination
+- Filename updated according to project rules
+
+## Scenario 18: Preview Feedback Changes
+
+See what would happen without making changes.
+
+```bash
+# Dry run with verbose output
+protokoll feedback ~/notes/2026/01/15-1412-meeting.md \
+  -f "YB should be Wibey" \
+  --dry-run --verbose
+```
+
+Output:
+```
+[Dry Run] Would apply the following changes:
+  - Replaced "YB" with "Wibey" (3 occurrences)
+  - Added term "Wibey" to context
+```
+
+## Scenario 19: Get Help with Feedback
+
+Not sure what feedback you can give.
+
+```bash
+# Show feedback examples
+protokoll feedback --help-me
+
+# Or during interactive session
+protokoll feedback ~/notes/meeting.md
+# Enter: "What kinds of feedback can I give?"
+```

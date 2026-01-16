@@ -171,6 +171,21 @@ describe('Pipeline Orchestrator', () => {
             // Should have routing info (even if default)
             expect(typeof result.routingConfidence).toBe('number');
         });
+        
+        it('should accept progress information in input', async () => {
+            const pipeline = await Pipeline.create(createConfig());
+      
+            const result = await pipeline.process({
+                audioFile: '/test/audio.m4a',
+                creation: new Date('2026-01-11T12:00:00'),
+                hash: 'abc123def456',
+                progress: { current: 3, total: 10 },
+            });
+      
+            // Processing should complete successfully with progress info
+            expect(result).toBeDefined();
+            expect(result.outputPath).toBeDefined();
+        });
 
         it('should include metadata header in output file', async () => {
             const pipeline = await Pipeline.create(createConfig());

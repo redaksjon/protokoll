@@ -13,6 +13,7 @@ Protokoll transforms audio recordings into intelligent, context-enhanced transcr
 ### Getting Started
 - [**Quick Start**](./quickstart.md): Get Protokoll working in 5 minutes
 - [**Configuration**](./configuration.md): All configuration options
+- [**Config Command**](./config.md): Interactive configuration editor
 
 ### Understanding Protokoll
 - [**Architecture**](./architecture.md): System design and data flow
@@ -20,6 +21,8 @@ Protokoll transforms audio recordings into intelligent, context-enhanced transcr
 - [**Context Commands**](./context-commands.md): CLI for managing entities
 - [**Routing**](./routing.md): Intelligent note routing
 - [**Reasoning**](./reasoning.md): Reasoning model integration
+- [**Transcript Actions**](./action.md): Post-processing commands (combine, etc.)
+- [**Feedback**](./feedback.md): Intelligent feedback for corrections
 
 ### Development
 - [**Development**](./development.md): Building and testing
@@ -41,6 +44,24 @@ protokoll --input-directory ./recordings --no-self-reflection
 
 # Full debug mode
 protokoll --input-directory ./recordings --debug --verbose
+```
+
+### Configuration Commands
+
+```bash
+# Interactive configuration editor
+protokoll config
+
+# List all settings
+protokoll config --list
+
+# View a specific setting
+protokoll config model
+
+# Set a specific value
+protokoll config model gpt-4o-mini
+protokoll config debug true
+protokoll config outputDirectory ~/my-notes
 ```
 
 ### Context Management Commands
@@ -71,6 +92,49 @@ protokoll person delete <id> --force
 # Context overview
 protokoll context status
 protokoll context search <query>
+```
+
+### Transcript Actions
+
+```bash
+# Edit a single transcript - change title
+protokoll action --title "Time to Celebrate" /path/to/transcript.md
+
+# Edit a single transcript - change project
+protokoll action --project client-alpha /path/to/transcript.md
+
+# Combine multiple transcripts (source files are auto-deleted)
+protokoll action --title "Full Meeting Notes" --combine "/path/to/file1.md
+/path/to/file2.md
+/path/to/file3.md"
+
+# Combine and change project
+protokoll action --title "Sprint Planning" --project my-project --combine "/path/to/files..."
+
+# Preview without making changes
+protokoll action --title "New Title" /path/to/file.md --dry-run --verbose
+```
+
+### Feedback
+
+```bash
+# Provide feedback interactively
+protokoll feedback /path/to/transcript.md
+
+# Provide feedback directly
+protokoll feedback /path/to/transcript.md -f "YB should be Wibey"
+
+# Fix a name and add to context
+protokoll feedback /path/to/transcript.md -f "San Jay Grouper is actually Sanjay Gupta"
+
+# Change project assignment
+protokoll feedback /path/to/transcript.md -f "This should be in the Quantum Readiness project"
+
+# Preview changes
+protokoll feedback /path/to/transcript.md -f "WCMP should be WCNP" --dry-run -v
+
+# Get help on feedback options
+protokoll feedback --help-me
 ```
 
 ### Key Directories
@@ -115,6 +179,7 @@ If you're an AI helping someone use Protokoll:
 | Setting | Default Value |
 |---------|---------------|
 | Reasoning Model | `gpt-5.2` |
+| Reasoning Level | `medium` |
 | Transcription Model | `whisper-1` |
 | Self-Reflection | `true` (enabled) |
 | Interactive Mode | `true` (enabled, use `--batch` to disable) |

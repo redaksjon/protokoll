@@ -45,14 +45,20 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
     });
     logger.debug('Context system initialized - ready to query entities via tools');
   
+    // Default routing configuration (used as fallback for projects without custom destination)
+    const defaultPath = config.outputDirectory || '~/notes';
+    const defaultStructure = (config.outputStructure || 'month') as Routing.FilesystemStructure;
+    const defaultFilenameOptions = (config.outputFilenameOptions || ['date', 'time', 'subject']) as Routing.FilenameOption[];
+
     // Convert context projects to routing format
+    // Projects without a destination inherit from the global default
     const contextProjects = context.getAllProjects();
     const routingProjects: Routing.ProjectRoute[] = contextProjects
         .filter(project => project.active !== false)
         .map(project => ({
             projectId: project.id,
             destination: {
-                path: project.routing.destination,
+                path: project.routing.destination || defaultPath,
                 structure: project.routing.structure,
                 filename_options: project.routing.filename_options,
                 createDirectories: true,
@@ -67,9 +73,9 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
     // Initialize routing with config-based defaults
     const routingConfig: Routing.RoutingConfig = {
         default: {
-            path: config.outputDirectory || '~/notes',
-            structure: (config.outputStructure || 'month') as Routing.FilesystemStructure,
-            filename_options: (config.outputFilenameOptions || ['date', 'time', 'subject']) as Routing.FilenameOption[],
+            path: defaultPath,
+            structure: defaultStructure,
+            filename_options: defaultFilenameOptions,
             createDirectories: true,
         },
         projects: routingProjects,
@@ -110,8 +116,11 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
     logger.debug('Transcription service initialized with model: %s', config.transcriptionModel);
   
     // Initialize reasoning for agentic processing
-    const reasoning = Reasoning.create({ model: config.model });
-    logger.debug('Reasoning system initialized with model: %s', config.model);
+    const reasoning = Reasoning.create({ 
+        model: config.model,
+        reasoningLevel: config.reasoningLevel,
+    });
+    logger.debug('Reasoning system initialized with model: %s, reasoning level: %s', config.model, config.reasoningLevel || 'medium');
 
     // Initialize complete phase for moving files to processed directory
     // Pass outputStructure so processed files use the same directory structure as output
@@ -144,8 +153,21 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
 
     const processInput = async (input: PipelineInput): Promise<PipelineResult> => {
         const startTime = Date.now();
+        
+        // Format progress prefix for log messages
+        const progressPrefix = input.progress 
+            ? `[${input.progress.current}/${input.progress.total}]` 
+            : '';
+        const log = (level: 'info' | 'debug', message: string, ...args: unknown[]) => {
+            const prefixedMessage = progressPrefix ? `${progressPrefix} ${message}` : message;
+            if (level === 'info') {
+                logger.info(prefixedMessage, ...args);
+            } else {
+                logger.debug(prefixedMessage, ...args);
+            }
+        };
     
-        logger.info('Processing: %s (hash: %s)', input.audioFile, input.hash);
+        log('info', 'Processing: %s (hash: %s)', input.audioFile, input.hash);
     
         // Initialize state
         const state: PipelineState = {
@@ -161,19 +183,19 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
         // Start interactive session if enabled
         if (config.interactive) {
             interactive.startSession();
-            logger.debug('Interactive session started');
+            log('debug', 'Interactive session started');
         }
     
         try {
             // Step 1: Check onboarding needs
-            logger.debug('Checking onboarding state...');
+            log('debug', 'Checking onboarding state...');
             const onboardingState = interactive.checkNeedsOnboarding();
             if (onboardingState.needsOnboarding) {
-                logger.debug('First-run detected - onboarding may be triggered');
+                log('debug', 'First-run detected - onboarding may be triggered');
             }
       
             // Step 2: Raw transcription using Transcription module
-            logger.info('Transcribing audio...');
+            log('info', 'Transcribing audio...');
             const whisperStart = Date.now();
             
             const transcriptionResult = await transcription.transcribe(input.audioFile, {
@@ -182,7 +204,7 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
             state.rawTranscript = transcriptionResult.text;
             
             const whisperDuration = Date.now() - whisperStart;
-            logger.info('Transcription: %d chars in %.1fs', 
+            log('info', 'Transcription: %d chars in %.1fs', 
                 state.rawTranscript.length, whisperDuration / 1000);
       
             if (reflection) {
@@ -190,7 +212,7 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
             }
       
             // Step 3: Route detection
-            logger.debug('Determining routing destination...');
+            log('debug', 'Determining routing destination...');
             const routingContext: Routing.RoutingContext = {
                 transcriptText: state.rawTranscript || '',
                 audioDate: input.creation,
@@ -200,7 +222,7 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
       
             const routeResult = routing.route(routingContext);
       
-            logger.debug('Routing decision: project=%s, confidence=%.2f', 
+            log('debug', 'Routing decision: project=%s, confidence=%.2f', 
                 routeResult.projectId || 'default', routeResult.confidence);
       
             // Record routing decision in reflection
@@ -225,10 +247,10 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
       
             // Build output path
             const outputPath = routing.buildOutputPath(routeResult, routingContext);
-            logger.debug('Output path: %s', outputPath);
+            log('debug', 'Output path: %s', outputPath);
       
             // Step 4: Create output paths using Output module
-            logger.debug('Setting up output directories...');
+            log('debug', 'Setting up output directories...');
             const paths = output.createOutputPaths(
                 input.audioFile,
                 outputPath,
@@ -238,7 +260,7 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
       
             await output.ensureDirectories(paths);
             
-            // Write raw transcript to intermediate
+            // Write raw transcript to intermediate (for debugging)
             await output.writeIntermediate(paths, 'transcript', {
                 text: state.rawTranscript,
                 model: config.transcriptionModel,
@@ -246,7 +268,7 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
             });
       
             // Step 5: Agentic enhancement using real executor
-            logger.info('Enhancing with %s...', config.model);
+            log('info', 'Enhancing with %s...', config.model);
             
             const agenticStart = Date.now();
             const toolContext: Agentic.ToolContext = {
@@ -296,7 +318,7 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
             // (e.g., via lookup_project tool finding a project with custom destination)
             if (agenticResult.state.routeDecision?.destination?.path) {
                 const agenticRoute = agenticResult.state.routeDecision;
-                logger.debug('Agentic processing found route: %s -> %s', 
+                log('debug', 'Agentic processing found route: %s -> %s', 
                     agenticRoute.projectId || 'unknown', 
                     agenticRoute.destination.path
                 );
@@ -316,7 +338,7 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
                 
                 // Rebuild output path with the new destination
                 const newOutputPath = routing.buildOutputPath(routeResult, routingContext);
-                logger.debug('Updated output path: %s -> %s', outputPath, newOutputPath);
+                log('debug', 'Updated output path: %s -> %s', outputPath, newOutputPath);
                 
                 // Recreate output paths with new destination
                 const newPaths = output.createOutputPaths(
@@ -331,8 +353,21 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
                 Object.assign(paths, newPaths);
             }
 
+            // Step 5c: Write raw transcript to .transcript/ directory alongside final output
+            // This is done AFTER the route is finalized so it goes to the correct location
+            // Enables compare and reanalyze workflows
+            log('debug', 'Writing raw transcript to .transcript/ directory...');
+            await output.writeRawTranscript(paths, {
+                text: state.rawTranscript,
+                model: config.transcriptionModel,
+                duration: whisperDuration,
+                audioFile: input.audioFile,
+                audioHash: input.hash,
+                transcribedAt: new Date().toISOString(),
+            });
+
             // Step 6: Write final output using Output module with metadata
-            logger.debug('Writing final transcript...');
+            log('debug', 'Writing final transcript...');
             if (state.enhancedText) {
                 // Build metadata from routing decision and input
                 const transcriptMetadata: Metadata.TranscriptMetadata = {
@@ -349,7 +384,7 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
             }
       
             // Step 7: Generate reflection report
-            logger.debug('Generating reflection report...');
+            log('debug', 'Generating reflection report...');
             let reflectionReport: Reflection.ReflectionReport | undefined;
             if (reflection) {
                 reflectionReport = reflection.generate(
@@ -365,11 +400,11 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
             }
       
             // Step 8: End interactive session
-            logger.debug('Finalizing session...');
+            log('debug', 'Finalizing session...');
             let session: Interactive.InteractiveSession | undefined;
             if (config.interactive) {
                 session = interactive.endSession();
-                logger.debug('Interactive session ended: %d clarifications', session.responses.length);
+                log('debug', 'Interactive session ended: %d clarifications', session.responses.length);
         
                 // Save session if path available
                 if (paths.intermediate.session) {
@@ -398,12 +433,12 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
             const processingTime = Date.now() - startTime;
       
             // Compact summary output
-            logger.info('Enhancement: %d iterations, %d tools, %.1fs', 
+            log('info', 'Enhancement: %d iterations, %d tools, %.1fs', 
                 agenticResult.iterations, toolsUsed.length, agenticDuration / 1000);
             if (agenticResult.totalTokens) {
-                logger.info('Tokens: %d total', agenticResult.totalTokens);
+                log('info', 'Tokens: %d total', agenticResult.totalTokens);
             }
-            logger.info('Output: %s (%.1fs total)', paths.final, processingTime / 1000);
+            log('info', 'Output: %s (%.1fs total)', paths.final, processingTime / 1000);
       
             return {
                 outputPath: paths.final,

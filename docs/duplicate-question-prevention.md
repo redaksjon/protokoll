@@ -53,10 +53,10 @@ This ensures that subsequent tool calls will find the newly created entity even 
 
 ## Benefits
 
-✅ **No Duplicate Questions:** Users are only asked about each person/project/term once per transcript  
-✅ **Better UX:** Faster processing for long transcripts with repeated mentions  
-✅ **Maintains State:** The resolved entities Map is shared across all tool executions in the session  
-✅ **Backwards Compatible:** Works even if `resolvedEntities` is undefined (graceful fallback)
+**No Duplicate Questions:** Users are only asked about each person/project/term once per transcript  
+**Better UX:** Faster processing for long transcripts with repeated mentions  
+**Maintains State:** The resolved entities Map is shared across all tool executions in the session  
+**Backwards Compatible:** Works even if `resolvedEntities` is undefined (graceful fallback)
 
 ## Example
 
@@ -114,4 +114,4 @@ Added 8 new tests in `tests/agentic/resolved-entities.test.ts`:
 - Test cross-tool entity sharing
 - Test graceful handling when resolvedEntities is undefined
 
-All 580 tests passing ✅
+All 580 tests passing.

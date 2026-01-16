@@ -8,6 +8,7 @@
 # Model settings
 model: "gpt-5.2"                   # Reasoning model (default)
 transcriptionModel: "whisper-1"    # Audio transcription
+reasoningLevel: "medium"           # Reasoning effort: low, medium, high (default: medium)
 
 # Directory settings (Dreadcabinet options)
 inputDirectory: "./recordings"      # Where to find audio files
@@ -51,6 +52,7 @@ contextDirectories: []             # Additional context locations
 | `--output-directory <dir>` | Default output directory | `./` |
 | `--model <model>` | Reasoning model | `gpt-5.2` |
 | `--transcription-model <model>` | Whisper model | `whisper-1` |
+| `--reasoning-level <level>` | Reasoning effort (low/medium/high) | `medium` |
 
 ### Mode Options
 

@@ -378,5 +378,155 @@ describe('Output Manager', () => {
             expect(Output.DEFAULT_OUTPUT_CONFIG.timestampFormat).toBe('YYMMDD-HHmm');
         });
     });
+
+    describe('rawTranscript path', () => {
+        it('should create rawTranscript path in .transcript/ alongside final output', () => {
+            const output = Output.create({
+                intermediateDir: path.join(tempDir, 'output/protokoll'),
+                keepIntermediates: true,
+                timestampFormat: 'YYMMDD-HHmm',
+            });
+      
+            const paths = output.createOutputPaths(
+                '/audio/recording.m4a',
+                '/notes/2026/01/11-meeting.md',
+                'abc123',
+                new Date()
+            );
+      
+            expect(paths.rawTranscript).toBe('/notes/2026/01/.transcript/11-meeting.json');
+        });
+
+        it('should preserve directory structure for rawTranscript', () => {
+            const output = Output.create({
+                intermediateDir: tempDir,
+                keepIntermediates: true,
+                timestampFormat: 'YYMMDD-HHmm',
+            });
+      
+            const paths = output.createOutputPaths(
+                '/audio/test.m4a',
+                '/users/tobrien/notes/work/project-alpha/2026-01-15-standup.md',
+                'abc123',
+                new Date()
+            );
+      
+            expect(paths.rawTranscript).toBe(
+                '/users/tobrien/notes/work/project-alpha/.transcript/2026-01-15-standup.json'
+            );
+        });
+    });
+
+    describe('writeRawTranscript', () => {
+        it('should write raw transcript data to .transcript/ directory', async () => {
+            const output = Output.create({
+                intermediateDir: path.join(tempDir, 'output/protokoll'),
+                keepIntermediates: true,
+                timestampFormat: 'YYMMDD-HHmm',
+            });
+      
+            const paths = output.createOutputPaths(
+                '/audio/recording.m4a',
+                path.join(tempDir, 'notes/2026/01/meeting.md'),
+                'abc123def456',
+                new Date()
+            );
+      
+            await output.ensureDirectories(paths);
+      
+            const rawData = {
+                text: 'This is the raw whisper output.',
+                model: 'whisper-1',
+                duration: 5432,
+                audioFile: '/audio/recording.m4a',
+                audioHash: 'abc123def456',
+                transcribedAt: '2026-01-15T14:30:00.000Z',
+            };
+      
+            const writtenPath = await output.writeRawTranscript(paths, rawData);
+      
+            expect(writtenPath).toBe(paths.rawTranscript);
+            const content = await fs.readFile(writtenPath, 'utf-8');
+            expect(JSON.parse(content)).toEqual(rawData);
+        });
+
+        it('should create .transcript/ directory if it does not exist', async () => {
+            const output = Output.create({
+                intermediateDir: path.join(tempDir, 'output/protokoll'),
+                keepIntermediates: true,
+                timestampFormat: 'YYMMDD-HHmm',
+            });
+      
+            const paths = output.createOutputPaths(
+                '/audio/recording.m4a',
+                path.join(tempDir, 'new-notes/deep/nested/meeting.md'),
+                'abc123',
+                new Date()
+            );
+      
+            await output.ensureDirectories(paths);
+      
+            const rawData = {
+                text: 'Test transcript',
+                model: 'whisper-1',
+                duration: 1000,
+                audioFile: '/audio/recording.m4a',
+                audioHash: 'abc123',
+                transcribedAt: new Date().toISOString(),
+            };
+      
+            await output.writeRawTranscript(paths, rawData);
+      
+            // Verify .transcript directory was created
+            const transcriptDir = path.dirname(paths.rawTranscript);
+            await expect(fs.access(transcriptDir)).resolves.toBeUndefined();
+        });
+    });
+
+    describe('readRawTranscript', () => {
+        it('should read previously written raw transcript', async () => {
+            const output = Output.create({
+                intermediateDir: path.join(tempDir, 'output/protokoll'),
+                keepIntermediates: true,
+                timestampFormat: 'YYMMDD-HHmm',
+            });
+      
+            const finalPath = path.join(tempDir, 'notes/2026/01/meeting.md');
+            const paths = output.createOutputPaths(
+                '/audio/recording.m4a',
+                finalPath,
+                'abc123def456',
+                new Date()
+            );
+      
+            await output.ensureDirectories(paths);
+      
+            const rawData = {
+                text: 'This is the raw whisper output for reading test.',
+                model: 'whisper-1',
+                duration: 3500,
+                audioFile: '/audio/recording.m4a',
+                audioHash: 'abc123def456',
+                transcribedAt: '2026-01-15T10:00:00.000Z',
+            };
+      
+            await output.writeRawTranscript(paths, rawData);
+      
+            const readData = await output.readRawTranscript(finalPath);
+            expect(readData).toEqual(rawData);
+        });
+
+        it('should return null when no raw transcript exists', async () => {
+            const output = Output.create({
+                intermediateDir: path.join(tempDir, 'output/protokoll'),
+                keepIntermediates: true,
+                timestampFormat: 'YYMMDD-HHmm',
+            });
+      
+            const nonExistentPath = path.join(tempDir, 'notes/2026/01/no-such-file.md');
+            const readData = await output.readRawTranscript(nonExistentPath);
+            expect(readData).toBeNull();
+        });
+    });
 });
 

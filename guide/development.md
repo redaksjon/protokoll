@@ -272,6 +272,7 @@ Verify documented defaults match code:
 |-------|-------------|---------------|
 | Interactive default | `src/constants.ts` (DEFAULT_INTERACTIVE) | `guide/configuration.md`, `guide/index.md` |
 | Self-reflection default | `src/constants.ts` (DEFAULT_SELF_REFLECTION) | `guide/configuration.md`, `guide/reasoning.md` |
+| Reasoning level default | `src/constants.ts` (DEFAULT_REASONING_LEVEL) | `guide/configuration.md`, `guide/reasoning.md`, `guide/quickstart.md`, `guide/index.md` |
 | Model defaults | `src/constants.ts` (DEFAULT_MODEL, DEFAULT_TRANSCRIPTION_MODEL) | All guide files |
 | Output structure | `src/constants.ts` (DEFAULT_OUTPUT_STRUCTURE) | `guide/configuration.md`, `guide/routing.md` |
 

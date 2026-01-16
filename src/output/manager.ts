@@ -7,7 +7,7 @@
 
 import * as path from 'node:path';
 import * as fs from 'fs/promises';
-import { OutputConfig, IntermediateFiles, OutputPaths } from './types';
+import { OutputConfig, IntermediateFiles, OutputPaths, RawTranscriptData } from './types';
 import * as Logging from '../logging';
 import * as Metadata from '../util/metadata';
 
@@ -27,9 +27,21 @@ export interface ManagerInstance {
         content: unknown
     ): Promise<string>;
   
+    /**
+     * Write the raw Whisper transcript to the .transcript/ directory alongside final output.
+     * This enables compare and reanalyze workflows.
+     */
+    writeRawTranscript(paths: OutputPaths, data: RawTranscriptData): Promise<string>;
+  
     writeTranscript(paths: OutputPaths, content: string, metadata?: Metadata.TranscriptMetadata): Promise<string>;
   
     cleanIntermediates(paths: OutputPaths): Promise<void>;
+    
+    /**
+     * Read a previously stored raw transcript from the .transcript/ directory.
+     * Returns null if no raw transcript exists.
+     */
+    readRawTranscript(finalOutputPath: string): Promise<RawTranscriptData | null>;
 }
 
 export const create = (config: OutputConfig): ManagerInstance => {
@@ -59,8 +71,15 @@ export const create = (config: OutputConfig): ManagerInstance => {
     
         const intermediateDir = config.intermediateDir;
     
+        // Generate raw transcript path in .transcript/ directory alongside final output
+        // e.g., /notes/2026/1/14-meeting.md -> /notes/2026/1/.transcript/14-meeting.json
+        const finalDir = path.dirname(routedDestination);
+        const finalBasename = path.basename(routedDestination, path.extname(routedDestination));
+        const rawTranscriptPath = path.join(finalDir, '.transcript', `${finalBasename}.json`);
+
         return {
             final: routedDestination,
+            rawTranscript: rawTranscriptPath,
             intermediate: {
                 transcript: path.join(intermediateDir, buildFilename('transcript', '.json')),
                 context: path.join(intermediateDir, buildFilename('context', '.json')),
@@ -78,10 +97,14 @@ export const create = (config: OutputConfig): ManagerInstance => {
     
         // Ensure final directory
         await fs.mkdir(path.dirname(paths.final), { recursive: true });
+        
+        // Ensure .transcript directory alongside final output
+        await fs.mkdir(path.dirname(paths.rawTranscript), { recursive: true });
     
         logger.debug('Ensured output directories', {
             intermediate: path.dirname(paths.intermediate.transcript),
             final: path.dirname(paths.final),
+            rawTranscript: path.dirname(paths.rawTranscript),
         });
     };
   
@@ -139,12 +162,52 @@ export const create = (config: OutputConfig): ManagerInstance => {
             }
         }
     };
+    
+    /**
+     * Write the raw Whisper transcript to the .transcript/ directory.
+     * This preserves the original transcription for compare/reanalyze workflows.
+     */
+    const writeRawTranscript = async (
+        paths: OutputPaths,
+        data: RawTranscriptData
+    ): Promise<string> => {
+        const filePath = paths.rawTranscript;
+        
+        await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
+        logger.debug('Wrote raw transcript to .transcript/', { path: filePath });
+        
+        return filePath;
+    };
+    
+    /**
+     * Read a previously stored raw transcript from the .transcript/ directory.
+     * Calculates the path based on the final output path.
+     * Returns null if no raw transcript exists.
+     */
+    const readRawTranscript = async (finalOutputPath: string): Promise<RawTranscriptData | null> => {
+        const finalDir = path.dirname(finalOutputPath);
+        const finalBasename = path.basename(finalOutputPath, path.extname(finalOutputPath));
+        const rawTranscriptPath = path.join(finalDir, '.transcript', `${finalBasename}.json`);
+        
+        try {
+            const content = await fs.readFile(rawTranscriptPath, 'utf-8');
+            return JSON.parse(content) as RawTranscriptData;
+        } catch (error: unknown) {
+            if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+                logger.debug('No raw transcript found', { path: rawTranscriptPath });
+                return null;
+            }
+            throw error;
+        }
+    };
   
     return {
         createOutputPaths,
         ensureDirectories,
         writeIntermediate,
+        writeRawTranscript,
         writeTranscript,
+        readRawTranscript,
         cleanIntermediates,
     };
 };

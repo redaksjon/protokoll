@@ -566,3 +566,9 @@ Each entity command's `show` action displays the file path, making it easy to fi
 4. **Use the search command**: Before adding new entities, search to see if similar ones exist.
 
 5. **Review ignored terms periodically**: You might want to un-ignore terms after adding them as proper context.
+
+## See Also
+
+- [Transcript Actions](./action.md) - Edit transcripts to change their project or title after creation
+- [Routing](./routing.md) - How project routing works
+- [Context System](./context-system.md) - How context storage works

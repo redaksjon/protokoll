@@ -41,7 +41,7 @@ export interface ProjectClassification {
 }
 
 export interface ProjectRouting {
-  destination: string;
+  destination?: string;  // Optional - if omitted, uses global default
   structure: 'none' | 'year' | 'month' | 'day';
   filename_options: Array<'date' | 'time' | 'subject'>;
   auto_tags?: string[];

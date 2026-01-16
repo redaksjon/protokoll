@@ -101,6 +101,7 @@ export const PROTOKOLL_DEFAULTS = {
     log: DEFAULT_LOG,
     transcriptionModel: DEFAULT_TRANSCRIPTION_MODEL,
     model: DEFAULT_MODEL,
+    reasoningLevel: DEFAULT_REASONING_LEVEL,
     contentTypes: DEFAULT_CONTENT_TYPES,
     overrides: DEFAULT_OVERRIDES,
     maxAudioSize: DEFAULT_MAX_AUDIO_SIZE,

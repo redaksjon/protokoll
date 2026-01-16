@@ -43,9 +43,9 @@ export const create = (context: Context.ContextInstance): OnboardingInstance => 
 
 /**
  * Create a default onboarding result for non-interactive mode
+ * Note: No default destination - the routing system will use its configured default
  */
 export const createDefaultOnboardingResult = (): OnboardingResult => ({
-    defaultDestination: '~/notes',
     defaultStructure: 'month',
     projects: [],
     completed: false,

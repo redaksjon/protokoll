@@ -7,9 +7,14 @@
 import { Command } from 'commander';
 import { PROGRAM_NAME, VERSION } from '../constants';
 import { registerContextCommands } from './context';
+import { registerActionCommands } from './action';
+import { registerFeedbackCommands } from './feedback';
+import { registerConfigCommands } from './config';
+import { registerInstallCommand, isInstallCommand, runInstallCLI } from './install';
+import { registerTranscriptCommands } from './transcript';
 
 // Context management subcommands
-const CONTEXT_SUBCOMMANDS = ['project', 'person', 'term', 'company', 'ignored', 'context'];
+const CONTEXT_SUBCOMMANDS = ['project', 'person', 'term', 'company', 'ignored', 'context', 'action', 'feedback', 'install', 'config', 'transcript'];
 
 /**
  * Check if the CLI arguments contain a context management subcommand
@@ -26,6 +31,12 @@ export const isContextCommand = (): boolean => {
  * Run the context management CLI
  */
 export const runContextCLI = async (): Promise<void> => {
+    // Special handling for install command - run directly without commander parsing
+    if (isInstallCommand()) {
+        await runInstallCLI();
+        return;
+    }
+
     const program = new Command();
     
     program
@@ -33,11 +44,35 @@ export const runContextCLI = async (): Promise<void> => {
         .version(VERSION)
         .description('Intelligent audio transcription with context management');
     
+    // Register install command
+    registerInstallCommand(program);
+    
     // Register context management commands
     registerContextCommands(program);
     
+    // Register action commands
+    registerActionCommands(program);
+    
+    // Register feedback commands
+    registerFeedbackCommands(program);
+    
+    // Register config commands
+    registerConfigCommands(program);
+    
+    // Register transcript commands (compare, reanalyze)
+    registerTranscriptCommands(program);
+    
     // Add help text about main transcription
     program.addHelpText('after', `
+Setup:
+  ${PROGRAM_NAME} install               Interactive setup wizard (first time)
+
+Configuration:
+  ${PROGRAM_NAME} config                Interactive configuration editor
+  ${PROGRAM_NAME} config --list         List all settings
+  ${PROGRAM_NAME} config <key>          View a specific setting
+  ${PROGRAM_NAME} config <key> <value>  Set a specific setting
+
 To transcribe audio files:
   ${PROGRAM_NAME} --input-directory <dir>
 
@@ -57,6 +92,20 @@ Context management:
   
   ${PROGRAM_NAME} context status        Show context system status
   ${PROGRAM_NAME} context search <q>    Search across all entities
+
+Transcript actions:
+  ${PROGRAM_NAME} action --title "Title" <file>  Edit a single transcript
+  ${PROGRAM_NAME} action --combine "<files>"     Combine multiple transcripts
+
+Feedback:
+  ${PROGRAM_NAME} feedback <file>       Provide feedback to improve transcripts
+  ${PROGRAM_NAME} feedback --help-me    Show feedback examples
+
+Transcript tools:
+  ${PROGRAM_NAME} transcript compare <file>      Compare raw vs enhanced
+  ${PROGRAM_NAME} transcript compare --raw <f>   Show only raw Whisper output
+  ${PROGRAM_NAME} transcript info <file>         Show raw transcript metadata
+  ${PROGRAM_NAME} transcript list <dir>          List transcripts with raw status
 `);
     
     await program.parseAsync(process.argv);

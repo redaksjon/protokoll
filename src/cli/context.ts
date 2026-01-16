@@ -203,16 +203,30 @@ const addProject = async (context: Context.ContextInstance): Promise<void> => {
             return;
         }
         
-        const id = await askQuestion(rl, `ID (Enter for "${name.toLowerCase().replace(/\s+/g, '-')}"): `);
-        const finalId = id || name.toLowerCase().replace(/\s+/g, '-');
+        const suggestedId = name.toLowerCase().replace(/\s+/g, '-');
+        print(`  (ID is used for the filename to store project info, e.g., "${suggestedId}.yaml")`);
+        const id = await askQuestion(rl, `ID (Enter for "${suggestedId}"): `);
+        const finalId = id || suggestedId;
         
         if (context.getProject(finalId)) {
             print(`Error: Project with ID "${finalId}" already exists.`);
             return;
         }
         
-        const destination = await askQuestion(rl, 'Output destination path: ');
+        // Get default output directory from config (if available)
+        const config = context.getConfig();
+        const defaultOutputDir = (config.outputDirectory as string) || '(configured default)';
+        print(`  (Leave blank to use the configured default: ${defaultOutputDir})`);
+        const destination = await askQuestion(rl, 'Output destination path (Enter for default): ');
+        
+        // Structure examples
+        print('  Examples:');
+        print('    none:  output/transcript.md');
+        print('    year:  output/2025/transcript.md');
+        print('    month: output/2025/01/transcript.md');
+        print('    day:   output/2025/01/15/transcript.md');
         const structure = await askQuestion(rl, 'Directory structure (none/year/month/day, Enter for month): ');
+        
         const contextType = await askQuestion(rl, 'Context type (work/personal/mixed, Enter for work): ');
         const phrasesStr = await askQuestion(rl, 'Trigger phrases (comma-separated): ');
         const topicsStr = await askQuestion(rl, 'Topic keywords (comma-separated, Enter to skip): ');
@@ -228,7 +242,8 @@ const addProject = async (context: Context.ContextInstance): Promise<void> => {
                 ...(topicsStr && { topics: topicsStr.split(',').map(s => s.trim()) }),
             },
             routing: {
-                destination: destination || '~/notes',
+                // Only include destination if explicitly provided - otherwise uses global default
+                ...(destination && { destination }),
                 structure: (structure || 'month') as 'none' | 'year' | 'month' | 'day',
                 filename_options: ['date', 'time', 'subject'],
             },

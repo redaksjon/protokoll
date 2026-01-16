@@ -156,13 +156,14 @@ export const create = (config: Config, operator: Dreadcabinet.Operator): Instanc
             };
             
             // Convert context projects to routing format
+            // Projects without a destination inherit from the default
             const contextProjects = context.getAllProjects();
             const routingProjects: Routing.ProjectRoute[] = contextProjects
                 .filter(project => project.active !== false)
                 .map(project => ({
                     projectId: project.id,
                     destination: {
-                        path: project.routing.destination,
+                        path: project.routing.destination || defaultRouteDestination.path,
                         structure: project.routing.structure,
                         filename_options: project.routing.filename_options,
                         createDirectories: true,
