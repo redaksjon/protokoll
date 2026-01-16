@@ -417,4 +417,132 @@ sounds_like:
       expect(people.length).toBe(1);
     });
   });
+
+  describe('delete', () => {
+    it('should delete entity file and remove from memory', async () => {
+      const peopleDir = path.join(tempDir, 'context', 'people');
+      await fs.mkdir(peopleDir, { recursive: true });
+      const filePath = path.join(peopleDir, 'to-delete.yaml');
+      await fs.writeFile(filePath, 'id: to-delete\nname: To Delete');
+      
+      await storage.load([path.join(tempDir, 'context')]);
+      expect(storage.get('person', 'to-delete')).toBeDefined();
+      
+      const deleted = await storage.delete('person', 'to-delete', path.join(tempDir, 'context'));
+      
+      expect(deleted).toBe(true);
+      expect(storage.get('person', 'to-delete')).toBeUndefined();
+      await expect(fs.stat(filePath)).rejects.toThrow();
+    });
+
+    it('should return false if entity file not found', async () => {
+      const peopleDir = path.join(tempDir, 'context', 'people');
+      await fs.mkdir(peopleDir, { recursive: true });
+      
+      await storage.load([path.join(tempDir, 'context')]);
+      
+      const deleted = await storage.delete('person', 'nonexistent', path.join(tempDir, 'context'));
+      
+      expect(deleted).toBe(false);
+    });
+
+    it('should delete yml files', async () => {
+      const peopleDir = path.join(tempDir, 'context', 'people');
+      await fs.mkdir(peopleDir, { recursive: true });
+      const filePath = path.join(peopleDir, 'to-delete.yml');
+      await fs.writeFile(filePath, 'id: to-delete\nname: To Delete');
+      
+      await storage.load([path.join(tempDir, 'context')]);
+      
+      const deleted = await storage.delete('person', 'to-delete', path.join(tempDir, 'context'));
+      
+      expect(deleted).toBe(true);
+      await expect(fs.stat(filePath)).rejects.toThrow();
+    });
+  });
+
+  describe('getEntityFilePath', () => {
+    it('should return path to yaml file', async () => {
+      const peopleDir = path.join(tempDir, 'context', 'people');
+      await fs.mkdir(peopleDir, { recursive: true });
+      await fs.writeFile(path.join(peopleDir, 'john.yaml'), 'id: john\nname: John');
+      
+      await storage.load([path.join(tempDir, 'context')]);
+      
+      const filePath = storage.getEntityFilePath('person', 'john', [path.join(tempDir, 'context')]);
+      
+      expect(filePath).toBe(path.join(peopleDir, 'john.yaml'));
+    });
+
+    it('should return path to yml file', async () => {
+      const peopleDir = path.join(tempDir, 'context', 'people');
+      await fs.mkdir(peopleDir, { recursive: true });
+      await fs.writeFile(path.join(peopleDir, 'jane.yml'), 'id: jane\nname: Jane');
+      
+      await storage.load([path.join(tempDir, 'context')]);
+      
+      const filePath = storage.getEntityFilePath('person', 'jane', [path.join(tempDir, 'context')]);
+      
+      expect(filePath).toBe(path.join(peopleDir, 'jane.yml'));
+    });
+
+    it('should return undefined for non-existent entity', async () => {
+      const peopleDir = path.join(tempDir, 'context', 'people');
+      await fs.mkdir(peopleDir, { recursive: true });
+      
+      await storage.load([path.join(tempDir, 'context')]);
+      
+      const filePath = storage.getEntityFilePath('person', 'nonexistent', [path.join(tempDir, 'context')]);
+      
+      expect(filePath).toBeUndefined();
+    });
+
+    it('should search directories in reverse order (closest first)', async () => {
+      const contextDir1 = path.join(tempDir, 'context1');
+      const contextDir2 = path.join(tempDir, 'context2');
+      const peopleDir1 = path.join(contextDir1, 'people');
+      const peopleDir2 = path.join(contextDir2, 'people');
+      
+      await fs.mkdir(peopleDir1, { recursive: true });
+      await fs.mkdir(peopleDir2, { recursive: true });
+      await fs.writeFile(path.join(peopleDir1, 'john.yaml'), 'id: john\nname: John 1');
+      await fs.writeFile(path.join(peopleDir2, 'john.yaml'), 'id: john\nname: John 2');
+      
+      await storage.load([contextDir1, contextDir2]);
+      
+      // Should find the one in contextDir2 first (closest)
+      const filePath = storage.getEntityFilePath('person', 'john', [contextDir1, contextDir2]);
+      
+      expect(filePath).toBe(path.join(peopleDir2, 'john.yaml'));
+    });
+  });
+
+  describe('ignored entities', () => {
+    it('should load ignored entities', async () => {
+      const ignoredDir = path.join(tempDir, 'context', 'ignored');
+      await fs.mkdir(ignoredDir, { recursive: true });
+      await fs.writeFile(
+        path.join(ignoredDir, 'common-phrase.yaml'),
+        'id: common-phrase\nname: Common Phrase\nignoredAt: 2026-01-15'
+      );
+      
+      await storage.load([path.join(tempDir, 'context')]);
+      
+      const ignored = storage.getAll('ignored');
+      expect(ignored.length).toBe(1);
+      expect(ignored[0].name).toBe('Common Phrase');
+    });
+
+    it('should save ignored entities', async () => {
+      await storage.save({
+        id: 'test-ignored',
+        name: 'Test Ignored',
+        type: 'ignored',
+      }, tempDir);
+      
+      const filePath = path.join(tempDir, 'context', 'ignored', 'test-ignored.yaml');
+      const content = await fs.readFile(filePath, 'utf-8');
+      expect(content).toContain('name: Test Ignored');
+    });
+  });
 });

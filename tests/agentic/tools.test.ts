@@ -18,6 +18,7 @@ describe('Agentic Tools', () => {
                 search: vi.fn(() => []),
                 findBySoundsLike: vi.fn(() => undefined),
                 getAllProjects: vi.fn(() => []),
+                isIgnored: vi.fn(() => false),
                 // @ts-ignore
             },
             routingInstance: {
@@ -280,7 +281,8 @@ describe('Agentic Tools', () => {
             const result = await tool.execute({ contentSummary: 'Test note' });
       
             expect(result.success).toBe(true);
-            expect(result.data.destination).toBeDefined();
+            expect(result.data.routingDecision).toBeDefined();
+            expect(result.data.outputPath).toBeDefined();
             expect(result.data.confidence).toBe(1.0);
         });
     });

@@ -17,7 +17,7 @@ import * as Registry from './registry';
 import * as Reasoning from '../reasoning';
 
 export interface ContextChangeRecord {
-    entityType: 'person' | 'project' | 'company' | 'term';
+    entityType: 'person' | 'project' | 'company' | 'term' | 'ignored';
     entityId: string;
     entityName: string;
     action: 'created' | 'updated';

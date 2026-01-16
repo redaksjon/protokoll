@@ -27,9 +27,21 @@ export interface HandlerInstance {
 }
 
 const createReadlineInterface = () => {
+    // Ensure stdin is in the correct mode for readline
+    // This helps prevent issues with some terminal emulators
+    if (process.stdin.setRawMode) {
+        try {
+            // Ensure we're NOT in raw mode - readline handles this itself
+            process.stdin.setRawMode(false);
+        } catch {
+            // Ignore errors - some environments don't support setRawMode
+        }
+    }
+    
     return readline.createInterface({
         input: process.stdin,
         output: process.stdout,
+        terminal: true, // Explicitly enable terminal mode for proper echo handling
     });
 };
 
@@ -94,10 +106,16 @@ const runNewProjectWizard = async (
     write('─'.repeat(60));
     
     // Step 1: Is this a project or a term?
-    const entityType = await askQuestion(rl, '\nIs this a Project or a Term? (P/T, or Enter to skip): ');
+    const entityType = await askQuestion(rl, '\nIs this a Project or a Term? (P/T/X to ignore, or Enter to skip): ');
     
     if (entityType === '' || entityType.toLowerCase() === 's' || entityType.toLowerCase() === 'skip') {
         return { action: 'skip' };
+    }
+    
+    // IGNORE FLOW - user doesn't want to be asked about this term again
+    if (entityType.toLowerCase() === 'x' || entityType.toLowerCase() === 'i' || entityType.toLowerCase() === 'ignore') {
+        write(`\n[Adding "${term}" to ignore list - you won't be asked about this again]`);
+        return { action: 'ignore', ignoredTerm: term };
     }
     
     // PROJECT FLOW
@@ -438,8 +456,14 @@ export const create = (config: InteractiveConfig): HandlerInstance => {
         const isTTY = process.stdin.isTTY === true;
         
         if (config.enabled && isTTY) {
-            rl = createReadlineInterface();
-            logger.info('Interactive session started - will prompt for clarifications');
+            // Only create readline interface if one doesn't already exist
+            // This prevents duplicate input handlers when processing multiple files
+            if (!rl) {
+                rl = createReadlineInterface();
+                logger.info('Interactive session started - will prompt for clarifications');
+            } else {
+                logger.debug('Interactive session continued (readline already active)');
+            }
         } else if (config.enabled && !isTTY) {
             logger.info('Interactive mode enabled but stdin is not a TTY - running in auto-resolve mode');
         } else {
@@ -453,8 +477,18 @@ export const create = (config: InteractiveConfig): HandlerInstance => {
         }
         
         if (rl) {
+            // Remove all listeners before closing to prevent any lingering handlers
+            // Check if method exists (may not in mocks)
+            if (typeof rl.removeAllListeners === 'function') {
+                rl.removeAllListeners();
+            }
             rl.close();
             rl = null;
+            
+            // Resume stdin in case it was paused
+            if (process.stdin.isPaused && process.stdin.isPaused()) {
+                process.stdin.resume();
+            }
         }
         
         session.completedAt = new Date();

@@ -10,26 +10,31 @@
 
 import * as yaml from 'js-yaml';
 import * as fs from 'fs/promises';
+// eslint-disable-next-line no-restricted-imports
+import { existsSync, statSync } from 'fs';
 import * as path from 'node:path';
 import { Entity, EntityType } from './types';
 
 export interface StorageInstance {
   load(contextDirs: string[]): Promise<void>;
   save(entity: Entity, targetDir: string): Promise<void>;
+  delete(type: EntityType, id: string, targetDir: string): Promise<boolean>;
   get<T extends Entity>(type: EntityType, id: string): T | undefined;
   getAll<T extends Entity>(type: EntityType): T[];
   search(query: string): Entity[];
   findBySoundsLike(phonetic: string): Entity | undefined;
   clear(): void;
+  getEntityFilePath(type: EntityType, id: string, contextDirs: string[]): string | undefined;
 }
 
-type DirectoryName = 'people' | 'projects' | 'companies' | 'terms';
+type DirectoryName = 'people' | 'projects' | 'companies' | 'terms' | 'ignored';
 
 const DIRECTORY_TO_TYPE: Record<DirectoryName, EntityType> = {
     'people': 'person',
     'projects': 'project',
     'companies': 'company',
     'terms': 'term',
+    'ignored': 'ignored',
 };
 
 const TYPE_TO_DIRECTORY: Record<EntityType, DirectoryName> = {
@@ -37,6 +42,7 @@ const TYPE_TO_DIRECTORY: Record<EntityType, DirectoryName> = {
     'project': 'projects',
     'company': 'companies',
     'term': 'terms',
+    'ignored': 'ignored',
 };
 
 export const create = (): StorageInstance => {
@@ -45,6 +51,7 @@ export const create = (): StorageInstance => {
         ['project', new Map()],
         ['company', new Map()],
         ['term', new Map()],
+        ['ignored', new Map()],
     ]);
 
     const load = async (contextDirs: string[]): Promise<void> => {
@@ -78,6 +85,7 @@ export const create = (): StorageInstance => {
 
     const save = async (entity: Entity, targetDir: string): Promise<void> => {
         const dirName = TYPE_TO_DIRECTORY[entity.type];
+        // Save to context subdirectory (context/people/, context/projects/, etc.)
         const dirPath = path.join(targetDir, 'context', dirName);
         await fs.mkdir(dirPath, { recursive: true });
     
@@ -90,6 +98,54 @@ export const create = (): StorageInstance => {
         await fs.writeFile(filePath, content, 'utf-8');
     
         entities.get(entity.type)?.set(entity.id, entity);
+    };
+
+    const deleteEntity = async (type: EntityType, id: string, targetDir: string): Promise<boolean> => {
+        const dirName = TYPE_TO_DIRECTORY[type];
+        
+        // Try both possible locations (with and without 'context' subdirectory)
+        const possiblePaths = [
+            path.join(targetDir, dirName, `${id}.yaml`),
+            path.join(targetDir, dirName, `${id}.yml`),
+            path.join(targetDir, 'context', dirName, `${id}.yaml`),
+            path.join(targetDir, 'context', dirName, `${id}.yml`),
+        ];
+        
+        for (const filePath of possiblePaths) {
+            try {
+                await fs.unlink(filePath);
+                entities.get(type)?.delete(id);
+                return true;
+            } catch {
+                // File doesn't exist at this path, try next
+            }
+        }
+        
+        return false;
+    };
+
+    const getEntityFilePath = (type: EntityType, id: string, contextDirs: string[]): string | undefined => {
+        const dirName = TYPE_TO_DIRECTORY[type];
+        
+        // Search in reverse order (closest first) to find where the entity is defined
+        for (const contextDir of [...contextDirs].reverse()) {
+            const possiblePaths = [
+                path.join(contextDir, dirName, `${id}.yaml`),
+                path.join(contextDir, dirName, `${id}.yml`),
+            ];
+            
+            for (const filePath of possiblePaths) {
+                // Use sync access check - this is only for CLI, not hot path
+                if (existsSync(filePath)) {
+                    const stat = statSync(filePath);
+                    if (stat.isFile()) {
+                        return filePath;
+                    }
+                }
+            }
+        }
+        
+        return undefined;
     };
 
     const get = <T extends Entity>(type: EntityType, id: string): T | undefined => {
@@ -138,6 +194,6 @@ export const create = (): StorageInstance => {
         }
     };
 
-    return { load, save, get, getAll, search, findBySoundsLike, clear };
+    return { load, save, delete: deleteEntity, get, getAll, search, findBySoundsLike, clear, getEntityFilePath };
 };
 

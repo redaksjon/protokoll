@@ -38,7 +38,11 @@ export const create = (ctx: ToolContext): TranscriptionTool => ({
             success: true,
             data: {
                 projectId: decision.projectId,
-                destination: outputPath,
+                // Return the routing decision (base path + structure), NOT the built output path
+                // The orchestrator will call buildOutputPath() later
+                routingDecision: decision,
+                // Also include the built path for informational purposes
+                outputPath: outputPath,
                 confidence: decision.confidence,
                 reasoning: decision.reasoning,
                 projectHint: args.projectHint,

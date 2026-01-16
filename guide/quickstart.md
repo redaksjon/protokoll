@@ -43,10 +43,8 @@ mkdir -p ~/.protokoll
 ```yaml
 # ~/.protokoll/config.yaml
 model: "gpt-5.2"
-routing:
-  default:
-    path: "~/notes"
-    structure: "month"
+outputDirectory: "~/notes"
+outputStructure: "month"
 ```
 
 ## First Transcription
@@ -61,10 +59,10 @@ protokoll --input-directory ~/recordings
 
 ## Interactive Mode
 
-Learn names and projects as you go:
+Interactive mode is **enabled by default**. Protokoll will ask questions to learn names and projects as you go:
 
 ```bash
-protokoll --input-directory ~/recordings --interactive
+protokoll --input-directory ~/recordings
 ```
 
 Protokoll will ask:
@@ -111,6 +109,9 @@ protokoll --input-directory ~/recordings --debug
 # Disable self-reflection (enabled by default)
 protokoll --input-directory ~/recordings --no-self-reflection
 
+# Disable interactive mode (for automation/cron jobs)
+protokoll --input-directory ~/recordings --batch
+
 # Dry run (show what would happen)
 protokoll --input-directory ~/recordings --dry-run
 
@@ -125,7 +126,7 @@ protokoll --input-directory ~/recordings --model claude-3-5-sonnet
 | `--model` | `gpt-5.2` |
 | `--transcription-model` | `whisper-1` |
 | `--self-reflection` | `true` (enabled) |
-| `--interactive` | `false` (disabled) |
+| Interactive mode | `true` (enabled, use `--batch` to disable) |
 | Output structure | `month` |
 | Filename options | `date`, `time`, `subject` |
 

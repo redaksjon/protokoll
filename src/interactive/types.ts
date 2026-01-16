@@ -80,7 +80,7 @@ export interface OnboardingResult {
  * Result from the new project/term wizard
  */
 export interface NewProjectWizardResult {
-    action: 'create' | 'link' | 'term' | 'skip';
+    action: 'create' | 'link' | 'term' | 'skip' | 'ignore';
     // For 'create' (new project)
     projectName?: string;
     destination?: string;
@@ -94,6 +94,8 @@ export interface NewProjectWizardResult {
     termProjects?: number[];      // Indices of associated projects
     // If user created a new project inline (when processing a term)
     createdProject?: NewProjectWizardResult;
+    // For 'ignore' - add term to ignore list
+    ignoredTerm?: string;
 }
 
 /**

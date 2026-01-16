@@ -71,6 +71,43 @@ export const create = (config: CompleteConfig): Instance => {
         }
     };
 
+    // Strip date prefix and hash suffix from subject if already present
+    // This handles cases where subject comes from an already-formatted filename
+    const cleanSubjectOfPatterns = (subject: string): string => {
+        let cleaned = subject;
+        
+        // Remove common date-time prefixes (try most specific first):
+        // - YYYY-MM-DD-HHmm- (e.g., "2026-01-14-2330-")
+        // - YYMMDD-HHmm- (e.g., "260114-2330-") 
+        // - MM-DD-HHmm- (e.g., "01-14-2330-")
+        // - DD-HHmm- (e.g., "14-2330-" or "15-1435-")
+        // - HHmm- (e.g., "2330-")
+        
+        // Pattern 1: YYYY-MM-DD-HHmm- (full ISO-like date with time)
+        cleaned = cleaned.replace(/^\d{4}-\d{2}-\d{2}-\d{4}-/, '');
+        
+        // Pattern 2: YYMMDD-HHmm- (compact date with time)
+        cleaned = cleaned.replace(/^\d{6}-\d{4}-/, '');
+        
+        // Pattern 3: MM-DD-HHmm- (month-day-time)
+        cleaned = cleaned.replace(/^\d{2}-\d{2}-\d{4}-/, '');
+        
+        // Pattern 4: DD-HHmm- (day-time, most common for 'month' structure)
+        // This matches patterns like "15-1435-" where 15 is day and 1435 is HHmm
+        cleaned = cleaned.replace(/^\d{1,2}-\d{4}-/, '');
+        
+        // Pattern 5: Just HHmm- at the start (time only)
+        cleaned = cleaned.replace(/^\d{4}-/, '');
+        
+        // Remove hash suffix (5-8 hex characters at end, preceded by dash)
+        cleaned = cleaned.replace(/-[a-f0-9]{5,8}$/i, '');
+        
+        // Clean up any leading dashes that might remain
+        cleaned = cleaned.replace(/^-+/, '');
+        
+        return cleaned;
+    };
+
     const complete = async (
         audioFile: string, 
         hash: string, 
@@ -107,16 +144,25 @@ export const create = (config: CompleteConfig): Instance => {
         // Create new filename: <date>-<subject>-<hash>
         // Hash is at the end for easier correlation with output files
         // Clean subject by removing special characters and spaces
+        // Also strip any existing date/hash patterns from the subject
         const shortHash = hash.substring(0, 6);
         let newFilename: string;
         if (subject) {
-            const cleanSubject = subject
+            // First strip any existing date prefixes and hash suffixes
+            const strippedSubject = cleanSubjectOfPatterns(subject);
+            const cleanSubject = strippedSubject
                 .replace(/[^a-zA-Z0-9]/g, '-')
                 .replace(/-+/g, '-')
                 .replace(/^-|-$/g, '')
                 .toLowerCase()
                 .substring(0, 50);
-            newFilename = `${dateStr}-${cleanSubject}-${shortHash}${fileExt}`;
+            
+            // Only include subject if there's something left after cleaning
+            if (cleanSubject) {
+                newFilename = `${dateStr}-${cleanSubject}-${shortHash}${fileExt}`;
+            } else {
+                newFilename = `${dateStr}-${shortHash}${fileExt}`;
+            }
         } else {
             newFilename = `${dateStr}-${shortHash}${fileExt}`;
         }

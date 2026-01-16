@@ -13,6 +13,7 @@ const mockContextInstance = {
     findBySoundsLike: vi.fn(() => null),
     getAllProjects: vi.fn(() => []),
     saveEntity: vi.fn(),
+    isIgnored: vi.fn(() => false),
 } as any;
 
 // Mock routing instance

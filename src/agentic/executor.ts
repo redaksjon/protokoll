@@ -11,7 +11,7 @@ import * as Reasoning from '../reasoning';
 import * as Logging from '../logging';
 
 export interface ContextChangeRecord {
-    entityType: 'person' | 'project' | 'company' | 'term';
+    entityType: 'person' | 'project' | 'company' | 'term' | 'ignored';
     entityId: string;
     entityName: string;
     action: 'created' | 'updated';
@@ -176,7 +176,7 @@ Remember: preserve ALL content, only fix transcription errors.`;
                                 // Handle new project/term wizard response
                                 if (result.data?.clarificationType === 'new_project' && clarification.additionalInfo) {
                                     const wizardResult = clarification.additionalInfo as {
-                                        action: 'create' | 'link' | 'term' | 'skip';
+                                        action: 'create' | 'link' | 'term' | 'skip' | 'ignore';
                                         projectName?: string;
                                         destination?: string;
                                         description?: string;
@@ -193,6 +193,8 @@ Remember: preserve ALL content, only fix transcription errors.`;
                                             destination?: string;
                                             description?: string;
                                         };
+                                        // For 'ignore' action
+                                        ignoredTerm?: string;
                                     };
                                     
                                     const knownProjects = result.data?.knownProjects as Array<{
@@ -445,6 +447,38 @@ Remember: preserve ALL content, only fix transcription errors.`;
                                         } catch (error) {
                                             logger.warn('Failed to save new term: %s', error);
                                         }
+                                    } else if (wizardResult.action === 'ignore' && wizardResult.ignoredTerm) {
+                                        // IGNORE - add term to ignore list so user won't be asked again
+                                        const ignoredTermName = wizardResult.ignoredTerm;
+                                        const ignoredId = ignoredTermName.toLowerCase()
+                                            .replace(/[^a-z0-9]/g, '-')
+                                            .replace(/-+/g, '-')
+                                            .replace(/^-|-$/g, '');
+                                        
+                                        const newIgnored = {
+                                            id: ignoredId,
+                                            name: ignoredTermName,
+                                            type: 'ignored' as const,
+                                            ignoredAt: new Date().toISOString(),
+                                        };
+                                        
+                                        try {
+                                            await ctx.contextInstance.saveEntity(newIgnored);
+                                            await ctx.contextInstance.reload();
+                                            logger.info('Added to ignore list: %s', ignoredTermName);
+                                            
+                                            contextChanges.push({
+                                                entityType: 'ignored',
+                                                entityId: ignoredId,
+                                                entityName: ignoredTermName,
+                                                action: 'created',
+                                                details: {
+                                                    reason: 'User chose to ignore this term',
+                                                },
+                                            });
+                                        } catch (error) {
+                                            logger.warn('Failed to save ignored term: %s', error);
+                                        }
                                     }
                                     // 'skip' action - do nothing
                                 }
@@ -605,13 +639,15 @@ Remember: preserve ALL content, only fix transcription errors.`;
                             state.resolvedEntities.set(result.data.person.name, result.data.suggestion);
                         }
                         
-                        // Capture routing from route_note tool (destination as string)
-                        if (result.data?.destination && typeof result.data.destination === 'string') {
+                        // Capture routing from route_note tool
+                        if (result.data?.routingDecision?.destination) {
+                            const routingDecision = result.data.routingDecision;
                             state.routeDecision = {
-                                projectId: result.data.projectId,
-                                destination: { path: result.data.destination, structure: 'month' },
-                                confidence: result.data.confidence || 1.0,
-                                reasoning: result.data.reasoning || 'Determined by route_note tool',
+                                projectId: routingDecision.projectId,
+                                destination: routingDecision.destination,
+                                confidence: routingDecision.confidence || 1.0,
+                                signals: routingDecision.signals,
+                                reasoning: routingDecision.reasoning || 'Determined by route_note tool',
                             };
                         }
                         

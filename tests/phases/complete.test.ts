@@ -343,6 +343,70 @@ describe('Complete Phase', () => {
             expect(callArgs[0]).toContain('.mp3');
         });
 
+        test('should strip existing date prefix from subject to avoid duplication', async () => {
+            const config = { processedDirectory: '/processed', outputStructure: 'month' };
+            const instance = completeModule.create(config);
+
+            const audioFile = '/audio/test.mp3';
+            const hash = 'abc123def456';
+            const creationTime = new Date('2023-01-15T14:30:00Z');
+            // Subject that already has date prefix (from output filename)
+            const subject = '15-1430-meeting-notes';
+
+            await instance.complete(audioFile, hash, creationTime, subject);
+
+            // Should NOT have duplicated date prefix
+            const callArgs = mockWriteFile.mock.calls[0];
+            const filename = callArgs[0];
+            // Should only have one date prefix, not "15-1430-15-1430-"
+            expect(filename).not.toMatch(/\d{2}-\d{4}-\d{2}-\d{4}/);
+            expect(filename).toContain('meeting-notes');
+            expect(filename).toContain('abc123');
+        });
+
+        test('should strip existing hash suffix from subject to avoid duplication', async () => {
+            const config = { processedDirectory: '/processed', outputStructure: 'month' };
+            const instance = completeModule.create(config);
+
+            const audioFile = '/audio/test.mp3';
+            const hash = 'abc123def456';
+            const creationTime = new Date('2023-01-15T14:30:00Z');
+            // Subject that already has hash suffix
+            const subject = 'meeting-notes-e3a24f';
+
+            await instance.complete(audioFile, hash, creationTime, subject);
+
+            // Should NOT have duplicated hash suffix
+            const callArgs = mockWriteFile.mock.calls[0];
+            const filename = callArgs[0];
+            // Should only have one hash, not "-e3a24f-abc123"
+            expect(filename).toContain('meeting-notes');
+            expect(filename).toContain('abc123');
+            expect(filename).not.toContain('e3a24f');
+        });
+
+        test('should strip both date prefix and hash suffix from subject', async () => {
+            const config = { processedDirectory: '/processed', outputStructure: 'month' };
+            const instance = completeModule.create(config);
+
+            const audioFile = '/audio/test.mp3';
+            const hash = 'abc123def456';
+            const creationTime = new Date('2023-01-15T14:30:00Z');
+            // Subject with full pattern: date-subject-hash (typical output filename)
+            const subject = '15-1430-meeting-notes-e3a24f';
+
+            await instance.complete(audioFile, hash, creationTime, subject);
+
+            const callArgs = mockWriteFile.mock.calls[0];
+            const filename = callArgs[0];
+            // Should extract just "meeting-notes" and apply new date/hash
+            expect(filename).toContain('meeting-notes');
+            expect(filename).toContain('abc123');
+            expect(filename).not.toContain('e3a24f');
+            // Should not have double date prefix
+            expect(filename).not.toMatch(/\d{2}-\d{4}-\d{2}-\d{4}/);
+        });
+
         test('should handle midnight time correctly', async () => {
             const config = { processedDirectory: '/processed' };
             const instance = completeModule.create(config);

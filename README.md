@@ -31,7 +31,7 @@ When you first start using Protokoll, it doesn't know anything about you. It doe
 
 **But that's the point.** Protokoll is designed to learn from you:
 
-1. **Interactive Discovery**: When you run `protokoll --interactive` and mention "Project Alpha" for the first time, the system recognizes it doesn't know what that is. It asks: *"Is Project Alpha a new project? Where should notes about it be stored?"* You tell it, and from that moment forward, every note mentioning Project Alpha routes correctly.
+1. **Interactive Discovery**: When you run `protokoll` (interactive by default) and mention "Project Alpha" for the first time, the system recognizes it doesn't know what that is. It asks: *"Is Project Alpha a new project? Where should notes about it be stored?"* You tell it, and from that moment forward, every note mentioning Project Alpha routes correctly.
 
 2. **Context Files You Own**: Unlike cloud transcription services that keep your data in their black box, Protokoll stores everything it learns in simple YAML files in your `.protokoll/context/` directory:
 
@@ -209,10 +209,20 @@ EOF
 cat > ~/.protokoll/projects/work.yaml << EOF
 id: work
 name: Work Notes
-destination: ~/work/notes
-triggers:
-  - "work note"
-  - "work meeting"
+type: project
+classification:
+  context_type: work
+  explicit_phrases:
+    - "work note"
+    - "work meeting"
+routing:
+  destination: ~/work/notes
+  structure: month
+  filename_options:
+    - date
+    - time
+    - subject
+active: true
 EOF
 
 # 4. Now transcribe - names are corrected, routing is automatic
@@ -277,46 +287,30 @@ Create `~/.protokoll/config.yaml`:
 model: "gpt-5.2"               # Reasoning model (default with high reasoning)
 transcriptionModel: "whisper-1" # Transcription model
 
-# Feature flags
-interactive: false              # Enable by default?
-selfReflection: false          # Generate reports by default?
-debug: false                   # Debug mode
+# Directory settings (Dreadcabinet options)
+inputDirectory: "./recordings"      # Where to find audio files
+outputDirectory: "~/notes"          # Where to write transcripts
+outputStructure: "month"            # Directory structure (none, year, month, day)
+outputFilenameOptions:              # Filename components
+  - date
+  - time
+  - subject
 
-# Output settings
-output:
-  intermediateDir: "./output/protokoll"
-  keepIntermediates: true
-  timestampFormat: "YYMMDD-HHmm"
+# Processing options
+processedDirectory: "./processed"   # Move processed audio here (optional)
 
-# Default routing
-routing:
-  default:
-    path: "~/notes"
-    structure: "month"          # none, year, month, or day
-    filename_options:
-      - date
-      - time
-      - subject
-  
-  conflict_resolution: "primary"  # ask, primary, or all
-  
-  projects:
-    - projectId: "work"
-      destination:
-        path: "~/work/notes"
-        structure: "month"
-        filename_options:
-          - date
-          - subject
-      classification:
-        context_type: "work"
-        explicit_phrases:
-          - "work note"
-          - "this is about work"
-        associated_people:
-          - "john-smith"
-      active: true
+# Feature flags (flat, not nested)
+interactive: true              # Interactive prompts (enabled by default)
+selfReflection: true          # Generate reports by default
+silent: false                 # Sound notifications
+debug: false                  # Debug mode
+
+# Advanced
+maxAudioSize: 26214400        # Max audio file size in bytes (25MB)
+tempDirectory: "/tmp"         # Temporary file storage
 ```
+
+**Note**: Project-specific routing is configured in **project files** (e.g., `~/.protokoll/projects/work.yaml`), not in the main config. See [Routing System](#routing-system) for details.
 
 ### Directory Structure Options
 
@@ -356,12 +350,15 @@ Combined example: `260111-1430-meeting-notes.md`
 
 | Option | Description |
 |--------|-------------|
-| `--interactive` | Enable interactive clarifications |
-| `--batch` | Disable interactivity (batch processing) |
-| `--self-reflection` | Generate reflection reports |
+| `--batch` | Disable interactive mode (for automation) |
+| `--self-reflection` | Generate reflection reports (default: true) |
+| `--no-self-reflection` | Disable reflection reports |
+| `--silent` | Disable sound notifications |
 | `--dry-run` | Show what would happen |
 | `--verbose` | Enable verbose logging |
 | `--debug` | Enable debug mode with intermediate files |
+
+> **Note**: Interactive mode is **enabled by default**. Use `--batch` to disable it for automation/cron jobs.
 
 ### Advanced Options
 
@@ -462,13 +459,26 @@ context: "Colleague from engineering team"
 # ~/.protokoll/projects/quarterly-planning.yaml
 id: quarterly-planning
 name: Quarterly Planning
-category: work
-destination: "~/work/planning/notes"
-structure: "month"
-triggers:
-  - "quarterly planning"
-  - "Q1 planning"
-  - "roadmap review"
+type: project
+
+classification:
+  context_type: work
+  explicit_phrases:
+    - "quarterly planning"
+    - "Q1 planning"
+    - "roadmap review"
+  topics:
+    - "roadmap"
+    - "budget"
+
+routing:
+  destination: "~/work/planning/notes"
+  structure: "month"
+  filename_options:
+    - date
+    - time
+    - subject
+
 active: true
 ```
 
@@ -601,14 +611,21 @@ Is this correct? (Y/Enter to accept, or enter different path):
 > y
 ```
 
-### How to Enable Interactive Mode
+### How to Use Interactive Mode
+
+Interactive mode is **enabled by default**. Simply run:
 
 ```bash
-# Single run with interactive mode
-protokoll --input-directory ~/recordings --interactive
+protokoll --input-directory ~/recordings
+```
 
-# Set as default in config
-echo "interactive: true" >> ~/.protokoll/config.yaml
+To disable interactive mode (for automation/cron jobs):
+
+```bash
+protokoll --input-directory ~/recordings --batch
+
+# Or set in config
+echo "interactive: false" >> ~/.protokoll/config.yaml
 ```
 
 ### First-Run Onboarding

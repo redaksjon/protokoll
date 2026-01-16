@@ -126,6 +126,18 @@ export const create = (ctx: ToolContext): TranscriptionTool => ({
                 },
             };
         }
+        
+        // Check if this term is on the ignore list
+        if (context.isIgnored(args.name)) {
+            return {
+                success: true,
+                data: {
+                    found: false,
+                    ignored: true,
+                    message: `"${args.name}" is on the ignore list - skipping without prompting`,
+                },
+            };
+        }
     
         // Look up project by name
         const projects = context.search(args.name);

@@ -14,6 +14,7 @@ const mockContextInstance = {
     getAllProjects: vi.fn(() => []),
     saveEntity: vi.fn(),
     reload: vi.fn(),
+    isIgnored: vi.fn(() => false),
 } as any;
 
 // Mock routing instance
