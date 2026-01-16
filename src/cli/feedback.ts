@@ -37,6 +37,7 @@ export interface FeedbackTool {
         description: string;
         required?: boolean;
         enum?: string[];
+        items?: { type: string };
     }>;
 }
 
@@ -56,7 +57,7 @@ export const FEEDBACK_TOOLS: FeedbackTool[] = [
         parameters: {
             term: { type: 'string', description: 'The correct term/abbreviation', required: true },
             definition: { type: 'string', description: 'What the term means', required: true },
-            sounds_like: { type: 'array', description: 'Phonetic variations that might be transcribed incorrectly (e.g., ["W C M P", "double u see em pee"])' },
+            sounds_like: { type: 'array', items: { type: 'string' }, description: 'Phonetic variations that might be transcribed incorrectly (e.g., ["W C M P", "double u see em pee"])' },
             context: { type: 'string', description: 'Additional context about when this term is used' },
         },
     },
@@ -65,7 +66,7 @@ export const FEEDBACK_TOOLS: FeedbackTool[] = [
         description: 'Add a new person to the context for future name recognition. Use this when you learn about people whose names were transcribed incorrectly.',
         parameters: {
             name: { type: 'string', description: 'The correct full name', required: true },
-            sounds_like: { type: 'array', description: 'Phonetic variations (e.g., ["San Jay", "Sanjai", "Sanjey"])', required: true },
+            sounds_like: { type: 'array', items: { type: 'string' }, description: 'Phonetic variations (e.g., ["San Jay", "Sanjai", "Sanjey"])', required: true },
             role: { type: 'string', description: 'Their role or title' },
             company: { type: 'string', description: 'Company they work for' },
             context: { type: 'string', description: 'Additional context about this person' },
@@ -593,6 +594,7 @@ export const processFeedback = async (
                             type: param.type,
                             description: param.description,
                             ...(param.enum ? { enum: param.enum } : {}),
+                            ...(param.items ? { items: param.items } : {}),
                         },
                     ])
                 ),
