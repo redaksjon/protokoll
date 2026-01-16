@@ -50,13 +50,26 @@ context: "Colleague from engineering team"
 # ~/.protokoll/projects/quarterly-planning.yaml
 id: quarterly-planning
 name: Quarterly Planning
-category: work
-destination: "~/work/planning/notes"
-structure: "month"
-triggers:
-  - "quarterly planning"
-  - "Q1 planning"
-  - "Q2 planning"
+type: project
+
+classification:
+  context_type: work
+  explicit_phrases:
+    - "quarterly planning"
+    - "Q1 planning"
+    - "Q2 planning"
+  topics:
+    - "roadmap"
+    - "budget"
+
+routing:
+  destination: "~/work/planning/notes"
+  structure: "month"
+  filename_options:
+    - date
+    - time
+    - subject
+
 active: true
 ```
 

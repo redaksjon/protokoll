@@ -13,6 +13,9 @@ import * as Strategy from './strategy';
 export interface ReasoningInstance {
     // Single completion
     complete(request: ReasoningRequest): Promise<ReasoningResponse>;
+    
+    // Multi-turn tool calling
+    completeWithTools(request: Client.ToolCallRequest): Promise<Client.ToolCallResponse>;
   
     // Strategy-based execution
     executeWithStrategy(
@@ -37,6 +40,7 @@ export const create = (config: ReasoningConfig): ReasoningInstance => {
   
     return {
         complete: (request) => client.complete(request),
+        completeWithTools: (request) => client.completeWithTools(request),
     
         executeWithStrategy: async (request, strategyType) => {
             // Create the strategy (for future use with full agentic execution)

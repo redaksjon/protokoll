@@ -134,14 +134,26 @@ Respond with ONLY the JSON object.`;
                         topics: [],
                     };
                     
-                    const newProject = {
+                    const newProject: {
+                        id: string;
+                        name: string;
+                        type: 'project';
+                        description: string;
+                        classification: typeof classification;
+                        routing: {
+                            destination?: string;
+                            structure: 'none' | 'year' | 'month' | 'day';
+                            filename_options: Array<'date' | 'time' | 'subject'>;
+                        };
+                        active: boolean;
+                    } = {
                         id: update.entityId,
                         name: update.entityId,
                         type: 'project' as const,
                         description: update.reasoning,
                         classification,
                         routing: {
-                            destination: '~/notes',
+                            // No destination - will use global default
                             structure: 'month' as const,
                             filename_options: ['date', 'time', 'subject'] as Array<'date' | 'time' | 'subject'>,
                         },

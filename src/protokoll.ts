@@ -8,6 +8,7 @@ import * as LocatePhase from './phases/locate';
 import * as Dreadcabinet from '@theunwalked/dreadcabinet';
 import * as Cardigantime from '@theunwalked/cardigantime';
 import { z } from 'zod';
+import { glob } from 'glob';
 
 export interface Args extends Dreadcabinet.Args, Cardigantime.Args {
     dryRun?: boolean;
@@ -15,13 +16,15 @@ export interface Args extends Dreadcabinet.Args, Cardigantime.Args {
     debug?: boolean;
     transcriptionModel?: string;
     model?: string;
+    reasoningLevel?: 'low' | 'medium' | 'high';
     openaiApiKey?: string;
     overrides?: boolean;
     contextDirectories?: string[];
     maxAudioSize?: number | string;
     tempDirectory?: string;
-    interactive?: boolean;
+    batch?: boolean;  // --batch flag (disables interactive mode)
     selfReflection?: boolean;
+    silent?: boolean;
     processedDirectory?: string;
 }
 
@@ -33,6 +36,7 @@ export const ConfigSchema = z.object({
     log: z.boolean(),
     model: z.string(),
     transcriptionModel: z.string(),
+    reasoningLevel: z.enum(['low', 'medium', 'high']),
     contentTypes: z.array(z.string()),
     overrides: z.boolean(),
     contextDirectories: z.array(z.string()).optional(),
@@ -40,6 +44,7 @@ export const ConfigSchema = z.object({
     tempDirectory: z.string(),
     interactive: z.boolean(),
     selfReflection: z.boolean(),
+    silent: z.boolean(),
     processedDirectory: z.string().optional(),
 });
 
@@ -111,8 +116,10 @@ export async function main() {
         const pipeline = await Pipeline.create({
             model: config.model,
             transcriptionModel: config.transcriptionModel,
+            reasoningLevel: config.reasoningLevel,
             interactive: config.interactive,
             selfReflection: config.selfReflection,
+            silent: config.silent,
             debug: config.debug,
             dryRun: config.dryRun,
             contextDirectory: config.configDirectory,
@@ -126,7 +133,38 @@ export async function main() {
             processedDirectory: config.processedDirectory,
         });
 
+        // Get list of files to process for progress tracking
+        // Build glob patterns from configured audio extensions
+        const inputDir = config.inputDirectory || DEFAULT_INPUT_DIRECTORY;
+        const extensions = config.extensions || DEFAULT_AUDIO_EXTENSIONS;
+        const patterns = extensions.map(ext => `**/*${ext}`);
+        
+        // Count files before processing
+        const matchedFiles = await glob(patterns, { 
+            cwd: inputDir, 
+            nodir: true,
+            absolute: true,
+        });
+        const totalFiles = matchedFiles.length;
+        
+        if (totalFiles === 0) {
+            logger.info('No files to process in %s', inputDir);
+            return;
+        }
+        
+        logger.info('Found %d file(s) to process in %s', totalFiles, inputDir);
+        
+        let currentFileIndex = 0;
+        
+        // Track processed files for summary
+        const processedFiles: Array<{ input: string; output: string }> = [];
+        
         await operator.process(async (file: string) => {
+            currentFileIndex++;
+            const progress = `[${currentFileIndex}/${totalFiles}]`;
+            
+            logger.info('%s Starting: %s', progress, file);
+            
             // Use locate phase for file metadata
             const { creationTime, hash } = await locatePhase.locate(file);
             
@@ -135,10 +173,43 @@ export async function main() {
                 audioFile: file,
                 creation: creationTime,
                 hash,
+                progress: { current: currentFileIndex, total: totalFiles },
             });
             
-            logger.info('Processed: %s -> %s', file, result.outputPath);
+            logger.info('%s Completed: %s -> %s', progress, file, result.outputPath);
+            
+            // Track for summary
+            processedFiles.push({ input: file, output: result.outputPath });
         });
+        
+        // Print summary of processed files
+        if (processedFiles.length > 0) {
+            // eslint-disable-next-line no-console
+            console.info('\n' + '='.repeat(60));
+            // eslint-disable-next-line no-console
+            console.info('TRANSCRIPTION SUMMARY');
+            // eslint-disable-next-line no-console
+            console.info('='.repeat(60));
+            // eslint-disable-next-line no-console
+            console.info(`Processed ${processedFiles.length} file(s)\n`);
+            
+            // eslint-disable-next-line no-console
+            console.info('Input Files:');
+            for (const { input } of processedFiles) {
+                // eslint-disable-next-line no-console
+                console.info(input);
+            }
+            
+            // eslint-disable-next-line no-console
+            console.info('\nOutput Files:');
+            for (const { output } of processedFiles) {
+                // eslint-disable-next-line no-console
+                console.info(output);
+            }
+            
+            // eslint-disable-next-line no-console
+            console.info('\n' + '='.repeat(60));
+        }
     } catch (error: any) {
         logger.error('Exiting due to Error: %s, %s', error.message, error.stack);
         process.exit(1);

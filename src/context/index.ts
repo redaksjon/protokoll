@@ -14,7 +14,8 @@ import {
     Person, 
     Project, 
     Company, 
-    Term, 
+    Term,
+    IgnoredTerm,
     ContextDiscoveryOptions,
     DiscoveredContextDir,
     HierarchicalContextResult 
@@ -30,17 +31,23 @@ export interface ContextInstance {
   // Discovery info
   getDiscoveredDirs(): DiscoveredContextDir[];
   getConfig(): Record<string, unknown>;
+  getContextDirs(): string[];
   
   // Entity access
   getPerson(id: string): Person | undefined;
   getProject(id: string): Project | undefined;
   getCompany(id: string): Company | undefined;
   getTerm(id: string): Term | undefined;
+  getIgnored(id: string): IgnoredTerm | undefined;
   
   getAllPeople(): Person[];
   getAllProjects(): Project[];
   getAllCompanies(): Company[];
   getAllTerms(): Term[];
+  getAllIgnored(): IgnoredTerm[];
+  
+  // Check if a term is ignored
+  isIgnored(term: string): boolean;
   
   // Search
   search(query: string): Entity[];
@@ -48,6 +55,8 @@ export interface ContextInstance {
   
   // Modification (for self-update mode)
   saveEntity(entity: Entity): Promise<void>;
+  deleteEntity(entity: Entity): Promise<boolean>;
+  getEntityFilePath(entity: Entity): string | undefined;
   
   // Check if context is available
   hasContext(): boolean;
@@ -95,16 +104,28 @@ export const create = async (options: CreateOptions = {}): Promise<ContextInstan
     
         getDiscoveredDirs: () => discoveryResult.discoveredDirs,
         getConfig: () => discoveryResult.config,
+        getContextDirs: () => discoveryResult.contextDirs,
     
         getPerson: (id) => storage.get<Person>('person', id),
         getProject: (id) => storage.get<Project>('project', id),
         getCompany: (id) => storage.get<Company>('company', id),
         getTerm: (id) => storage.get<Term>('term', id),
+        getIgnored: (id) => storage.get<IgnoredTerm>('ignored', id),
     
         getAllPeople: () => storage.getAll<Person>('person'),
         getAllProjects: () => storage.getAll<Project>('project'),
         getAllCompanies: () => storage.getAll<Company>('company'),
         getAllTerms: () => storage.getAll<Term>('term'),
+        getAllIgnored: () => storage.getAll<IgnoredTerm>('ignored'),
+        
+        isIgnored: (term: string) => {
+            const normalizedTerm = term.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+            const ignoredTerms = storage.getAll<IgnoredTerm>('ignored');
+            return ignoredTerms.some(ignored => 
+                ignored.id === normalizedTerm || 
+                ignored.name.toLowerCase() === term.toLowerCase()
+            );
+        },
     
         search: (query) => storage.search(query),
         findBySoundsLike: (phonetic) => storage.findBySoundsLike(phonetic),
@@ -115,10 +136,30 @@ export const create = async (options: CreateOptions = {}): Promise<ContextInstan
                 .sort((a, b) => a.level - b.level)[0];
       
             if (!closestDir) {
-                throw new Error('No .protokoll directory found. Run with --setup to create one.');
+                throw new Error('No .protokoll directory found. Run with --init-config to create one.');
             }
       
             await storage.save(entity, closestDir.path);
+        },
+        
+        deleteEntity: async (entity) => {
+            // Delete from the closest .protokoll directory that contains it
+            const filePath = storage.getEntityFilePath(entity.type, entity.id, discoveryResult.contextDirs);
+            if (!filePath) {
+                return false;
+            }
+            
+            // Extract the context directory from the file path
+            const contextDir = discoveryResult.contextDirs.find(dir => filePath.startsWith(dir));
+            if (!contextDir) {
+                return false;
+            }
+            
+            return storage.delete(entity.type, entity.id, contextDir);
+        },
+        
+        getEntityFilePath: (entity) => {
+            return storage.getEntityFilePath(entity.type, entity.id, discoveryResult.contextDirs);
         },
     
         hasContext: () => discoveryResult.discoveredDirs.length > 0,

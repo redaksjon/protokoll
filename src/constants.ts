@@ -76,8 +76,9 @@ export const DEFAULT_REASONING_LEVEL = 'medium';
 export const DEFAULT_OVERRIDES = false;
 export const DEFAULT_MAX_AUDIO_SIZE = 26214400; // 25MB in bytes
 export const DEFAULT_TEMP_DIRECTORY = os.tmpdir(); // Use OS default temp directory
-export const DEFAULT_INTERACTIVE = false;
+export const DEFAULT_INTERACTIVE = true;  // Interactive prompts enabled by default
 export const DEFAULT_SELF_REFLECTION = true;
+export const DEFAULT_SILENT = false; // Sound notifications enabled by default
 
 // Output Management Constants
 export const DEFAULT_INTERMEDIATE_DIRECTORY = './output/protokoll';
@@ -100,6 +101,7 @@ export const PROTOKOLL_DEFAULTS = {
     log: DEFAULT_LOG,
     transcriptionModel: DEFAULT_TRANSCRIPTION_MODEL,
     model: DEFAULT_MODEL,
+    reasoningLevel: DEFAULT_REASONING_LEVEL,
     contentTypes: DEFAULT_CONTENT_TYPES,
     overrides: DEFAULT_OVERRIDES,
     maxAudioSize: DEFAULT_MAX_AUDIO_SIZE,
@@ -107,4 +109,5 @@ export const PROTOKOLL_DEFAULTS = {
     configDirectory: DEFAULT_CONFIG_DIR,
     interactive: DEFAULT_INTERACTIVE,
     selfReflection: DEFAULT_SELF_REFLECTION,
+    silent: DEFAULT_SILENT,
 };

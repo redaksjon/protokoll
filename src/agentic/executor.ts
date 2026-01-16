@@ -11,7 +11,7 @@ import * as Reasoning from '../reasoning';
 import * as Logging from '../logging';
 
 export interface ContextChangeRecord {
-    entityType: 'person' | 'project' | 'company' | 'term';
+    entityType: 'person' | 'project' | 'company' | 'term' | 'ignored';
     entityId: string;
     entityName: string;
     action: 'created' | 'updated';
@@ -52,6 +52,9 @@ export const create = (
             resolvedEntities: new Map(),
             confidence: 0,
         };
+    
+        // Make resolvedEntities available to tools so they can avoid re-asking
+        ctx.resolvedEntities = state.resolvedEntities;
     
         const toolsUsed: string[] = [];
         const contextChanges: ContextChangeRecord[] = [];
@@ -152,7 +155,8 @@ Remember: preserve ALL content, only fix transcription errors.`;
                         logger.debug('Tool %s result: %s', toolCall.name, result.success ? 'success' : 'failed');
           
                         // Handle results that need user input
-                        if (result.needsUserInput && ctx.interactiveMode && ctx.interactiveInstance) {
+                        // Check if interactive handler is available (not gated by interactiveMode flag)
+                        if (result.needsUserInput && ctx.interactiveInstance) {
                             logger.info('Interactive: %s requires clarification', toolCall.name);
                             
                             const termName = String(toolCall.arguments.name || toolCall.arguments.term || '');
@@ -169,23 +173,56 @@ Remember: preserve ALL content, only fix transcription errors.`;
                                 state.resolvedEntities.set(termName, clarification.response);
                                 logger.info('Clarified: %s -> %s', termName, clarification.response);
                                 
-                                // Handle new project creation
-                                if (result.data?.clarificationType === 'new_project' && clarification.response.trim()) {
-                                    const projectPath = clarification.response.trim();
-                                    // Only create if user provided a path (not just pressed Enter)
-                                    if (projectPath && projectPath !== termName) {
-                                        const projectId = termName.toLowerCase().replace(/\s+/g, '-');
+                                // Handle new project/term wizard response
+                                if (result.data?.clarificationType === 'new_project' && clarification.additionalInfo) {
+                                    const wizardResult = clarification.additionalInfo as {
+                                        action: 'create' | 'link' | 'term' | 'skip' | 'ignore';
+                                        projectName?: string;
+                                        destination?: string;
+                                        description?: string;
+                                        linkedProjectIndex?: number;
+                                        termDescription?: string;
+                                        // For 'term' action
+                                        termName?: string;
+                                        termExpansion?: string;
+                                        termProjects?: number[];
+                                        // For nested project creation from term wizard
+                                        createdProject?: {
+                                            action: 'create' | 'link' | 'skip';
+                                            projectName?: string;
+                                            destination?: string;
+                                            description?: string;
+                                        };
+                                        // For 'ignore' action
+                                        ignoredTerm?: string;
+                                    };
+                                    
+                                    const knownProjects = result.data?.knownProjects as Array<{
+                                        id: string;
+                                        name: string;
+                                        description?: string;
+                                        classification?: { explicit_phrases?: string[]; context_type?: string };
+                                        routing?: { destination: string; structure?: string; filename_options?: string[] };
+                                    }> | undefined;
+                                    
+                                    if (wizardResult.action === 'create') {
+                                        // CREATE NEW PROJECT
+                                        const projectName = wizardResult.projectName || termName;
+                                        const projectId = projectName.toLowerCase().replace(/\s+/g, '-');
+                                        const projectDestination = wizardResult.destination;
+                                        
                                         const newProject = {
                                             id: projectId,
-                                            name: termName,
+                                            name: projectName,
                                             type: 'project' as const,
-                                            description: `Auto-created from transcript mentioning "${termName}"`,
+                                            description: wizardResult.description || `Project for "${projectName}"`,
                                             classification: {
                                                 context_type: 'work' as const,
-                                                explicit_phrases: [termName.toLowerCase()],
+                                                explicit_phrases: [termName.toLowerCase(), projectName.toLowerCase()].filter((v, i, a) => a.indexOf(v) === i),
                                             },
                                             routing: {
-                                                destination: projectPath,
+                                                // Only include destination if explicitly provided - otherwise uses global default
+                                                ...(projectDestination && { destination: projectDestination }),
                                                 structure: 'month' as const,
                                                 filename_options: ['date', 'time', 'subject'] as Array<'date' | 'time' | 'subject'>,
                                             },
@@ -194,32 +231,410 @@ Remember: preserve ALL content, only fix transcription errors.`;
                                         
                                         try {
                                             await ctx.contextInstance.saveEntity(newProject);
-                                            logger.info('Created new project: %s -> %s', termName, projectPath);
+                                            await ctx.contextInstance.reload();  // Reload so subsequent searches find this entity
+                                            logger.info('Created new project: %s%s', projectName, projectDestination ? ` -> ${projectDestination}` : ' (using default destination)');
                                             
-                                            // Record the context change
                                             contextChanges.push({
                                                 entityType: 'project',
                                                 entityId: projectId,
-                                                entityName: termName,
+                                                entityName: projectName,
                                                 action: 'created',
                                                 details: {
-                                                    destination: projectPath,
-                                                    routing: newProject.routing,
+                                                    ...(projectDestination && { destination: projectDestination }),
+                                                    description: wizardResult.description,
+                                                    triggeredByTerm: termName,
                                                 },
                                             });
                                             
-                                            // Update routing to use new project
-                                            state.routeDecision = {
-                                                projectId,
-                                                destination: { path: projectPath, structure: 'month' },
-                                                confidence: 1.0,
-                                                signals: [{ type: 'explicit_phrase', value: termName, weight: 1.0 }],
-                                                reasoning: `User created new project "${termName}" routing to ${projectPath}`,
-                                            };
+                                            // Update routing if destination was specified
+                                            if (projectDestination) {
+                                                state.routeDecision = {
+                                                    projectId,
+                                                    destination: { path: projectDestination, structure: 'month' },
+                                                    confidence: 1.0,
+                                                    signals: [{ type: 'explicit_phrase', value: termName, weight: 1.0 }],
+                                                    reasoning: `User created new project "${projectName}" routing to ${projectDestination}`,
+                                                };
+                                            }
                                         } catch (error) {
                                             logger.warn('Failed to save new project: %s', error);
                                         }
+                                        
+                                    } else if (wizardResult.action === 'link' && typeof wizardResult.linkedProjectIndex === 'number') {
+                                        // LINK TO EXISTING PROJECT
+                                        if (knownProjects && wizardResult.linkedProjectIndex < knownProjects.length) {
+                                            const linkedProject = knownProjects[wizardResult.linkedProjectIndex];
+                                            
+                                            // Add the term as an alias
+                                            const existingPhrases = linkedProject.classification?.explicit_phrases || [];
+                                            const updatedPhrases = [...existingPhrases, termName.toLowerCase()]
+                                                .filter((v, i, a) => a.indexOf(v) === i); // dedupe
+                                            
+                                            const updatedProject = {
+                                                ...linkedProject,
+                                                type: 'project' as const,
+                                                // Add term description to project notes if provided
+                                                notes: wizardResult.termDescription 
+                                                    ? `${linkedProject.description || ''}\n\n${termName}: ${wizardResult.termDescription}`.trim()
+                                                    : linkedProject.description,
+                                                classification: {
+                                                    ...linkedProject.classification,
+                                                    context_type: (linkedProject.classification?.context_type || 'work') as 'work' | 'personal' | 'mixed',
+                                                    explicit_phrases: updatedPhrases,
+                                                },
+                                                routing: {
+                                                    // Preserve existing destination (or omit if not set)
+                                                    ...(linkedProject.routing?.destination && { destination: linkedProject.routing.destination }),
+                                                    structure: (linkedProject.routing?.structure || 'month') as 'none' | 'year' | 'month' | 'day',
+                                                    filename_options: (linkedProject.routing?.filename_options || ['date', 'time']) as Array<'date' | 'time' | 'subject'>,
+                                                },
+                                            };
+                                            
+                                            try {
+                                                await ctx.contextInstance.saveEntity(updatedProject);
+                                                await ctx.contextInstance.reload();  // Reload so subsequent searches find this entity
+                                                logger.info('Linked "%s" to project "%s"', termName, linkedProject.name);
+                                                
+                                                contextChanges.push({
+                                                    entityType: 'project',
+                                                    entityId: linkedProject.id,
+                                                    entityName: linkedProject.name,
+                                                    action: 'updated',
+                                                    details: {
+                                                        addedAlias: termName,
+                                                        termDescription: wizardResult.termDescription,
+                                                        explicit_phrases: updatedPhrases,
+                                                    },
+                                                });
+                                                
+                                                // Update routing to use the linked project
+                                                if (linkedProject.routing?.destination) {
+                                                    state.routeDecision = {
+                                                        projectId: linkedProject.id,
+                                                        destination: { 
+                                                            path: linkedProject.routing.destination, 
+                                                            structure: 'month' 
+                                                        },
+                                                        confidence: 1.0,
+                                                        signals: [{ type: 'explicit_phrase', value: termName, weight: 1.0 }],
+                                                        reasoning: `User linked "${termName}" to existing project "${linkedProject.name}"`,
+                                                    };
+                                                }
+                                            } catch (error) {
+                                                logger.warn('Failed to update project with alias: %s', error);
+                                            }
+                                        }
+                                    } else if (wizardResult.action === 'term') {
+                                        // CREATE NEW TERM ENTITY
+                                        const termNameFinal = wizardResult.termName || termName;
+                                        const termId = termNameFinal.toLowerCase().replace(/\s+/g, '-');
+                                        
+                                        // Get project IDs from indices
+                                        const projectIds: string[] = [];
+                                        if (wizardResult.termProjects && knownProjects) {
+                                            for (const idx of wizardResult.termProjects) {
+                                                if (idx >= 0 && idx < knownProjects.length) {
+                                                    projectIds.push(knownProjects[idx].id);
+                                                }
+                                            }
+                                        }
+                                        
+                                        // Handle nested project creation from term wizard
+                                        if (wizardResult.createdProject?.action === 'create' && wizardResult.createdProject.projectName) {
+                                            const projectName = wizardResult.createdProject.projectName;
+                                            const projectId = projectName.toLowerCase().replace(/\s+/g, '-');
+                                            const projectDestination = wizardResult.createdProject.destination;
+                                            
+                                            const newProject = {
+                                                id: projectId,
+                                                name: projectName,
+                                                type: 'project' as const,
+                                                description: wizardResult.createdProject.description || `Project for "${projectName}"`,
+                                                classification: {
+                                                    context_type: 'work' as const,
+                                                    explicit_phrases: [projectName.toLowerCase(), termNameFinal.toLowerCase()].filter((v, i, a) => a.indexOf(v) === i),
+                                                },
+                                                routing: {
+                                                    // Only include destination if explicitly provided - otherwise uses global default
+                                                    ...(projectDestination && { destination: projectDestination }),
+                                                    structure: 'month' as const,
+                                                    filename_options: ['date', 'time', 'subject'] as Array<'date' | 'time' | 'subject'>,
+                                                },
+                                                active: true,
+                                            };
+                                            
+                                            try {
+                                                await ctx.contextInstance.saveEntity(newProject);
+                                                await ctx.contextInstance.reload();  // Reload so subsequent searches find this entity
+                                                logger.info('Created new project from term wizard: %s%s', projectName, projectDestination ? ` -> ${projectDestination}` : ' (using default destination)');
+                                                
+                                                // Add the new project to the projectIds list for term association
+                                                projectIds.push(projectId);
+                                                
+                                                contextChanges.push({
+                                                    entityType: 'project',
+                                                    entityId: projectId,
+                                                    entityName: projectName,
+                                                    action: 'created',
+                                                    details: {
+                                                        ...(projectDestination && { destination: projectDestination }),
+                                                        description: wizardResult.createdProject.description,
+                                                        createdForTerm: termNameFinal,
+                                                    },
+                                                });
+                                                
+                                                // Update routing to use the new project (if destination was specified)
+                                                if (projectDestination) {
+                                                    state.routeDecision = {
+                                                        projectId,
+                                                        destination: { path: projectDestination, structure: 'month' },
+                                                        confidence: 1.0,
+                                                        signals: [{ type: 'explicit_phrase', value: termNameFinal, weight: 1.0 }],
+                                                        reasoning: `User created project "${projectName}" for term "${termNameFinal}"`,
+                                                    };
+                                                }
+                                            } catch (error) {
+                                                logger.warn('Failed to save new project from term wizard: %s', error);
+                                            }
+                                        }
+                                        
+                                        const newTerm = {
+                                            id: termId,
+                                            name: termNameFinal,
+                                            type: 'term' as const,
+                                            expansion: wizardResult.termExpansion,
+                                            notes: wizardResult.termDescription,
+                                            projects: projectIds.length > 0 ? projectIds : undefined,
+                                            sounds_like: [termName.toLowerCase()],
+                                        };
+                                        
+                                        try {
+                                            await ctx.contextInstance.saveEntity(newTerm);
+                                            await ctx.contextInstance.reload();  // Reload so subsequent searches find this entity
+                                            logger.info('Created new term: %s (projects: %s)', 
+                                                termNameFinal, 
+                                                projectIds.length > 0 ? projectIds.join(', ') : 'none'
+                                            );
+                                            
+                                            contextChanges.push({
+                                                entityType: 'term',
+                                                entityId: termId,
+                                                entityName: termNameFinal,
+                                                action: 'created',
+                                                details: {
+                                                    expansion: wizardResult.termExpansion,
+                                                    projects: projectIds,
+                                                    description: wizardResult.termDescription,
+                                                },
+                                            });
+                                            
+                                            // If term has associated projects and we haven't set routing yet, use the first one
+                                            if (projectIds.length > 0 && !state.routeDecision) {
+                                                // For newly created project, we already set routing above
+                                                // For existing projects, look them up
+                                                if (knownProjects) {
+                                                    const primaryProject = knownProjects.find(p => p.id === projectIds[0]);
+                                                    if (primaryProject?.routing?.destination) {
+                                                        state.routeDecision = {
+                                                            projectId: primaryProject.id,
+                                                            destination: { 
+                                                                path: primaryProject.routing.destination, 
+                                                                structure: 'month' 
+                                                            },
+                                                            confidence: 1.0,
+                                                            signals: [{ type: 'explicit_phrase', value: termNameFinal, weight: 1.0 }],
+                                                            reasoning: `User created term "${termNameFinal}" associated with project "${primaryProject.name}"`,
+                                                        };
+                                                    }
+                                                }
+                                            }
+                                        } catch (error) {
+                                            logger.warn('Failed to save new term: %s', error);
+                                        }
+                                    } else if (wizardResult.action === 'ignore' && wizardResult.ignoredTerm) {
+                                        // IGNORE - add term to ignore list so user won't be asked again
+                                        const ignoredTermName = wizardResult.ignoredTerm;
+                                        const ignoredId = ignoredTermName.toLowerCase()
+                                            .replace(/[^a-z0-9]/g, '-')
+                                            .replace(/-+/g, '-')
+                                            .replace(/^-|-$/g, '');
+                                        
+                                        const newIgnored = {
+                                            id: ignoredId,
+                                            name: ignoredTermName,
+                                            type: 'ignored' as const,
+                                            ignoredAt: new Date().toISOString(),
+                                        };
+                                        
+                                        try {
+                                            await ctx.contextInstance.saveEntity(newIgnored);
+                                            await ctx.contextInstance.reload();
+                                            logger.info('Added to ignore list: %s', ignoredTermName);
+                                            
+                                            contextChanges.push({
+                                                entityType: 'ignored',
+                                                entityId: ignoredId,
+                                                entityName: ignoredTermName,
+                                                action: 'created',
+                                                details: {
+                                                    reason: 'User chose to ignore this term',
+                                                },
+                                            });
+                                        } catch (error) {
+                                            logger.warn('Failed to save ignored term: %s', error);
+                                        }
                                     }
+                                    // 'skip' action - do nothing
+                                }
+                                
+                                // Handle new person wizard response
+                                if (result.data?.clarificationType === 'new_person' && clarification.additionalInfo) {
+                                    const personWizardResult = clarification.additionalInfo as {
+                                        action: 'create' | 'skip';
+                                        personName?: string;
+                                        organization?: string;
+                                        notes?: string;
+                                        linkedProjectId?: string;
+                                        linkedProjectIndex?: number;
+                                        createdProject?: {
+                                            action: 'create' | 'link' | 'skip';
+                                            projectName?: string;
+                                            destination?: string;
+                                            description?: string;
+                                        };
+                                    };
+                                    
+                                    const knownProjects = result.data?.knownProjects as Array<{
+                                        id: string;
+                                        name: string;
+                                        description?: string;
+                                        classification?: { explicit_phrases?: string[]; context_type?: string };
+                                        routing?: { destination: string; structure?: string; filename_options?: string[] };
+                                    }> | undefined;
+                                    
+                                    if (personWizardResult.action === 'create') {
+                                        let linkedProjectId: string | undefined;
+                                        
+                                        // First, handle any nested project creation
+                                        if (personWizardResult.createdProject?.action === 'create' && personWizardResult.createdProject.projectName) {
+                                            const projectName = personWizardResult.createdProject.projectName;
+                                            const projectId = projectName.toLowerCase().replace(/\s+/g, '-');
+                                            const projectDestination = personWizardResult.createdProject.destination;
+                                            
+                                            const newProject = {
+                                                id: projectId,
+                                                name: projectName,
+                                                type: 'project' as const,
+                                                description: personWizardResult.createdProject.description || `Project for "${projectName}"`,
+                                                classification: {
+                                                    context_type: 'work' as const,
+                                                    explicit_phrases: [projectName.toLowerCase()],
+                                                },
+                                                routing: {
+                                                    // Only include destination if explicitly provided - otherwise uses global default
+                                                    ...(projectDestination && { destination: projectDestination }),
+                                                    structure: 'month' as const,
+                                                    filename_options: ['date', 'time', 'subject'] as Array<'date' | 'time' | 'subject'>,
+                                                },
+                                                active: true,
+                                            };
+                                            
+                                            try {
+                                                await ctx.contextInstance.saveEntity(newProject);
+                                                await ctx.contextInstance.reload();  // Reload so subsequent searches find this entity
+                                                logger.info('Created new project from person wizard: %s%s', projectName, projectDestination ? ` -> ${projectDestination}` : ' (using default destination)');
+                                                linkedProjectId = projectId;
+                                                
+                                                contextChanges.push({
+                                                    entityType: 'project',
+                                                    entityId: projectId,
+                                                    entityName: projectName,
+                                                    action: 'created',
+                                                    details: {
+                                                        ...(projectDestination && { destination: projectDestination }),
+                                                        description: personWizardResult.createdProject.description,
+                                                        createdForPerson: personWizardResult.personName,
+                                                    },
+                                                });
+                                                
+                                                // Update routing to use the new project (if destination was specified)
+                                                if (projectDestination) {
+                                                    state.routeDecision = {
+                                                        projectId,
+                                                        destination: { path: projectDestination, structure: 'month' },
+                                                        confidence: 1.0,
+                                                        signals: [{ type: 'explicit_phrase', value: projectName, weight: 1.0 }],
+                                                        reasoning: `User created project "${projectName}" for person "${personWizardResult.personName}"`,
+                                                    };
+                                                }
+                                            } catch (error) {
+                                                logger.warn('Failed to save new project from person wizard: %s', error);
+                                            }
+                                        } else if (typeof personWizardResult.linkedProjectIndex === 'number' && knownProjects) {
+                                            // User linked to existing project
+                                            if (personWizardResult.linkedProjectIndex < knownProjects.length) {
+                                                const linkedProject = knownProjects[personWizardResult.linkedProjectIndex];
+                                                linkedProjectId = linkedProject.id;
+                                                
+                                                // Update routing to use the linked project
+                                                if (linkedProject.routing?.destination) {
+                                                    state.routeDecision = {
+                                                        projectId: linkedProject.id,
+                                                        destination: { 
+                                                            path: linkedProject.routing.destination, 
+                                                            structure: 'month' 
+                                                        },
+                                                        confidence: 1.0,
+                                                        signals: [{ type: 'explicit_phrase', value: personWizardResult.personName || termName, weight: 1.0 }],
+                                                        reasoning: `User linked person "${personWizardResult.personName}" to project "${linkedProject.name}"`,
+                                                    };
+                                                }
+                                            }
+                                        }
+                                        
+                                        // Now save the person
+                                        const personName = personWizardResult.personName || termName;
+                                        const personId = personName.toLowerCase().replace(/\s+/g, '-');
+                                        
+                                        const newPerson = {
+                                            id: personId,
+                                            name: personName,
+                                            type: 'person' as const,
+                                            organization: personWizardResult.organization,
+                                            notes: personWizardResult.notes,
+                                            projects: linkedProjectId ? [linkedProjectId] : [],
+                                            sounds_like: [termName.toLowerCase()],
+                                        };
+                                        
+                                        try {
+                                            await ctx.contextInstance.saveEntity(newPerson);
+                                            await ctx.contextInstance.reload();  // Reload so subsequent searches find this entity
+                                            logger.info('Created new person: %s (org: %s, project: %s)', 
+                                                personName, 
+                                                personWizardResult.organization || 'none',
+                                                linkedProjectId || 'none'
+                                            );
+                                            
+                                            // Update resolved entities with correct name
+                                            state.resolvedEntities.set(termName, personName);
+                                            
+                                            contextChanges.push({
+                                                entityType: 'person',
+                                                entityId: personId,
+                                                entityName: personName,
+                                                action: 'created',
+                                                details: {
+                                                    organization: personWizardResult.organization,
+                                                    linkedProject: linkedProjectId,
+                                                    notes: personWizardResult.notes,
+                                                    heardAs: termName,
+                                                },
+                                            });
+                                        } catch (error) {
+                                            logger.warn('Failed to save new person: %s', error);
+                                        }
+                                    }
+                                    // 'skip' action - do nothing
                                 }
                             }
                         }
@@ -228,8 +643,34 @@ Remember: preserve ALL content, only fix transcription errors.`;
                         if (result.data?.person) {
                             state.resolvedEntities.set(result.data.person.name, result.data.suggestion);
                         }
-                        if (result.data?.destination) {
-                            state.routeDecision = result.data;
+                        
+                        // Capture routing from route_note tool
+                        if (result.data?.routingDecision?.destination) {
+                            const routingDecision = result.data.routingDecision;
+                            state.routeDecision = {
+                                projectId: routingDecision.projectId,
+                                destination: routingDecision.destination,
+                                confidence: routingDecision.confidence || 1.0,
+                                signals: routingDecision.signals,
+                                reasoning: routingDecision.reasoning || 'Determined by route_note tool',
+                            };
+                        }
+                        
+                        // Capture routing from lookup_project when project has routing config
+                        if (result.data?.found && result.data?.project?.routing?.destination) {
+                            const project = result.data.project;
+                            state.routeDecision = {
+                                projectId: project.id,
+                                destination: { 
+                                    path: project.routing.destination,
+                                    structure: project.routing.structure || 'month',
+                                },
+                                confidence: 1.0,
+                                signals: [{ type: 'explicit_phrase', value: project.name, weight: 1.0 }],
+                                reasoning: `Matched project "${project.name}" with routing to ${project.routing.destination}`,
+                            };
+                            logger.debug('Captured routing from project lookup: %s -> %s', 
+                                project.name, project.routing.destination);
                         }
           
                     } catch (error) {

@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config';
+import { fileURLToPath, URL } from 'node:url';
 
 export default defineConfig({
     test: {
@@ -34,6 +35,9 @@ export default defineConfig({
                 'src/reflection/index.ts',
                 'src/pipeline/orchestrator.ts',
                 'src/pipeline/index.ts',
+                // Interactive CLI modules - require TTY interaction
+                'src/cli/context.ts',
+                'src/cli/index.ts',
             ],
             thresholds: {
                 lines: 80,
@@ -45,7 +49,7 @@ export default defineConfig({
     },
     resolve: {
         alias: {
-            '@': new URL('./src', import.meta.url).pathname,
+            '@': fileURLToPath(new URL('./src', import.meta.url)),
         },
     },
 });

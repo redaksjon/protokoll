@@ -31,17 +31,17 @@ function App() {
                     <h2 className="section-title">The Transcription Problem</h2>
                     <div className="problem-grid">
                         <div className="problem-card">
-                            <div className="problem-icon">🎤</div>
+                            <div className="problem-icon problem-icon-text">1</div>
                             <h3>Whisper Mishears</h3>
                             <p>"Priya" becomes "pre a"<br/>"Kubernetes" becomes "cube er net ease"</p>
                         </div>
                         <div className="problem-card">
-                            <div className="problem-icon">📁</div>
+                            <div className="problem-icon problem-icon-text">2</div>
                             <h3>Notes Go Everywhere</h3>
                             <p>Work notes in personal folders<br/>Client calls mixed with internal meetings</p>
                         </div>
                         <div className="problem-card">
-                            <div className="problem-icon">⏰</div>
+                            <div className="problem-icon problem-icon-text">3</div>
                             <h3>Manual Organization</h3>
                             <p>30% of your time fixing and organizing<br/>what transcription services got wrong</p>
                         </div>
@@ -74,8 +74,8 @@ function App() {
                                     Need to follow up with <span className="corrected">DevOps</span> team about the timeline."
                                 </p>
                                 <div className="demo-meta">
-                                    <span className="meta-item">📂 Routed to: ~/work/acme-corp/notes/</span>
-                                    <span className="meta-item">🏷️ Tags: meeting, kubernetes, acme</span>
+                                    <span className="meta-item">Routed to: ~/work/acme-corp/notes/</span>
+                                    <span className="meta-item">Tags: meeting, kubernetes, acme</span>
                                 </div>
                             </div>
                         </div>
@@ -98,7 +98,7 @@ function App() {
                         <div className="context-files">
                             <div className="file-card">
                                 <div className="file-header">
-                                    <span className="file-icon">👤</span>
+                                    <span className="file-icon file-icon-text">P</span>
                                     <span className="file-name">people/priya-sharma.yaml</span>
                                 </div>
                                 <pre className="file-content">{`id: priya-sharma
@@ -112,7 +112,7 @@ sounds_like:
                             </div>
                             <div className="file-card">
                                 <div className="file-header">
-                                    <span className="file-icon">🏢</span>
+                                    <span className="file-icon file-icon-text">C</span>
                                     <span className="file-name">companies/acme-corp.yaml</span>
                                 </div>
                                 <pre className="file-content">{`id: acme-corp
@@ -124,7 +124,7 @@ sounds_like:
                             </div>
                             <div className="file-card">
                                 <div className="file-header">
-                                    <span className="file-icon">📋</span>
+                                    <span className="file-icon file-icon-text">R</span>
                                     <span className="file-name">projects/work.yaml</span>
                                 </div>
                                 <pre className="file-content">{`id: work
@@ -136,7 +136,7 @@ triggers:
                             </div>
                             <div className="file-card">
                                 <div className="file-header">
-                                    <span className="file-icon">📚</span>
+                                    <span className="file-icon file-icon-text">T</span>
                                     <span className="file-name">terms/kubernetes.yaml</span>
                                 </div>
                                 <pre className="file-content">{`id: kubernetes
@@ -217,32 +217,119 @@ sounds_like:
 
                         <div className="interactive-features">
                             <div className="interactive-feature">
-                                <span className="feature-icon">🔤</span>
+                                <span className="feature-icon feature-icon-text">N</span>
                                 <div>
                                     <h4>Name Corrections</h4>
                                     <p>Fix misspelled names and save phonetic variants</p>
                                 </div>
                             </div>
                             <div className="interactive-feature">
-                                <span className="feature-icon">👥</span>
+                                <span className="feature-icon feature-icon-text">P</span>
                                 <div>
                                     <h4>New People</h4>
                                     <p>Add company, role, and context for unknown people</p>
                                 </div>
                             </div>
                             <div className="interactive-feature">
-                                <span className="feature-icon">📂</span>
+                                <span className="feature-icon feature-icon-text">R</span>
                                 <div>
                                     <h4>Routing Decisions</h4>
                                     <p>Confirm or override where notes should be saved</p>
                                 </div>
                             </div>
                             <div className="interactive-feature">
-                                <span className="feature-icon">📖</span>
+                                <span className="feature-icon feature-icon-text">V</span>
                                 <div>
                                     <h4>Vocabulary</h4>
                                     <p>Define technical terms and domain-specific language</p>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            {/* Context Management Commands */}
+            <section className="commands-section">
+                <div className="container">
+                    <h2 className="section-title">Context Management Commands</h2>
+                    <p className="section-subtitle">
+                        Manage your context entities directly from the command line.
+                        No need to edit YAML files manually.
+                    </p>
+                    
+                    <div className="commands-grid">
+                        <div className="command-group">
+                            <h4>Entity Commands</h4>
+                            <div className="code-block">
+                                <div className="code-line"><span className="code-comment"># List all entities</span></div>
+                                <div className="code-line">protokoll project list</div>
+                                <div className="code-line">protokoll person list</div>
+                                <div className="code-line">protokoll term list</div>
+                                <div className="code-line">protokoll company list</div>
+                                <div className="code-line">protokoll ignored list</div>
+                            </div>
+                        </div>
+                        <div className="command-group">
+                            <h4>View & Manage</h4>
+                            <div className="code-block">
+                                <div className="code-line"><span className="code-comment"># Show entity details</span></div>
+                                <div className="code-line">protokoll person show priya-sharma</div>
+                                <div className="code-line"></div>
+                                <div className="code-line"><span className="code-comment"># Add new entities (interactive)</span></div>
+                                <div className="code-line">protokoll project add</div>
+                                <div className="code-line">protokoll person add</div>
+                                <div className="code-line"></div>
+                                <div className="code-line"><span className="code-comment"># Delete entities</span></div>
+                                <div className="code-line">protokoll person delete john-smith</div>
+                            </div>
+                        </div>
+                        <div className="command-group">
+                            <h4>Context Overview</h4>
+                            <div className="code-block">
+                                <div className="code-line"><span className="code-comment"># Check context status</span></div>
+                                <div className="code-line">protokoll context status</div>
+                                <div className="code-line"></div>
+                                <div className="code-line"><span className="code-comment"># Search across all entities</span></div>
+                                <div className="code-line">protokoll context search "acme"</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="terminal-demo" style={{marginTop: '2rem'}}>
+                        <div className="terminal-header">
+                            <span className="terminal-dot red"></span>
+                            <span className="terminal-dot yellow"></span>
+                            <span className="terminal-dot green"></span>
+                            <span className="terminal-title">protokoll person add</span>
+                        </div>
+                        <div className="terminal-body">
+                            <div className="terminal-line">
+                                <span className="terminal-highlight">[Add New Person]</span>
+                            </div>
+                            <div className="terminal-line"></div>
+                            <div className="terminal-line">
+                                <span className="terminal-dim">Full name: </span>
+                                <span className="terminal-user">Priya Sharma</span>
+                            </div>
+                            <div className="terminal-line">
+                                <span className="terminal-dim">ID (Enter for "priya-sharma"): </span>
+                            </div>
+                            <div className="terminal-line">
+                                <span className="terminal-dim">Company ID: </span>
+                                <span className="terminal-user">acme-corp</span>
+                            </div>
+                            <div className="terminal-line">
+                                <span className="terminal-dim">Role: </span>
+                                <span className="terminal-user">Product Manager</span>
+                            </div>
+                            <div className="terminal-line">
+                                <span className="terminal-dim">Sounds like: </span>
+                                <span className="terminal-user">pre a, pria, preeya</span>
+                            </div>
+                            <div className="terminal-line"></div>
+                            <div className="terminal-line">
+                                <span className="terminal-success">Person "Priya Sharma" saved successfully.</span>
                             </div>
                         </div>
                     </div>
@@ -260,7 +347,7 @@ sounds_like:
                     <div className="reflection-demo">
                         <div className="reflection-card">
                             <div className="reflection-header">
-                                <span>📊</span> Self-Reflection Report
+                                Self-Reflection Report
                             </div>
                             <div className="reflection-body">
                                 <div className="reflection-row">
@@ -296,6 +383,132 @@ sounds_like:
                 </div>
             </section>
 
+            {/* Transcript Actions */}
+            <section className="actions-section">
+                <div className="container">
+                    <h2 className="section-title">Transcript Actions</h2>
+                    <p className="section-subtitle">
+                        Edit single transcripts or combine multiple notes. Reorganize by project.
+                    </p>
+                    
+                    <div className="actions-demo">
+                        <div className="action-card">
+                            <div className="action-header">
+                                <h4>Edit & Combine</h4>
+                            </div>
+                            <p className="action-description">
+                                Change titles, move between projects, or merge related transcripts.
+                                Source files are auto-deleted when combining.
+                            </p>
+                            <div className="code-block">
+                                <div className="code-line"><span className="code-comment"># Edit a single transcript</span></div>
+                                <div className="code-line">protokoll action --title "Time to Celebrate" /path/to/file.md</div>
+                                <div className="code-line"></div>
+                                <div className="code-line"><span className="code-comment"># Combine multiple transcripts</span></div>
+                                <div className="code-line">protokoll action --title "Full Meeting" --combine "/path/to/part1.md</div>
+                                <div className="code-line">/path/to/part2.md"</div>
+                                <div className="code-line"></div>
+                                <div className="code-line"><span className="code-comment"># Change project (with routing)</span></div>
+                                <div className="code-line">protokoll action --project client-alpha /path/to/file.md</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div className="actions-features">
+                        <div className="action-feature">
+                            <span className="feature-icon feature-icon-text">T</span>
+                            <div>
+                                <h4>Custom Titles</h4>
+                                <p>--title updates document heading and renames the file</p>
+                            </div>
+                        </div>
+                        <div className="action-feature">
+                            <span className="feature-icon feature-icon-text">P</span>
+                            <div>
+                                <h4>Project Routing</h4>
+                                <p>--project updates metadata and moves to project destination</p>
+                            </div>
+                        </div>
+                        <div className="action-feature">
+                            <span className="feature-icon feature-icon-text">C</span>
+                            <div>
+                                <h4>Smart Combine</h4>
+                                <p>--combine merges files chronologically with auto-cleanup</p>
+                            </div>
+                        </div>
+                        <div className="action-feature">
+                            <span className="feature-icon feature-icon-text">M</span>
+                            <div>
+                                <h4>Metadata Merging</h4>
+                                <p>Combines durations, deduplicates tags, preserves timestamps</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            {/* Feedback System */}
+            <section className="feedback-section">
+                <div className="container">
+                    <h2 className="section-title">Intelligent Feedback</h2>
+                    <p className="section-subtitle">
+                        Describe problems in plain English. Protokoll understands and fixes them automatically.
+                    </p>
+                    
+                    <div className="feedback-demo">
+                        <div className="feedback-card">
+                            <div className="feedback-header">
+                                <h4>Natural Language Corrections</h4>
+                            </div>
+                            <p className="feedback-description">
+                                Tell Protokoll what's wrong in plain English. It corrects the transcript AND learns for the future.
+                            </p>
+                            <div className="code-block">
+                                <div className="code-line"><span className="code-comment"># Fix a term and teach it</span></div>
+                                <div className="code-line">protokoll feedback notes.md -f "WCMP should be WCNP"</div>
+                                <div className="code-line"></div>
+                                <div className="code-line"><span className="code-comment"># Fix a name</span></div>
+                                <div className="code-line">protokoll feedback notes.md -f "San Jay Grouper is Sanjay Gupta"</div>
+                                <div className="code-line"></div>
+                                <div className="code-line"><span className="code-comment"># Reassign to different project</span></div>
+                                <div className="code-line">protokoll feedback notes.md -f "This should be in Quantum project"</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div className="feedback-features">
+                        <div className="feedback-feature">
+                            <span className="feature-icon feature-icon-text">T</span>
+                            <div>
+                                <h4>Term Corrections</h4>
+                                <p>Fix abbreviations and add them to your vocabulary</p>
+                            </div>
+                        </div>
+                        <div className="feedback-feature">
+                            <span className="feature-icon feature-icon-text">N</span>
+                            <div>
+                                <h4>Name Corrections</h4>
+                                <p>Fix names and teach phonetic variants</p>
+                            </div>
+                        </div>
+                        <div className="feedback-feature">
+                            <span className="feature-icon feature-icon-text">P</span>
+                            <div>
+                                <h4>Project Assignment</h4>
+                                <p>Move transcripts to the right project</p>
+                            </div>
+                        </div>
+                        <div className="feedback-feature">
+                            <span className="feature-icon feature-icon-text">L</span>
+                            <div>
+                                <h4>Context Learning</h4>
+                                <p>Corrections become future knowledge</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
             {/* Routing System */}
             <section className="routing-section">
                 <div className="container">
@@ -307,7 +520,7 @@ sounds_like:
                     <div className="routing-demo">
                         <div className="routing-flow">
                             <div className="routing-input">
-                                <div className="routing-icon">🎙️</div>
+                                <div className="routing-icon routing-icon-text">IN</div>
                                 <span>"This is a work meeting about the sprint planning..."</span>
                             </div>
                             <div className="routing-arrow">
@@ -319,7 +532,7 @@ sounds_like:
                                 </div>
                             </div>
                             <div className="routing-output">
-                                <div className="routing-icon">📁</div>
+                                <div className="routing-icon routing-icon-text">OUT</div>
                                 <span>~/work/notes/2026/01/sprint-planning.md</span>
                             </div>
                         </div>

@@ -11,7 +11,7 @@
  * extracted for use in other tools (kronologi, observasjon) in the future.
  */
 
-export type EntityType = 'person' | 'project' | 'company' | 'term';
+export type EntityType = 'person' | 'project' | 'company' | 'term' | 'ignored';
 
 export interface BaseEntity {
   id: string;           // Unique identifier (slug)
@@ -41,7 +41,7 @@ export interface ProjectClassification {
 }
 
 export interface ProjectRouting {
-  destination: string;
+  destination?: string;  // Optional - if omitted, uses global default
   structure: 'none' | 'year' | 'month' | 'day';
   filename_options: Array<'date' | 'time' | 'subject'>;
   auto_tags?: string[];
@@ -72,15 +72,27 @@ export interface Term extends BaseEntity {
   expansion?: string;     // Full form if it's an acronym
   domain?: string;        // E.g., "engineering", "finance"
   sounds_like?: string[];
+  projects?: string[];    // Associated project IDs - triggers routing to these projects
 }
 
-export type Entity = Person | Project | Company | Term;
+/**
+ * Ignored terms - phrases the user doesn't want to be prompted about.
+ * These are common phrases that aren't worth defining as proper terms.
+ */
+export interface IgnoredTerm extends BaseEntity {
+  type: 'ignored';
+  reason?: string;        // Optional note about why it's ignored
+  ignoredAt?: string;     // ISO date when it was ignored
+}
+
+export type Entity = Person | Project | Company | Term | IgnoredTerm;
 
 export interface ContextStore {
   people: Map<string, Person>;
   projects: Map<string, Project>;
   companies: Map<string, Company>;
   terms: Map<string, Term>;
+  ignored: Map<string, IgnoredTerm>;
 }
 
 /**

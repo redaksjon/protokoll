@@ -25,6 +25,7 @@ export interface ToolContext {
     routingInstance: Routing.RoutingInstance;
     interactiveMode: boolean;
     interactiveInstance?: Interactive.InteractiveInstance;
+    resolvedEntities?: Map<string, string>;  // Entities resolved during this session
 }
 
 export interface ToolResult {

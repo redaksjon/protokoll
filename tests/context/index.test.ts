@@ -248,5 +248,146 @@ sounds_like:
       expect(dirs[1].level).toBe(1); // Parent is further
     });
   });
+
+  describe('ignored terms', () => {
+    it('should load ignored terms from disk', async () => {
+      const protokollDir = path.join(tempDir, '.protokoll');
+      const ignoredDir = path.join(protokollDir, 'context', 'ignored');
+      await fs.mkdir(ignoredDir, { recursive: true });
+      await fs.writeFile(path.join(protokollDir, 'config.yaml'), 'version: 1');
+      await fs.writeFile(
+        path.join(ignoredDir, 'common-term.yaml'),
+        'id: common-term\nname: Common Term\nignoredAt: 2026-01-15'
+      );
+      
+      const context = await Context.create({ startingDir: tempDir });
+      
+      expect(context.getAllIgnored().length).toBe(1);
+      expect(context.getIgnored('common-term')?.name).toBe('Common Term');
+    });
+
+    it('should check if term is ignored by id', async () => {
+      const protokollDir = path.join(tempDir, '.protokoll');
+      const ignoredDir = path.join(protokollDir, 'context', 'ignored');
+      await fs.mkdir(ignoredDir, { recursive: true });
+      await fs.writeFile(path.join(protokollDir, 'config.yaml'), 'version: 1');
+      await fs.writeFile(
+        path.join(ignoredDir, 'test-term.yaml'),
+        'id: test-term\nname: Test Term'
+      );
+      
+      const context = await Context.create({ startingDir: tempDir });
+      
+      expect(context.isIgnored('test-term')).toBe(true);
+      expect(context.isIgnored('unknown-term')).toBe(false);
+    });
+
+    it('should check if term is ignored by name (case insensitive)', async () => {
+      const protokollDir = path.join(tempDir, '.protokoll');
+      const ignoredDir = path.join(protokollDir, 'context', 'ignored');
+      await fs.mkdir(ignoredDir, { recursive: true });
+      await fs.writeFile(path.join(protokollDir, 'config.yaml'), 'version: 1');
+      await fs.writeFile(
+        path.join(ignoredDir, 'my-term.yaml'),
+        'id: my-term\nname: My Special Term'
+      );
+      
+      const context = await Context.create({ startingDir: tempDir });
+      
+      expect(context.isIgnored('My Special Term')).toBe(true);
+      expect(context.isIgnored('my special term')).toBe(true);
+      expect(context.isIgnored('MY SPECIAL TERM')).toBe(true);
+    });
+  });
+
+  describe('deleteEntity', () => {
+    it('should delete an entity from disk', async () => {
+      const protokollDir = path.join(tempDir, '.protokoll');
+      const peopleDir = path.join(protokollDir, 'context', 'people');
+      await fs.mkdir(peopleDir, { recursive: true });
+      await fs.writeFile(path.join(protokollDir, 'config.yaml'), 'version: 1');
+      const filePath = path.join(peopleDir, 'to-delete.yaml');
+      await fs.writeFile(filePath, 'id: to-delete\nname: To Delete');
+      
+      const context = await Context.create({ startingDir: tempDir });
+      expect(context.getPerson('to-delete')).toBeDefined();
+      
+      const deleted = await context.deleteEntity({
+        id: 'to-delete',
+        name: 'To Delete',
+        type: 'person',
+      });
+      
+      expect(deleted).toBe(true);
+      // File should be deleted
+      await expect(fs.stat(filePath)).rejects.toThrow();
+    });
+
+    it('should return false when entity file not found', async () => {
+      const protokollDir = path.join(tempDir, '.protokoll');
+      await fs.mkdir(path.join(protokollDir, 'context'), { recursive: true });
+      await fs.writeFile(path.join(protokollDir, 'config.yaml'), 'version: 1');
+      
+      const context = await Context.create({ startingDir: tempDir });
+      
+      const deleted = await context.deleteEntity({
+        id: 'nonexistent',
+        name: 'Nonexistent',
+        type: 'person',
+      });
+      
+      expect(deleted).toBe(false);
+    });
+  });
+
+  describe('getEntityFilePath', () => {
+    it('should return path to entity file', async () => {
+      const protokollDir = path.join(tempDir, '.protokoll');
+      const peopleDir = path.join(protokollDir, 'context', 'people');
+      await fs.mkdir(peopleDir, { recursive: true });
+      await fs.writeFile(path.join(protokollDir, 'config.yaml'), 'version: 1');
+      await fs.writeFile(path.join(peopleDir, 'john.yaml'), 'id: john\nname: John');
+      
+      const context = await Context.create({ startingDir: tempDir });
+      
+      const filePath = context.getEntityFilePath({
+        id: 'john',
+        name: 'John',
+        type: 'person',
+      });
+      
+      expect(filePath).toContain('john.yaml');
+    });
+
+    it('should return undefined for non-existent entity', async () => {
+      const protokollDir = path.join(tempDir, '.protokoll');
+      await fs.mkdir(path.join(protokollDir, 'context'), { recursive: true });
+      await fs.writeFile(path.join(protokollDir, 'config.yaml'), 'version: 1');
+      
+      const context = await Context.create({ startingDir: tempDir });
+      
+      const filePath = context.getEntityFilePath({
+        id: 'nonexistent',
+        name: 'Nonexistent',
+        type: 'person',
+      });
+      
+      expect(filePath).toBeUndefined();
+    });
+  });
+
+  describe('getContextDirs', () => {
+    it('should return context directories', async () => {
+      const protokollDir = path.join(tempDir, '.protokoll');
+      await fs.mkdir(path.join(protokollDir, 'context'), { recursive: true });
+      await fs.writeFile(path.join(protokollDir, 'config.yaml'), 'version: 1');
+      
+      const context = await Context.create({ startingDir: tempDir });
+      
+      const contextDirs = context.getContextDirs();
+      expect(contextDirs.length).toBe(1);
+      expect(contextDirs[0]).toContain('context');
+    });
+  });
 });
 

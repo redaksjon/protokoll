@@ -54,7 +54,7 @@ export interface Recommendation {
 }
 
 export interface ContextChange {
-    entityType: 'person' | 'project' | 'company' | 'term';
+    entityType: 'person' | 'project' | 'company' | 'term' | 'ignored';
     entityId: string;
     entityName: string;
     action: 'created' | 'updated';

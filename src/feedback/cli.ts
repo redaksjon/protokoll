@@ -92,6 +92,7 @@ export const createFeedbackCommand = (): Command => {
                     if (!decision) {
                         logger.error('Decision not found: %s', options.decision);
                         process.exit(1);
+                        return;
                     }
 
                     // Collect and process feedback
@@ -135,6 +136,7 @@ export const createFeedbackCommand = (): Command => {
             } catch (error) {
                 logger.error('Feedback command failed', { error });
                 process.exit(1);
+                return;
             }
         });
 

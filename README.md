@@ -17,11 +17,11 @@ Protokoll solves this.
 
 Protokoll is an intelligent audio transcription system that uses advanced reasoning models to create highly accurate, context-enhanced transcripts. Unlike basic transcription tools, Protokoll:
 
-- **🧠 Learns Your World**: Maintains a knowledge base of people, projects, and organizations you mention. When Whisper mishears someone, Protokoll recognizes and corrects it using phonetic variants and context awareness
-- **🎯 Routes Intelligently**: Multi-signal classification sends notes to the right destination—work notes stay in your work folder, client calls go to client projects, personal thoughts go to personal notes
-- **📝 Preserves Everything**: This is NOT a summarizer. Protokoll preserves the full content of what you said while cleaning up filler words, false starts, and obvious transcription errors
-- **📚 Improves Over Time**: The more you use it, the smarter it gets. Build context incrementally and watch transcription quality improve session after session
-- **⚡ Zero Configuration Start**: Works out of the box with sensible defaults. No API wrestling, no complex setup—just transcribe
+- **Learns Your World**: Maintains a knowledge base of people, projects, and organizations you mention. When Whisper mishears someone, Protokoll recognizes and corrects it using phonetic variants and context awareness
+- **Routes Intelligently**: Multi-signal classification sends notes to the right destination—work notes stay in your work folder, client calls go to client projects, personal thoughts go to personal notes
+- **Preserves Everything**: This is NOT a summarizer. Protokoll preserves the full content of what you said while cleaning up filler words, false starts, and obvious transcription errors
+- **Improves Over Time**: The more you use it, the smarter it gets. Build context incrementally and watch transcription quality improve session after session
+- **Zero Configuration Start**: Works out of the box with sensible defaults. No API wrestling, no complex setup—just transcribe
 
 ## The Core Philosophy: Context You Own and Control
 
@@ -31,7 +31,7 @@ When you first start using Protokoll, it doesn't know anything about you. It doe
 
 **But that's the point.** Protokoll is designed to learn from you:
 
-1. **Interactive Discovery**: When you run `protokoll --interactive` and mention "Project Alpha" for the first time, the system recognizes it doesn't know what that is. It asks: *"Is Project Alpha a new project? Where should notes about it be stored?"* You tell it, and from that moment forward, every note mentioning Project Alpha routes correctly.
+1. **Interactive Discovery**: When you run `protokoll` (interactive by default) and mention "Project Alpha" for the first time, the system recognizes it doesn't know what that is. It asks: *"Is Project Alpha a new project? Where should notes about it be stored?"* You tell it, and from that moment forward, every note mentioning Project Alpha routes correctly.
 
 2. **Context Files You Own**: Unlike cloud transcription services that keep your data in their black box, Protokoll stores everything it learns in simple YAML files in your `.protokoll/context/` directory:
 
@@ -77,8 +77,15 @@ The goal is simple: **After a few weeks of use, Protokoll should understand your
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Getting Started](#getting-started)
+  - [Progress Tracking](#progress-tracking)
+  - [Transcription Summary](#transcription-summary)
 - [Configuration](#configuration)
+  - [Interactive Configuration Editor](#interactive-configuration-editor)
+  - [Quick Configuration Commands](#quick-configuration-commands)
 - [Command Line Options](#command-line-options)
+- [Context Management Commands](#context-management-commands)
+- [Transcript Actions](#transcript-actions)
+- [Feedback Command](#feedback-command)
 - [Key Features](#key-features)
 - [Context System](#context-system)
 - [Routing System](#routing-system)
@@ -115,15 +122,15 @@ You're drowning in voice memos but can't use them because they're disorganized. 
 
 ### Who Should Use Protokoll
 
-✅ **Product Managers**: Record customer conversations, feature ideas, meeting notes—Protokoll routes them to projects automatically
+**Product Managers**: Record customer conversations, feature ideas, meeting notes—Protokoll routes them to projects automatically
 
-✅ **Researchers**: Capture interview insights, lab notes, findings—build a growing knowledge base that improves over time
+**Researchers**: Capture interview insights, lab notes, findings—build a growing knowledge base that improves over time
 
-✅ **Authors & Creators**: Dictate ideas, chapter notes, research—get organized files without manual organization
+**Authors & Creators**: Dictate ideas, chapter notes, research—get organized files without manual organization
 
-✅ **Managers**: Record 1-on-1s, team meetings, strategy sessions—automatic routing means they're never lost
+**Managers**: Record 1-on-1s, team meetings, strategy sessions—automatic routing means they're never lost
 
-✅ **Teams**: Self-hosted means your transcripts never leave your server—perfect for regulated industries
+**Teams**: Self-hosted means your transcripts never leave your server—perfect for regulated industries
 
 ## Prerequisites
 
@@ -209,10 +216,20 @@ EOF
 cat > ~/.protokoll/projects/work.yaml << EOF
 id: work
 name: Work Notes
-destination: ~/work/notes
-triggers:
-  - "work note"
-  - "work meeting"
+type: project
+classification:
+  context_type: work
+  explicit_phrases:
+    - "work note"
+    - "work meeting"
+routing:
+  destination: ~/work/notes
+  structure: month
+  filename_options:
+    - date
+    - time
+    - subject
+active: true
 EOF
 
 # 4. Now transcribe - names are corrected, routing is automatic
@@ -229,6 +246,50 @@ protokoll --input-directory ~/recordings
    - Preserve your exact wording
 3. **Routing**: Notes automatically go to the right folder based on content
 4. **Output**: You get markdown files with perfect names, proper organization, and full content
+
+### Progress Tracking
+
+When processing multiple files, Protokoll shows clear progress indicators so you always know where you are:
+
+```
+Found 11 file(s) to process in ~/recordings
+[1/11] Starting: ~/recordings/meeting-notes.m4a
+[1/11] Transcribing audio...
+[1/11] Transcription: 2847 chars in 3.2s
+[1/11] Enhancing with gpt-5.2...
+[1/11] Enhancement: 3 iterations, 2 tools, 4.1s
+[1/11] Output: ~/notes/2026/01/260115-1412-meeting-notes.md (7.3s total)
+[1/11] Completed: ~/recordings/meeting-notes.m4a -> ~/notes/2026/01/260115-1412-meeting-notes.md
+[2/11] Starting: ~/recordings/quick-thought.m4a
+...
+```
+
+The `[X/Y]` prefix on every log message tells you exactly which file you're on and how many remain—no more wondering if the system is making progress during long batch runs.
+
+### Transcription Summary
+
+When batch processing completes, Protokoll prints a summary of all processed files:
+
+```
+============================================================
+TRANSCRIPTION SUMMARY
+============================================================
+Processed 11 file(s)
+
+Input Files:
+/Users/me/recordings/meeting-notes.m4a
+/Users/me/recordings/quick-thought.m4a
+/Users/me/recordings/client-call.m4a
+
+Output Files:
+/Users/me/notes/2026/01/260115-1412-meeting-notes.md
+/Users/me/notes/2026/01/260115-1430-quick-thought.md
+/Users/me/notes/2026/01/260115-1500-client-call.md
+
+============================================================
+```
+
+Each file path is printed on its own line, making it easy to copy and paste to the command line for further processing—like reviewing transcripts, sending them for feedback, or moving them to a different location.
 
 ### Where Are My Files?
 
@@ -268,6 +329,54 @@ Protokoll uses hierarchical configuration discovery. It walks up the directory t
 - **Global**: `~/.protokoll/config.yaml`
 - **Project-specific**: `./protokoll/config.yaml` (in any parent directory)
 
+### Interactive Configuration Editor
+
+The easiest way to configure Protokoll is with the interactive config command:
+
+```bash
+# Launch interactive configuration editor
+protokoll config
+```
+
+This opens a guided editor that walks through each setting:
+
+```
+╔════════════════════════════════════════════════════════════════╗
+║           PROTOKOLL CONFIGURATION EDITOR                       ║
+╚════════════════════════════════════════════════════════════════╝
+
+Config file: ~/.protokoll/config.yaml
+
+── AI Models ──
+
+  model
+  AI model for transcription enhancement
+  Examples: gpt-5.2, gpt-4o, gpt-4o-mini, claude-3-5-sonnet
+  Current: default: gpt-5.2
+  New value (Enter to skip): 
+```
+
+### Quick Configuration Commands
+
+Set individual values directly from the command line:
+
+```bash
+# View all settings
+protokoll config --list
+
+# View a specific setting
+protokoll config model
+
+# Set a specific value
+protokoll config model gpt-4o-mini
+protokoll config debug true
+protokoll config outputDirectory ~/my-notes
+protokoll config outputFilenameOptions "date,time,subject"
+
+# Show config file path
+protokoll config --path
+```
+
 ### Full Configuration Example
 
 Create `~/.protokoll/config.yaml`:
@@ -277,46 +386,30 @@ Create `~/.protokoll/config.yaml`:
 model: "gpt-5.2"               # Reasoning model (default with high reasoning)
 transcriptionModel: "whisper-1" # Transcription model
 
-# Feature flags
-interactive: false              # Enable by default?
-selfReflection: false          # Generate reports by default?
-debug: false                   # Debug mode
+# Directory settings (Dreadcabinet options)
+inputDirectory: "./recordings"      # Where to find audio files
+outputDirectory: "~/notes"          # Where to write transcripts
+outputStructure: "month"            # Directory structure (none, year, month, day)
+outputFilenameOptions:              # Filename components
+  - date
+  - time
+  - subject
 
-# Output settings
-output:
-  intermediateDir: "./output/protokoll"
-  keepIntermediates: true
-  timestampFormat: "YYMMDD-HHmm"
+# Processing options
+processedDirectory: "./processed"   # Move processed audio here (optional)
 
-# Default routing
-routing:
-  default:
-    path: "~/notes"
-    structure: "month"          # none, year, month, or day
-    filename_options:
-      - date
-      - time
-      - subject
-  
-  conflict_resolution: "primary"  # ask, primary, or all
-  
-  projects:
-    - projectId: "work"
-      destination:
-        path: "~/work/notes"
-        structure: "month"
-        filename_options:
-          - date
-          - subject
-      classification:
-        context_type: "work"
-        explicit_phrases:
-          - "work note"
-          - "this is about work"
-        associated_people:
-          - "john-smith"
-      active: true
+# Feature flags (flat, not nested)
+interactive: true              # Interactive prompts (enabled by default)
+selfReflection: true          # Generate reports by default
+silent: false                 # Sound notifications
+debug: false                  # Debug mode
+
+# Advanced
+maxAudioSize: 26214400        # Max audio file size in bytes (25MB)
+tempDirectory: "/tmp"         # Temporary file storage
 ```
+
+**Note**: Project-specific routing is configured in **project files** (e.g., `~/.protokoll/projects/work.yaml`), not in the main config. See [Routing System](#routing-system) for details.
 
 ### Directory Structure Options
 
@@ -356,12 +449,15 @@ Combined example: `260111-1430-meeting-notes.md`
 
 | Option | Description |
 |--------|-------------|
-| `--interactive` | Enable interactive clarifications |
-| `--batch` | Disable interactivity (batch processing) |
-| `--self-reflection` | Generate reflection reports |
+| `--batch` | Disable interactive mode (for automation) |
+| `--self-reflection` | Generate reflection reports (default: true) |
+| `--no-self-reflection` | Disable reflection reports |
+| `--silent` | Disable sound notifications |
 | `--dry-run` | Show what would happen |
 | `--verbose` | Enable verbose logging |
 | `--debug` | Enable debug mode with intermediate files |
+
+> **Note**: Interactive mode is **enabled by default**. Use `--batch` to disable it for automation/cron jobs.
 
 ### Advanced Options
 
@@ -372,6 +468,304 @@ Combined example: `260111-1430-meeting-notes.md`
 | `--recursive` | Process subdirectories | `false` |
 | `--max-audio-size <bytes>` | Max file size before splitting | `25MB` |
 | `--temp-directory <dir>` | Temp files for audio splitting | System temp |
+
+## Context Management Commands
+
+Protokoll includes a complete CLI for managing context entities directly from the command line. Instead of manually editing YAML files, you can use these subcommands to list, view, add, and delete entities.
+
+### Entity Types
+
+| Command | Description |
+|---------|-------------|
+| `project` | Manage projects (routing destinations) |
+| `person` | Manage people (name recognition) |
+| `term` | Manage technical terms |
+| `company` | Manage companies |
+| `ignored` | Manage ignored terms (won't prompt for these) |
+| `context` | Overall context system management |
+
+### Common Actions
+
+Each entity type supports the same actions:
+
+```bash
+# List all entities of a type
+protokoll project list
+protokoll person list
+protokoll term list
+protokoll company list
+protokoll ignored list
+
+# Show details for a specific entity
+protokoll project show <id>
+protokoll person show priya-sharma
+
+# Add a new entity (interactive)
+protokoll project add
+protokoll person add
+protokoll term add
+
+# Delete an entity
+protokoll project delete <id>
+protokoll person delete john-smith --force
+```
+
+### Context Overview
+
+```bash
+# Show context system status (discovered directories, entity counts)
+protokoll context status
+
+# Search across all entity types
+protokoll context search "acme"
+```
+
+### Example: Adding a Person
+
+```bash
+$ protokoll person add
+
+[Add New Person]
+
+Full name: Priya Sharma
+ID (Enter for "priya-sharma"): 
+First name (Enter to skip): Priya
+Last name (Enter to skip): Sharma
+Company ID (Enter to skip): acme-corp
+Role (Enter to skip): Product Manager
+Sounds like (comma-separated, Enter to skip): pre a, pria, preeya
+Context notes (Enter to skip): Colleague from product team
+
+Person "Priya Sharma" saved successfully.
+```
+
+### Example: Adding a Project
+
+```bash
+$ protokoll project add
+
+[Add New Project]
+
+Project name: Client Alpha
+ID (Enter for "client-alpha"): 
+Output destination path: ~/clients/alpha/notes
+Directory structure (none/year/month/day, Enter for month): month
+Context type (work/personal/mixed, Enter for work): work
+Trigger phrases (comma-separated): client alpha, alpha project
+Topic keywords (comma-separated, Enter to skip): client engagement
+Description (Enter to skip): Primary client project
+
+Project "Client Alpha" saved successfully.
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `-v, --verbose` | Show full details (for `list` commands) |
+| `-f, --force` | Skip confirmation (for `delete` commands) |
+
+For complete documentation, see the [Context Commands Guide](./guide/context-commands.md).
+
+## Transcript Actions
+
+Protokoll includes the `action` command for editing and combining existing transcripts. This is useful for post-processing, organizing, and managing your transcript library.
+
+### Edit a Single Transcript
+
+Change the title and/or project of an existing transcript:
+
+```bash
+# Change the title (updates document heading and filename)
+protokoll action --title "Time to Celebrate" /path/to/transcript.md
+
+# Change the project (updates metadata and moves to project's destination)
+protokoll action --project client-alpha /path/to/transcript.md
+
+# Change both title and project
+protokoll action --title "Q1 Planning Session" --project quarterly-planning /path/to/transcript.md
+
+# Preview what would happen without making changes
+protokoll action --title "New Title" /path/to/transcript.md --dry-run --verbose
+```
+
+### Combine Multiple Transcripts
+
+Merge multiple related transcripts into a single document. When combining, source files are automatically deleted after the combined file is created.
+
+```bash
+# Combine transcripts with a custom title
+protokoll action --title "Time to Celebrate" --combine "/path/to/transcript1.md
+/path/to/transcript2.md
+/path/to/transcript3.md"
+
+# Combine and change project
+protokoll action --title "Full Meeting Notes" --project my-project --combine "/path/to/part1.md
+/path/to/part2.md"
+
+# Preview what would happen without making changes
+protokoll action --combine "/path/to/files..." --dry-run --verbose
+```
+
+#### What Combine Does
+
+1. **Parses all transcripts**: Extracts metadata, title, and content from each file
+2. **Sorts chronologically**: Orders transcripts by filename (which includes timestamp)
+3. **Merges metadata**: Uses the first transcript's date/time, combines durations, deduplicates tags
+4. **Creates sections**: Each source transcript becomes a section with its original title
+5. **Routes intelligently**: If `--project` is specified, uses that project's routing configuration
+6. **Cleans up**: Automatically deletes source files after successful combine
+
+#### Action Options
+
+| Option | Description |
+|--------|-------------|
+| `-t, --title <title>` | Set a custom title (also affects the output filename) |
+| `-p, --project <id>` | Change to a different project (updates metadata and routing) |
+| `-c, --combine <files>` | Combine multiple files (newline-separated list) |
+| `--dry-run` | Show what would happen without making changes |
+| `-v, --verbose` | Show detailed output |
+
+#### Title Slugification
+
+When you provide a custom title with `--title`, it's automatically converted to a filename-safe slug:
+
+| Title | Filename |
+|-------|----------|
+| `Time to Celebrate` | `15-1412-time-to-celebrate.md` |
+| `Meeting: Q1 Planning & Review!` | `15-1412-meeting-q1-planning-review.md` |
+| `Sprint 42 Retrospective` | `15-1412-sprint-42-retrospective.md` |
+
+The slug preserves the original timestamp prefix and is limited to 50 characters.
+
+#### Common Use Cases
+
+```bash
+# Rename a transcript with a more meaningful title
+protokoll action --title "Q1 Budget Review Meeting" ~/notes/2026/01/15-1412-meeting.md
+
+# Move a transcript to a different project
+protokoll action --project client-beta ~/notes/2026/01/15-1412-meeting.md
+
+# Consolidate a long meeting recorded in segments
+protokoll action --title "Full Team Standup" --combine "~/notes/part1.md
+~/notes/part2.md
+~/notes/part3.md"
+
+# Reorganize scattered notes into a project
+protokoll action --title "Sprint 42 Planning" --project sprint-42 --combine "~/notes/misc1.md
+~/notes/misc2.md"
+```
+
+#### Example Output
+
+When combining transcripts, the output looks like:
+
+```markdown
+# Meeting Notes Part 1 (Combined)
+
+## Metadata
+
+**Date**: January 15, 2026
+**Time**: 02:12 PM
+
+**Project**: AI Safety
+**Project ID**: `ai-safety`
+
+### Routing
+
+**Destination**: /Users/you/notes/ai-safety
+**Confidence**: 85.0%
+
+**Tags**: `work`, `ai`, `safety`, `meeting`
+
+**Duration**: 15m 30s
+
+---
+
+## Meeting Notes Part 1
+*Source: 15-1412-meeting-part-1.md*
+
+First part of the meeting content...
+
+## Meeting Notes Part 2
+*Source: 15-1421-meeting-part-2.md*
+
+Second part of the meeting content...
+```
+
+For complete documentation, see the [Action Commands Guide](./guide/action.md).
+
+## Feedback Command
+
+The `feedback` command uses an agentic model to understand natural language feedback and take corrective actions automatically.
+
+### Basic Usage
+
+```bash
+# Interactive feedback
+protokoll feedback /path/to/transcript.md
+
+# Direct feedback
+protokoll feedback /path/to/transcript.md -f "YB should be Wibey"
+
+# Preview changes
+protokoll feedback /path/to/transcript.md -f "WCMP should be WCNP" --dry-run -v
+```
+
+### What You Can Do
+
+#### Fix Terms & Abbreviations
+
+```bash
+protokoll feedback notes.md -f "WCMP should be WCNP - Walmart's Native Cloud Platform"
+```
+
+This will:
+1. Replace "WCMP" with "WCNP" throughout the transcript
+2. Add "WCNP" to your vocabulary with the full expansion
+3. Store phonetic variants so it won't be misheard again
+
+#### Fix Names
+
+```bash
+protokoll feedback notes.md -f "San Jay Grouper is actually Sanjay Gupta"
+```
+
+This will:
+1. Replace the name throughout the transcript
+2. Fix variations like "San Jay" or "Sanjay Grouper"
+3. Add the person to context for future recognition
+
+#### Change Project Assignment
+
+```bash
+protokoll feedback notes.md -f "This should be in the Quantum Readiness project"
+```
+
+This will:
+1. Update the project metadata
+2. Move the file to the project's destination
+3. Rename the file according to project rules
+
+### Feedback Options
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--feedback <text>` | `-f` | Provide feedback directly (non-interactive) |
+| `--model <model>` | `-m` | Reasoning model to use (default: gpt-5.2) |
+| `--dry-run` | | Show what would happen without making changes |
+| `--verbose` | `-v` | Show detailed output |
+| `--help-me` | | Show examples of feedback you can provide |
+
+### Get Help
+
+```bash
+# Show feedback examples
+protokoll feedback --help-me
+```
+
+For complete documentation, see the [Feedback Guide](./guide/feedback.md).
 
 ## Key Features
 
@@ -462,13 +856,26 @@ context: "Colleague from engineering team"
 # ~/.protokoll/projects/quarterly-planning.yaml
 id: quarterly-planning
 name: Quarterly Planning
-category: work
-destination: "~/work/planning/notes"
-structure: "month"
-triggers:
-  - "quarterly planning"
-  - "Q1 planning"
-  - "roadmap review"
+type: project
+
+classification:
+  context_type: work
+  explicit_phrases:
+    - "quarterly planning"
+    - "Q1 planning"
+    - "roadmap review"
+  topics:
+    - "roadmap"
+    - "budget"
+
+routing:
+  destination: "~/work/planning/notes"
+  structure: "month"
+  filename_options:
+    - date
+    - time
+    - subject
+
 active: true
 ```
 
@@ -601,14 +1008,21 @@ Is this correct? (Y/Enter to accept, or enter different path):
 > y
 ```
 
-### How to Enable Interactive Mode
+### How to Use Interactive Mode
+
+Interactive mode is **enabled by default**. Simply run:
 
 ```bash
-# Single run with interactive mode
-protokoll --input-directory ~/recordings --interactive
+protokoll --input-directory ~/recordings
+```
 
-# Set as default in config
-echo "interactive: true" >> ~/.protokoll/config.yaml
+To disable interactive mode (for automation/cron jobs):
+
+```bash
+protokoll --input-directory ~/recordings --batch
+
+# Or set in config
+echo "interactive: false" >> ~/.protokoll/config.yaml
 ```
 
 ### First-Run Onboarding

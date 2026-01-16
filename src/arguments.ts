@@ -4,6 +4,7 @@ import { Command } from "commander";
 import {
     PROTOKOLL_DEFAULTS,
     DEFAULT_MAX_AUDIO_SIZE,
+    DEFAULT_REASONING_LEVEL,
     PROGRAM_NAME,
     VERSION
 } from "@/constants";
@@ -25,13 +26,15 @@ export const configure = async (dreadcabinet: Dreadcabinet.DreadCabinet, cardiga
         .option('--openai-api-key <openaiApiKey>', 'OpenAI API key')
         .option('--transcription-model <transcriptionModel>', 'OpenAI transcription model to use')
         .option('--model <model>', 'OpenAI model to use for transcription enhancement')
+        .option('--reasoning-level <reasoningLevel>', `reasoning effort level: low, medium, or high (default: ${DEFAULT_REASONING_LEVEL})`)
         .option('--overrides', 'allow overrides of the default configuration')
         .option('--context-directories [contextDirectories...]', 'directories containing context files to be included in prompts')
         .option('--max-audio-size <maxAudioSize>', 'maximum audio file size in bytes')
         .option('--temp-directory <tempDirectory>', 'temporary directory for processing files')
-        .option('--interactive', 'enable interactive mode for clarification questions')
+        .option('--batch', 'disable interactive prompts (for automation/cron jobs)')
         .option('--self-reflection', 'generate self-reflection reports (default: true)')
         .option('--no-self-reflection', 'disable self-reflection reports')
+        .option('--silent', 'disable sound notifications in interactive mode')
         .option('--processed-directory <processedDirectory>', 'directory to move processed audio files to')
 
     await dreadcabinet.configure(program);
@@ -79,13 +82,15 @@ export const configure = async (dreadcabinet: Dreadcabinet.DreadCabinet, cardiga
 
     // Extract protokoll-specific CLI args (only include if explicitly set)
     const protokollCliArgs: Partial<Config> = {};
-    if (cliArgs.interactive !== undefined) protokollCliArgs.interactive = cliArgs.interactive;
+    // --batch disables interactive mode (interactive is default)
+    if (cliArgs.batch !== undefined) protokollCliArgs.interactive = !cliArgs.batch;
     if (cliArgs.selfReflection !== undefined) protokollCliArgs.selfReflection = cliArgs.selfReflection;
     if (cliArgs.debug !== undefined) protokollCliArgs.debug = cliArgs.debug;
     if (cliArgs.verbose !== undefined) protokollCliArgs.verbose = cliArgs.verbose;
     if (cliArgs.dryRun !== undefined) protokollCliArgs.dryRun = cliArgs.dryRun;
     if (cliArgs.model !== undefined) protokollCliArgs.model = cliArgs.model;
     if (cliArgs.transcriptionModel !== undefined) protokollCliArgs.transcriptionModel = cliArgs.transcriptionModel;
+    if (cliArgs.reasoningLevel !== undefined) protokollCliArgs.reasoningLevel = cliArgs.reasoningLevel;
     if (cliArgs.overrides !== undefined) protokollCliArgs.overrides = cliArgs.overrides;
     if (cliArgs.contextDirectories !== undefined) protokollCliArgs.contextDirectories = cliArgs.contextDirectories;
     if (cliArgs.maxAudioSize !== undefined) {
@@ -95,6 +100,7 @@ export const configure = async (dreadcabinet: Dreadcabinet.DreadCabinet, cardiga
     }
     if (cliArgs.tempDirectory !== undefined) protokollCliArgs.tempDirectory = cliArgs.tempDirectory;
     if (cliArgs.processedDirectory !== undefined) protokollCliArgs.processedDirectory = cliArgs.processedDirectory;
+    if (cliArgs.silent !== undefined) protokollCliArgs.silent = cliArgs.silent;
 
     // Merge configurations: Defaults -> File -> Dreadcabinet CLI -> Protokoll CLI (highest precedence)
     let mergedConfig: Partial<Config> = {

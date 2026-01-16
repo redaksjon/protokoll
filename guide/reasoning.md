@@ -45,13 +45,26 @@ The reasoning system:
 ```yaml
 # ~/.protokoll/config.yaml
 model: "gpt-5.2"
+reasoningLevel: "medium"  # low, medium, or high
 ```
 
 Or via command line:
 
 ```bash
-protokoll --model claude-3-5-sonnet --input-directory ./recordings
+protokoll --model claude-3-5-sonnet --reasoning-level medium --input-directory ./recordings
 ```
+
+## Reasoning Levels
+
+For models that support the `reasoning_effort` parameter (gpt-5.1, gpt-5.2, o1, o1-mini, o3, o3-mini), you can control how much reasoning effort the model expends:
+
+| Level | Description | Best For |
+|-------|-------------|----------|
+| `low` | Quick processing, minimal reasoning | Simple transcripts with few corrections needed |
+| `medium` | **Default** - Balanced reasoning | Standard transcription with context lookup |
+| `high` | Maximum reasoning effort | Unusual or highly technical content |
+
+The default is `medium` because transcript enhancement benefits from balanced reasoning: looking up names, correcting spellings, and categorizing content requires moderate context analysis. Use `low` for simple transcripts with few corrections needed, or `high` for complex technical content.
 
 ## Reasoning Strategies
 
@@ -175,9 +188,10 @@ interface ReasoningResponse {
 
 ### Slow Processing
 
-1. Use faster model: `--model gpt-4o-mini`
-2. Check self-reflection for bottlenecks
-3. Add more context to reduce iterations
+1. Use lower reasoning level: `--reasoning-level low`
+2. Use faster model: `--model gpt-4o-mini`
+3. Check self-reflection for bottlenecks
+4. Add more context to reduce iterations
 
 ### Poor Quality
 

@@ -628,6 +628,49 @@ section {
 }
 
 /* ========================================
+   Commands Section
+   ======================================== */
+.commands-section {
+    background: var(--color-bg);
+    text-align: center;
+}
+
+.commands-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.5rem;
+    margin: 2rem 0;
+    text-align: left;
+}
+
+.command-group {
+    background: var(--color-bg-elevated);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    transition: all 0.3s ease;
+}
+
+.command-group:hover {
+    border-color: var(--color-primary);
+    transform: translateY(-2px);
+}
+
+.command-group h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    color: var(--color-text);
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.command-group .code-block {
+    padding: 1rem;
+    font-size: 0.75rem;
+}
+
+/* ========================================
    Reflection Section
    ======================================== */
 .reflection-section {
@@ -1010,6 +1053,164 @@ section {
 
 .footer a:hover {
     text-decoration: underline;
+}
+
+/* ========================================
+   Actions Section
+   ======================================== */
+.actions-section {
+    background: var(--color-bg);
+}
+
+.actions-demo {
+    max-width: 800px;
+    margin: 3rem auto;
+}
+
+.action-card {
+    background: var(--color-bg-card);
+    border: 1px solid var(--color-border);
+    border-radius: 16px;
+    padding: 2rem;
+}
+
+.action-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.action-icon {
+    font-size: 2rem;
+}
+
+.action-header h4 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--color-text);
+    margin: 0;
+}
+
+.action-description {
+    color: var(--color-text-secondary);
+    margin-bottom: 1.5rem;
+    line-height: 1.6;
+}
+
+.actions-features {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.5rem;
+    margin-top: 2rem;
+}
+
+.action-feature {
+    display: flex;
+    gap: 1rem;
+    align-items: flex-start;
+    padding: 1.5rem;
+    background: var(--color-bg-elevated);
+    border-radius: 12px;
+    border: 1px solid var(--color-border);
+}
+
+.action-feature .feature-icon {
+    font-size: 1.5rem;
+    flex-shrink: 0;
+}
+
+.action-feature h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--color-text);
+    margin: 0 0 0.5rem 0;
+}
+
+.action-feature p {
+    font-size: 0.9rem;
+    color: var(--color-text-secondary);
+    margin: 0;
+    line-height: 1.5;
+}
+
+/* ========================================
+   Feedback Section
+   ======================================== */
+.feedback-section {
+    background: var(--color-bg-elevated);
+}
+
+.feedback-demo {
+    max-width: 800px;
+    margin: 3rem auto;
+}
+
+.feedback-card {
+    background: var(--color-bg-card);
+    border: 1px solid var(--color-border);
+    border-radius: 16px;
+    padding: 2rem;
+}
+
+.feedback-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.feedback-icon {
+    font-size: 2rem;
+}
+
+.feedback-header h4 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--color-text);
+    margin: 0;
+}
+
+.feedback-description {
+    color: var(--color-text-secondary);
+    margin-bottom: 1.5rem;
+    line-height: 1.6;
+}
+
+.feedback-features {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.5rem;
+    margin-top: 2rem;
+}
+
+.feedback-feature {
+    display: flex;
+    gap: 1rem;
+    align-items: flex-start;
+    padding: 1.5rem;
+    background: var(--color-bg);
+    border-radius: 12px;
+    border: 1px solid var(--color-border);
+}
+
+.feedback-feature .feature-icon {
+    font-size: 1.5rem;
+    flex-shrink: 0;
+}
+
+.feedback-feature h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--color-text);
+    margin: 0 0 0.5rem 0;
+}
+
+.feedback-feature p {
+    font-size: 0.9rem;
+    color: var(--color-text-secondary);
+    margin: 0;
+    line-height: 1.5;
 }
 
 /* ========================================

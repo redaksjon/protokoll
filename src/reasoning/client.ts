@@ -9,8 +9,38 @@ import OpenAI from 'openai';
 import { ReasoningConfig, ReasoningRequest, ReasoningResponse, ToolCall } from './types';
 import * as Logging from '../logging';
 
+export interface ToolCallRequest {
+    messages: Array<{
+        role: 'system' | 'user' | 'assistant' | 'tool';
+        content: string;
+        tool_call_id?: string;
+        tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>;
+    }>;
+    tools?: Array<{
+        type: 'function';
+        function: {
+            name: string;
+            description: string;
+            parameters: Record<string, unknown>;
+        };
+    }>;
+}
+
+export interface ToolCallResponse {
+    content: string;
+    tool_calls?: Array<{
+        id: string;
+        function: {
+            name: string;
+            arguments: string;
+        };
+    }>;
+    finish_reason?: string;
+}
+
 export interface ClientInstance {
     complete(request: ReasoningRequest): Promise<ReasoningResponse>;
+    completeWithTools(request: ToolCallRequest): Promise<ToolCallResponse>;
     isReasoningModel(model: string): boolean;
     getModelFamily(model: string): 'openai' | 'anthropic' | 'gemini' | 'unknown';
 }
@@ -139,8 +169,90 @@ export const create = (config: ReasoningConfig): ClientInstance => {
         }
     };
   
+    const completeWithTools = async (request: ToolCallRequest): Promise<ToolCallResponse> => {
+        logger.debug('Tool call request starting', { model: config.model, messageCount: request.messages.length });
+        
+        try {
+            // Convert messages to OpenAI format
+            const messages: Array<OpenAI.Chat.ChatCompletionMessageParam> = request.messages.map(msg => {
+                if (msg.role === 'tool') {
+                    return {
+                        role: 'tool' as const,
+                        content: msg.content,
+                        tool_call_id: msg.tool_call_id || '',
+                    };
+                }
+                if (msg.role === 'assistant' && msg.tool_calls) {
+                    return {
+                        role: 'assistant' as const,
+                        content: msg.content || null,
+                        tool_calls: msg.tool_calls.map(tc => ({
+                            id: tc.id,
+                            type: 'function' as const,
+                            function: tc.function,
+                        })),
+                    };
+                }
+                return {
+                    role: msg.role as 'system' | 'user' | 'assistant',
+                    content: msg.content,
+                };
+            });
+            
+            // Build request options
+            const requestOptions: Record<string, unknown> = {
+                model: config.model,
+                messages,
+                tools: request.tools,
+                tool_choice: request.tools && request.tools.length > 0 ? 'auto' : undefined,
+            };
+            
+            // Add reasoning_effort for models that support it
+            if (supportsReasoningLevel(config.model)) {
+                requestOptions.reasoning_effort = config.reasoningLevel || 'medium';
+            }
+            
+            const response = await getClient().chat.completions.create(
+                requestOptions as unknown as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming
+            );
+            
+            const choice = response.choices[0];
+            const message = choice.message;
+            
+            // Extract tool calls if any
+            const toolCalls = message.tool_calls?.map(tc => {
+                // Handle both standard and custom tool call formats
+                const fn = 'function' in tc ? tc.function : null;
+                if (!fn) {
+                    return { id: tc.id, function: { name: 'unknown', arguments: '{}' } };
+                }
+                return {
+                    id: tc.id,
+                    function: {
+                        name: fn.name,
+                        arguments: fn.arguments,
+                    },
+                };
+            });
+            
+            if (toolCalls && toolCalls.length > 0) {
+                logger.debug('Model requested %d tool calls: %s', toolCalls.length, toolCalls.map(t => t.function.name).join(', '));
+            }
+            
+            return {
+                content: message.content || '',
+                tool_calls: toolCalls,
+                finish_reason: choice.finish_reason,
+            };
+        } catch (error) {
+            logger.error('Tool call request failed', { error });
+            throw error;
+        }
+    };
+    
     return {
         complete,
+        completeWithTools,
         isReasoningModel,
         getModelFamily,
     };
