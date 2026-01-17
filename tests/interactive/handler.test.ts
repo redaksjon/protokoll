@@ -963,8 +963,8 @@ describe('Interactive Handler', () => {
 
         it('should handle term flow with correction and expansion', async () => {
             handler.startSession();
-            // T (term), correction, expansion, skip projects, description
-            setMockAnswers(['T', 'CorrectedTerm', 'Full Term Name', '', 'Term description']);
+            // T (term), N (not alias), correction, expansion, skip projects, description
+            setMockAnswers(['T', '', 'CorrectedTerm', 'Full Term Name', '', 'Term description']);
             
             const request: ClarificationRequest = {
                 type: 'new_project',
@@ -987,8 +987,8 @@ describe('Interactive Handler', () => {
 
         it('should handle term flow without correction (accept original)', async () => {
             handler.startSession();
-            // T (term), empty (accept), empty (no expansion), skip projects, empty desc
-            setMockAnswers(['term', '', '', '', '']);
+            // T (term), N (not alias), empty (accept name), empty (no expansion), skip projects, empty desc
+            setMockAnswers(['term', '', '', '', '', '']);
             
             const request: ClarificationRequest = {
                 type: 'new_project',
@@ -1005,8 +1005,8 @@ describe('Interactive Handler', () => {
 
         it('should handle term flow with project association', async () => {
             handler.startSession();
-            // T (term), empty (accept name), empty (no expansion), "1,2" (select projects), description
-            setMockAnswers(['t', '', '', '1,2', 'A technical term']);
+            // T (term), N (not alias), empty (accept name), empty (no expansion), "1,2" (select projects), description
+            setMockAnswers(['t', '', '', '', '1,2', 'A technical term']);
             
             const request: ClarificationRequest = {
                 type: 'new_project',
@@ -1023,8 +1023,8 @@ describe('Interactive Handler', () => {
 
         it('should handle term flow with new project creation', async () => {
             handler.startSession();
-            // T (term), empty, empty, N (new project), NewProjectName, /output, project desc, term desc
-            setMockAnswers(['t', '', '', 'N', 'NewProject', '/dest', 'Project desc', 'Term desc']);
+            // T (term), N (not alias), empty (accept name), empty (no expansion), N (new project), NewProjectName, /output, project desc, term desc
+            setMockAnswers(['t', '', '', '', 'N', 'NewProject', '/dest', 'Project desc', 'Term desc']);
             
             const request: ClarificationRequest = {
                 type: 'new_project',
@@ -1044,8 +1044,8 @@ describe('Interactive Handler', () => {
 
         it('should handle term flow with no existing projects - create new', async () => {
             handler.startSession();
-            // T (term), empty, empty, Y (create new), ProjectName, /dest, proj desc, term desc
-            setMockAnswers(['t', '', '', 'y', 'NewProj', '/path', 'Proj desc', 'Term desc']);
+            // T (term), N (not alias), empty (accept name), empty (no expansion), Y (create new), ProjectName, /dest, proj desc, term desc
+            setMockAnswers(['t', '', '', '', 'y', 'NewProj', '/path', 'Proj desc', 'Term desc']);
             
             const request: ClarificationRequest = {
                 type: 'new_project',
@@ -1113,8 +1113,8 @@ describe('Interactive Handler', () => {
 
         it('should handle runCreateProjectFlow skip when project name empty (from term flow)', async () => {
             handler.startSession();
-            // T (term), accept name, no expansion, N (new project), empty project name (skip)
-            setMockAnswers(['t', '', '', 'N', '']);
+            // T (term), N (not alias), accept name, no expansion, N (new project), empty project name (skip)
+            setMockAnswers(['t', '', '', '', 'N', '']);
             
             const request: ClarificationRequest = {
                 type: 'new_project',
@@ -1131,8 +1131,8 @@ describe('Interactive Handler', () => {
 
         it('should handle term with invalid project indices', async () => {
             handler.startSession();
-            // T, empty, empty, "99,abc,1" (mixed valid/invalid), desc
-            setMockAnswers(['t', '', '', '99,abc,1', 'desc']);
+            // T, N (not alias), empty (accept name), empty (no expansion), "99,abc,1" (mixed valid/invalid), desc
+            setMockAnswers(['t', '', '', '', '99,abc,1', 'desc']);
             
             const request: ClarificationRequest = {
                 type: 'new_project',

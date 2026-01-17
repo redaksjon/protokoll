@@ -6,6 +6,21 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
+
+// Mock the MCP SDK modules before importing the server
+vi.mock('@modelcontextprotocol/sdk/server/index.js', () => ({
+    Server: vi.fn(),
+}));
+
+vi.mock('@modelcontextprotocol/sdk/server/stdio.js', () => ({
+    StdioServerTransport: vi.fn(),
+}));
+
+vi.mock('@modelcontextprotocol/sdk/types.js', () => ({
+    CallToolRequestSchema: {},
+    ListToolsRequestSchema: {},
+}));
+
 import {
     fileExists,
     getAudioMetadata,
