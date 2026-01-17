@@ -85,8 +85,10 @@ export interface NewProjectWizardResult {
     projectName?: string;
     destination?: string;
     description?: string;
-    // For 'link' (link term to existing project)
+    // For 'link' (link this variation to existing term/project)
     linkedProjectIndex?: number;
+    linkedTermName?: string;      // Name of existing term this is an alias for
+    aliasName?: string;           // The new variant/alias to add to the term
     termDescription?: string;
     // For 'term' (create a new term entity)
     termName?: string;

@@ -181,6 +181,8 @@ Remember: preserve ALL content, only fix transcription errors.`;
                                         destination?: string;
                                         description?: string;
                                         linkedProjectIndex?: number;
+                                        linkedTermName?: string;
+                                        aliasName?: string;
                                         termDescription?: string;
                                         // For 'term' action
                                         termName?: string;
@@ -258,6 +260,73 @@ Remember: preserve ALL content, only fix transcription errors.`;
                                             }
                                         } catch (error) {
                                             logger.warn('Failed to save new project: %s', error);
+                                        }
+                                        
+                                    } else if (wizardResult.action === 'link' && wizardResult.linkedTermName) {
+                                        // LINK AS ALIAS TO EXISTING TERM
+                                        const existingTermName = wizardResult.linkedTermName;
+                                        const aliasVariant = wizardResult.aliasName || termName;
+                                        
+                                        // Search for the existing term
+                                        const termSearch = await ctx.contextInstance.search(existingTermName);
+                                        const existingTerm = termSearch.find(e => e.type === 'term' && 
+                                            e.name.toLowerCase() === existingTermName.toLowerCase());
+                                        
+                                        if (existingTerm) {
+                                            // Add the new variant to sounds_like
+                                            const existingVariants = (existingTerm as { sounds_like?: string[] }).sounds_like || [];
+                                            const updatedVariants = [...existingVariants, aliasVariant.toLowerCase()]
+                                                .filter((v, i, a) => a.indexOf(v) === i); // dedupe
+                                            
+                                            const updatedTerm = {
+                                                ...existingTerm,
+                                                type: 'term' as const,
+                                                sounds_like: updatedVariants,
+                                            };
+                                            
+                                            try {
+                                                await ctx.contextInstance.saveEntity(updatedTerm);
+                                                await ctx.contextInstance.reload();
+                                                logger.info('Added alias "%s" to existing term "%s"', aliasVariant, existingTerm.name);
+                                                
+                                                // Mark as resolved
+                                                state.resolvedEntities.set(termName, existingTerm.name);
+                                                state.resolvedEntities.set(aliasVariant, existingTerm.name);
+                                                
+                                                contextChanges.push({
+                                                    entityType: 'term',
+                                                    entityId: existingTerm.id,
+                                                    entityName: existingTerm.name,
+                                                    action: 'updated',
+                                                    details: {
+                                                        addedAlias: aliasVariant,
+                                                        sounds_like: updatedVariants,
+                                                    },
+                                                });
+                                                
+                                                // If term has associated projects, use for routing
+                                                const termProjects = (existingTerm as { projects?: string[] }).projects || [];
+                                                if (termProjects.length > 0) {
+                                                    const allProjects = ctx.contextInstance.getAllProjects();
+                                                    const primaryProject = allProjects.find(p => p.id === termProjects[0]);
+                                                    if (primaryProject?.routing?.destination) {
+                                                        state.routeDecision = {
+                                                            projectId: primaryProject.id,
+                                                            destination: {
+                                                                path: primaryProject.routing.destination,
+                                                                structure: 'month'
+                                                            },
+                                                            confidence: 1.0,
+                                                            signals: [{ type: 'explicit_phrase', value: existingTerm.name, weight: 1.0 }],
+                                                            reasoning: `User linked "${aliasVariant}" as alias for term "${existingTerm.name}" associated with project "${primaryProject.name}"`,
+                                                        };
+                                                    }
+                                                }
+                                            } catch (error) {
+                                                logger.warn('Failed to add alias to existing term: %s', error);
+                                            }
+                                        } else {
+                                            logger.warn('Could not find existing term "%s" to link alias', existingTermName);
                                         }
                                         
                                     } else if (wizardResult.action === 'link' && typeof wizardResult.linkedProjectIndex === 'number') {

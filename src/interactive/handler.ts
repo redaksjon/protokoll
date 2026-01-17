@@ -140,7 +140,22 @@ const runNewProjectWizard = async (
     
     // TERM FLOW
     if (entityType.toLowerCase() === 't' || entityType.toLowerCase() === 'term') {
-        // Step 2: Validate spelling
+        // Step 2: Check if this is an alias for an existing term
+        const isAlias = await askQuestion(rl, `\nIs "${term}" the same as an existing term you've already defined? (Y/N, or Enter to skip): `);
+        
+        if (isAlias.toLowerCase() === 'y' || isAlias.toLowerCase() === 'yes') {
+            const existingTermName = await askQuestion(rl, `\nWhich existing term is this the same as? (Enter the term name): `);
+            
+            if (existingTermName) {
+                return {
+                    action: 'link',
+                    linkedTermName: existingTermName.trim(),
+                    aliasName: term,
+                };
+            }
+        }
+        
+        // Step 3: Validate spelling
         const termCorrection = await askQuestion(rl, `\nIs "${term}" spelled correctly? (Enter to accept, or type correction): `);
         const finalTermName = termCorrection || term;
         
@@ -148,10 +163,10 @@ const runNewProjectWizard = async (
             write(`Term updated to: "${finalTermName}"`);
         }
         
-        // Step 3: Is this an acronym?
+        // Step 4: Is this an acronym?
         const expansion = await askQuestion(rl, `\nIf "${finalTermName}" is an acronym, what does it stand for? (Enter to skip): `);
         
-        // Step 4: Which project(s) is this term associated with?
+        // Step 5: Which project(s) is this term associated with?
         const termProjects: number[] = [];
         let createdProject: NewProjectWizardResult | undefined;
         
@@ -200,7 +215,7 @@ const runNewProjectWizard = async (
             }
         }
         
-        // Step 5: Description
+        // Step 6: Description
         const termDesc = await askQuestion(rl, `\nBrief description of "${finalTermName}"? (Enter to skip): `);
         
         return {
