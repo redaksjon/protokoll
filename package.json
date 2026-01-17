@@ -42,7 +42,7 @@
     "@google/generative-ai": "^0.24.1",
     "@riotprompt/riotprompt": "^0.0.21",
     "@theunwalked/cardigantime": "^0.0.20",
-    "@theunwalked/dreadcabinet": "^0.0.13",
+    "@theunwalked/dreadcabinet": "^0.0.15",
     "@types/fluent-ffmpeg": "^2.1.28",
     "commander": "^14.0.2",
     "dayjs": "^1.11.19",
