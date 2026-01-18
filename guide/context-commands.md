@@ -197,6 +197,103 @@ Project "Client Alpha" saved successfully.
 
 - **Topic keywords** (`topics`): Lower-confidence associations. If a transcript mentions "budget" and your project has "budget" as a topic, it's a weaker signal than a trigger phrase. Topics help with classification but shouldn't be relied on alone.
 
+#### Smart Project Creation
+
+Protokoll can use AI assistance to automatically generate sounds_like, trigger phrases, topics, and descriptions:
+
+**Basic Smart Creation**
+
+```bash
+# AI generates sounds_like and trigger phrases from project name
+protokoll project add
+
+[Add New Project]
+
+Project name: Protokoll
+ID (Enter for "protokoll"): 
+
+[Generating phonetic variants...]
+Sounds like (Enter for suggested, or edit):
+  protocol,pro to call,proto call,protocolle,...
+
+[Generating trigger phrases...]
+Trigger phrases (Enter for suggested, or edit):
+  protokoll,working on protokoll,protokoll project,protokoll meeting,...
+```
+
+**With Source Content**
+
+```bash
+# Provide URL or file for full context analysis
+protokoll project add https://github.com/myorg/myproject
+
+[Fetching content from source...]
+Found: github - myorg/myproject
+
+[Analyzing content...]
+
+Project name (Enter for "MyProject"): 
+ID (Enter for "myproject"): 
+
+[Generating phonetic variants...]
+[Generating trigger phrases...]
+
+Topic keywords (Enter for suggested, or edit):
+  typescript,automation,api,github,...
+
+Description (Enter for suggested, or edit):
+  MyProject is a comprehensive automation toolkit...
+```
+
+**Command-Line Options**
+
+```bash
+# Skip prompts with arguments
+protokoll project add --name "My Project"
+protokoll project add --name "My Project" --context work
+
+# Combine with source
+protokoll project add https://github.com/org/repo --name "Repo Name"
+
+# Control smart assistance
+protokoll project add --smart       # Force enable
+protokoll project add --no-smart    # Force disable
+```
+
+**Supported Source Types**
+
+| Type | Description | Example |
+|------|-------------|---------|
+| GitHub URL | Fetches raw README.md | `https://github.com/org/repo` |
+| Web URL | Fetches page content | `https://example.com/docs` |
+| Local file | Reads file content | `./README.md` |
+| Directory | Finds README in directory | `./my-project/` |
+
+**Configuration**
+
+```yaml
+# .protokoll/config.yaml
+smartAssistance:
+  enabled: true                # Enable AI-assisted project creation
+  assistModel: "gpt-5.2-mini"  # Fast model for suggestions
+  soundsLikeOnAdd: true        # Auto-generate phonetic variants
+  triggerPhrasesOnAdd: true    # Auto-generate trigger phrases
+  promptForSource: true        # Ask for URL/file when creating projects
+```
+
+**How It Works**
+
+1. Enter project name
+2. AI generates sounds_like (phonetic variants for transcription correction)
+3. AI generates trigger phrases (content-matching for classification)
+4. Optionally provide URL/file for topics and description
+5. All suggestions are editable before saving
+
+**Requirements**
+
+- `OPENAI_API_KEY` environment variable set
+- Network access for URL fetching and API calls
+
 ### Delete a Project
 
 ```bash
