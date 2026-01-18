@@ -11,6 +11,8 @@ import * as yaml from 'js-yaml';
 import Table from 'cli-table3';
 import * as Context from '../context';
 import { Entity, Person, Project, Company, Term, IgnoredTerm, EntityType } from '../context/types';
+import * as ProjectAssist from './project-assist';
+import * as ContentFetcher from './content-fetcher';
 
 // Options for adding a project
 interface AddProjectOptions {
@@ -476,99 +478,293 @@ const addProject = async (
     options: AddProjectOptions = {}
 ): Promise<void> => {
     const rl = createReadline();
+    const smartConfig = context.getSmartAssistanceConfig();
+    const useSmartAssist = shouldUseSmartAssistance(context, options);
     
+    // Initialize assist modules if smart assistance is enabled
+    const assist = useSmartAssist ? ProjectAssist.create(smartConfig) : null;
+    const fetcher = useSmartAssist ? ContentFetcher.create() : null;
+
     try {
         print('\n[Add New Project]\n');
-        print('Projects define where transcripts are filed and how they\'re classified.');
-        print('Each field helps Protokoll route your audio notes to the right place.\n');
         
-        // --- Project Name ---
-        const name = await askQuestion(rl, 'Project name: ');
+        // ===== PHASE 1: Basic Info =====
+        
+        // Get project name
+        let name = options.name;
+        let suggestedName: string | undefined;
+        let suggestions: ProjectAssist.ProjectSuggestions | undefined;
+        
+        // If source provided and no name, try to get suggestions first
+        if (options.source && !name && assist && fetcher) {
+            print('[Fetching content from source...]');
+            const fetchResult = await fetcher.fetch(options.source);
+            
+            if (fetchResult.success && fetchResult.content) {
+                print(`Found: ${fetchResult.sourceType} - ${fetchResult.sourceName}\n`);
+                
+                print('[Analyzing content...]');
+                suggestions = await assist.analyzeContent(fetchResult.content);
+                
+                if (suggestions.name) {
+                    suggestedName = suggestions.name;
+                }
+            } else {
+                print(`Warning: Could not fetch content: ${fetchResult.error}\n`);
+            }
+        }
+        
         if (!name) {
-            print('Name is required. Aborting.');
+            const namePrompt = suggestedName 
+                ? `Project name (Enter for "${suggestedName}"): `
+                : 'Project name: ';
+            
+            name = await askQuestion(rl, namePrompt);
+            if (!name && suggestedName) {
+                name = suggestedName;
+            }
+            if (!name) {
+                print('Name is required. Aborting.');
+                return;
+            }
+        }
+        
+        // Get/calculate ID
+        const suggestedId = calculateId(name);
+        let id = options.id;
+        
+        if (!id) {
+            print(`  (ID is used for the filename, e.g., "${suggestedId}.yaml")`);
+            const idInput = await askQuestion(rl, `ID (Enter for "${suggestedId}"): `);
+            id = idInput || suggestedId;
+        }
+        
+        // Check for existing project
+        if (context.getProject(id)) {
+            print(`Error: Project with ID "${id}" already exists.`);
             return;
         }
         
-        // --- ID ---
-        print('');
-        const suggestedId = name.toLowerCase().replace(/\s+/g, '-');
-        print(`  ID is used for the filename to store project info (e.g., "${suggestedId}.yaml")`);
-        print('  and as a reference when linking other entities to this project.');
-        const id = await askQuestion(rl, `ID (Enter for "${suggestedId}"): `);
-        const finalId = id || suggestedId;
+        // ===== PHASE 2: Routing Config =====
         
-        if (context.getProject(finalId)) {
-            print(`Error: Project with ID "${finalId}" already exists.`);
-            return;
-        }
-        
-        // --- Output Destination ---
-        print('');
         const config = context.getConfig();
         const defaultOutputDir = (config.outputDirectory as string) || '(configured default)';
-        print('  Output destination is where transcripts for this project will be saved.');
-        print(`  Leave blank to use the configured default: ${defaultOutputDir}`);
-        const destination = await askQuestion(rl, 'Output destination path (Enter for default): ');
         
-        // --- Directory Structure ---
-        print('');
-        print('  Directory structure determines how transcripts are organized by date:');
-        print('    none:  output/transcript.md');
-        print('    year:  output/2025/transcript.md');
-        print('    month: output/2025/01/transcript.md');
-        print('    day:   output/2025/01/15/transcript.md');
-        const structure = await askQuestion(rl, 'Directory structure (none/year/month/day, Enter for month): ');
+        let destination = options.destination;
+        if (!destination) {
+            print(`\n  (Leave blank to use the configured default: ${defaultOutputDir})`);
+            destination = await askQuestion(rl, 'Output destination path (Enter for default): ');
+        }
         
-        // --- Context Type ---
-        print('');
-        print('  Context type helps classify the nature of this project:');
-        print('    work:     Professional/business content');
-        print('    personal: Personal notes and ideas');
-        print('    mixed:    Contains both work and personal content');
-        const contextType = await askQuestion(rl, 'Context type (work/personal/mixed, Enter for work): ');
+        let structure = options.structure;
+        if (!structure) {
+            print('  Examples:');
+            print('    none:  output/transcript.md');
+            print('    year:  output/2025/transcript.md');
+            print('    month: output/2025/01/transcript.md');
+            print('    day:   output/2025/01/15/transcript.md');
+            const structureInput = await askQuestion(rl, 'Directory structure (none/year/month/day, Enter for month): ');
+            structure = (structureInput || 'month') as 'none' | 'year' | 'month' | 'day';
+        }
         
-        // --- Trigger Phrases ---
-        print('');
-        print('  Trigger phrases are words/phrases that identify content belongs to this project.');
-        print('  When these phrases appear in your audio, Protokoll routes it here.');
-        print('  Examples: "client alpha", "alpha project", "working on alpha"');
-        const phrasesStr = await askQuestion(rl, 'Trigger phrases (comma-separated): ');
+        let contextType = options.context;
+        if (!contextType) {
+            print('\n  Context type:');
+            print('    work:     Professional/business content');
+            print('    personal: Personal notes and ideas');
+            print('    mixed:    Contains both work and personal content');
+            const contextInput = await askQuestion(rl, 'Context type (work/personal/mixed, Enter for work): ');
+            contextType = (contextInput || 'work') as 'work' | 'personal' | 'mixed';
+        }
         
-        // --- Sounds Like (Phonetic Variants) ---
-        print('');
-        print('  Sounds-like variants help when Whisper mishears the project name.');
-        print('  Useful for non-English names (Norwegian, etc.) that may be transcribed differently.');
-        print('  Examples for "Protokoll": "protocol", "pro to call", "proto call"');
-        const soundsLikeStr = await askQuestion(rl, 'Sounds like (comma-separated, Enter to skip): ');
+        // ===== PHASE 3: Smart Assistance Fields =====
         
-        // --- Topic Keywords ---
-        print('');
-        print('  Topic keywords are themes/subjects associated with this project.');
-        print('  These provide additional context for classification but are lower-confidence');
-        print('  than trigger phrases. Examples: "budget", "roadmap", "client engagement"');
-        const topicsStr = await askQuestion(rl, 'Topic keywords (comma-separated, Enter to skip): ');
+        let soundsLike: string[] = [];
+        let triggerPhrases: string[] = [];
+        let topics: string[] = [];
+        let description: string | undefined;
         
-        // --- Description ---
-        print('');
-        print('  Description is a brief note about this project for your reference.');
-        const description = await askQuestion(rl, 'Description (Enter to skip): ');
+        if (useSmartAssist && assist) {
+            // Generate sounds_like (phonetic variants of the project NAME)
+            print('\n[Generating phonetic variants...]');
+            
+            if (suggestions?.soundsLike?.length) {
+                soundsLike = suggestions.soundsLike;
+            } else {
+                soundsLike = await assist.generateSoundsLike(name);
+            }
+            
+            if (soundsLike.length > 0) {
+                const soundsPreview = soundsLike.slice(0, 6).join(',');
+                const moreCount = soundsLike.length - 6;
+                const preview = moreCount > 0 ? `${soundsPreview},...(+${moreCount} more)` : soundsPreview;
+                
+                print('  (Phonetic variants help when Whisper mishears the project name)');
+                const soundsInput = await askQuestion(rl, `Sounds like (Enter for suggested, or edit):\n  ${preview}\n> `);
+                
+                if (soundsInput.trim()) {
+                    soundsLike = soundsInput.split(',').map(s => s.trim()).filter(s => s.length > 0);
+                }
+            } else {
+                print('  (Phonetic variants help when Whisper mishears the project name)');
+                const soundsInput = await askQuestion(rl, 'Sounds like (comma-separated, Enter to skip): ');
+                if (soundsInput.trim()) {
+                    soundsLike = soundsInput.split(',').map(s => s.trim()).filter(s => s.length > 0);
+                }
+            }
+            
+            // Generate trigger phrases (content-matching phrases)
+            print('\n[Generating trigger phrases...]');
+            
+            if (suggestions?.triggerPhrases?.length) {
+                triggerPhrases = suggestions.triggerPhrases;
+            } else {
+                triggerPhrases = await assist.generateTriggerPhrases(name);
+            }
+            
+            if (triggerPhrases.length > 0) {
+                const phrasesPreview = triggerPhrases.slice(0, 8).join(',');
+                const moreCount = triggerPhrases.length - 8;
+                const preview = moreCount > 0 ? `${phrasesPreview},...(+${moreCount} more)` : phrasesPreview;
+                
+                print('  (Trigger phrases indicate content belongs to this project)');
+                const phrasesInput = await askQuestion(rl, `Trigger phrases (Enter for suggested, or edit):\n  ${preview}\n> `);
+                
+                if (phrasesInput.trim()) {
+                    triggerPhrases = phrasesInput.split(',').map(s => s.trim()).filter(s => s.length > 0);
+                }
+            } else {
+                print('  (Trigger phrases indicate content belongs to this project)');
+                const phrasesInput = await askQuestion(rl, 'Trigger phrases (comma-separated): ');
+                if (phrasesInput.trim()) {
+                    triggerPhrases = phrasesInput.split(',').map(s => s.trim()).filter(s => s.length > 0);
+                }
+            }
+            
+            // Handle topics and description
+            if (suggestions?.topics?.length || suggestions?.description) {
+                // We have suggestions from content analysis
+                if (suggestions.topics?.length) {
+                    const topicsPreview = suggestions.topics.slice(0, 10).join(',');
+                    const moreCount = suggestions.topics.length - 10;
+                    const preview = moreCount > 0 ? `${topicsPreview},...(+${moreCount} more)` : topicsPreview;
+                    
+                    const topicsInput = await askQuestion(rl, `\nTopic keywords (Enter for suggested, or edit):\n  ${preview}\n> `);
+                    
+                    if (topicsInput.trim()) {
+                        topics = topicsInput.split(',').map(s => s.trim()).filter(s => s.length > 0);
+                    } else {
+                        topics = suggestions.topics;
+                    }
+                }
+                
+                if (suggestions.description) {
+                    const descPreview = suggestions.description.length > 200 
+                        ? suggestions.description.substring(0, 200) + '...'
+                        : suggestions.description;
+                    
+                    const descInput = await askQuestion(rl, `\nDescription (Enter for suggested, or edit):\n  ${descPreview}\n> `);
+                    
+                    if (descInput.trim()) {
+                        description = descInput;
+                    } else {
+                        description = suggestions.description;
+                    }
+                }
+            } else if (!options.source && smartConfig.promptForSource) {
+                // No source provided yet, ask if user wants to provide one
+                print('\nWould you like to provide a URL or file path for auto-generating');
+                const sourceInput = await askQuestion(rl, 'keywords and description? (Enter path, or press Enter to skip): ');
+                
+                if (sourceInput.trim() && fetcher) {
+                    print('[Fetching content...]');
+                    const fetchResult = await fetcher.fetch(sourceInput.trim());
+                    
+                    if (fetchResult.success && fetchResult.content) {
+                        print(`Found: ${fetchResult.sourceType} - ${fetchResult.sourceName}`);
+                        print('[Analyzing content...]');
+                        
+                        const contentSuggestions = await assist.analyzeContent(fetchResult.content, name);
+                        
+                        if (contentSuggestions.topics?.length) {
+                            const topicsPreview = contentSuggestions.topics.slice(0, 10).join(',');
+                            const topicsInput = await askQuestion(rl, `\nTopic keywords (Enter for suggested, or edit):\n  ${topicsPreview}\n> `);
+                            
+                            topics = topicsInput.trim() 
+                                ? topicsInput.split(',').map(s => s.trim()).filter(s => s.length > 0)
+                                : contentSuggestions.topics;
+                        }
+                        
+                        if (contentSuggestions.description) {
+                            const descPreview = contentSuggestions.description.length > 200 
+                                ? contentSuggestions.description.substring(0, 200) + '...'
+                                : contentSuggestions.description;
+                            const descInput = await askQuestion(rl, `\nDescription (Enter for suggested, or edit):\n  ${descPreview}\n> `);
+                            
+                            description = descInput.trim() || contentSuggestions.description;
+                        }
+                    } else {
+                        print(`Warning: Could not fetch content: ${fetchResult.error}`);
+                    }
+                }
+                
+                // Fall back to manual entry if no source or fetch failed
+                if (!topics.length) {
+                    const topicsInput = await askQuestion(rl, '\nTopic keywords (comma-separated, Enter to skip): ');
+                    if (topicsInput.trim()) {
+                        topics = topicsInput.split(',').map(s => s.trim()).filter(s => s.length > 0);
+                    }
+                }
+                
+                if (!description) {
+                    const descInput = await askQuestion(rl, 'Description (Enter to skip): ');
+                    if (descInput.trim()) {
+                        description = descInput.trim();
+                    }
+                }
+            }
+        } else {
+            // Smart assistance disabled - manual entry only
+            print('\n  (Phonetic variants help when Whisper mishears the project name)');
+            const soundsStr = await askQuestion(rl, 'Sounds like (comma-separated, Enter to skip): ');
+            if (soundsStr.trim()) {
+                soundsLike = soundsStr.split(',').map(s => s.trim()).filter(s => s.length > 0);
+            }
+            
+            print('\n  (Trigger phrases indicate content belongs to this project)');
+            const phrasesStr = await askQuestion(rl, 'Trigger phrases (comma-separated): ');
+            if (phrasesStr.trim()) {
+                triggerPhrases = phrasesStr.split(',').map(s => s.trim()).filter(s => s.length > 0);
+            }
+            
+            const topicsStr = await askQuestion(rl, '\nTopic keywords (comma-separated, Enter to skip): ');
+            if (topicsStr.trim()) {
+                topics = topicsStr.split(',').map(s => s.trim()).filter(s => s.length > 0);
+            }
+            
+            const descInput = await askQuestion(rl, 'Description (Enter to skip): ');
+            if (descInput.trim()) {
+                description = descInput.trim();
+            }
+        }
+        
+        // ===== PHASE 4: Create Project =====
         
         const project: Project = {
-            id: finalId,
+            id,
             name,
             type: 'project',
             classification: {
-                context_type: (contextType || 'work') as 'work' | 'personal' | 'mixed',
-                explicit_phrases: phrasesStr ? phrasesStr.split(',').map(s => s.trim()) : [],
-                ...(topicsStr && { topics: topicsStr.split(',').map(s => s.trim()) }),
+                context_type: contextType,
+                explicit_phrases: triggerPhrases,
+                ...(topics.length && { topics }),
             },
             routing: {
-                // Only include destination if explicitly provided - otherwise uses global default
                 ...(destination && { destination }),
-                structure: (structure || 'month') as 'none' | 'year' | 'month' | 'day',
+                structure: structure as 'none' | 'year' | 'month' | 'day',
                 filename_options: ['date', 'time', 'subject'],
             },
-            ...(soundsLikeStr && { sounds_like: soundsLikeStr.split(',').map(s => s.trim()) }),
+            ...(soundsLike.length && { sounds_like: soundsLike }),
             ...(description && { description }),
             active: true,
         };
