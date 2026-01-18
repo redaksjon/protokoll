@@ -45,6 +45,8 @@ import * as Media from '@/util/media';
 import * as Storage from '@/util/storage';
 import * as Reasoning from '@/reasoning';
 import { getLogger } from '@/logging';
+import * as ProjectAssist from '@/cli/project-assist';
+import * as ContentFetcher from '@/cli/content-fetcher';
 import {
     DEFAULT_OUTPUT_DIRECTORY,
     DEFAULT_OUTPUT_STRUCTURE,
@@ -578,20 +580,25 @@ const tools: Tool[] = [
     {
         name: 'protokoll_add_project',
         description:
-            'Add a new project to the context. ' +
+            'Add a new project to the context with optional smart assistance for generating metadata. ' +
             'Projects define where transcripts should be routed based on classification signals. ' +
-            'Include explicit_phrases that should trigger routing to this project. ' +
-            'Include sounds_like variants for phonetic matching of non-English project names.',
+            'Smart assistance auto-generates sounds_like (phonetic variants for transcription correction) and ' +
+            'explicit_phrases (content-matching trigger phrases for classification). ' +
+            'Provide a source URL or file path to also generate topics and description from content analysis.',
         inputSchema: {
             type: 'object',
             properties: {
                 name: {
                     type: 'string',
-                    description: 'Project name',
+                    description: 'Project name (required)',
                 },
                 id: {
                     type: 'string',
                     description: 'Unique ID (default: slugified name)',
+                },
+                source: {
+                    type: 'string',
+                    description: 'URL or file path to analyze for generating topics, description, sounds_like, and explicit_phrases (optional)',
                 },
                 destination: {
                     type: 'string',
@@ -610,21 +617,25 @@ const tools: Tool[] = [
                 explicit_phrases: {
                     type: 'array',
                     items: { type: 'string' },
-                    description: 'High-confidence phrases that trigger routing to this project when they appear in audio',
+                    description: 'Content-matching trigger phrases for classification (auto-generated if smart assistance enabled)',
                 },
                 sounds_like: {
                     type: 'array',
                     items: { type: 'string' },
-                    description: 'Phonetic variants for when Whisper mishears the project name (useful for non-English names like Norwegian)',
+                    description: 'Phonetic variants of project NAME for transcription correction (auto-generated if smart assistance enabled)',
                 },
                 topics: {
                     type: 'array',
                     items: { type: 'string' },
-                    description: 'Lower-confidence topic keywords for classification',
+                    description: 'Topic keywords for classification (auto-generated from source if provided)',
                 },
                 description: {
                     type: 'string',
-                    description: 'Project description',
+                    description: 'Project description (auto-generated from source if provided)',
+                },
+                useSmartAssist: {
+                    type: 'boolean',
+                    description: 'Enable smart assistance for auto-generating metadata (default: true if configured)',
                 },
                 contextDirectory: {
                     type: 'string',
@@ -632,6 +643,31 @@ const tools: Tool[] = [
                 },
             },
             required: ['name'],
+        },
+    },
+    {
+        name: 'protokoll_suggest_project_metadata',
+        description:
+            'Generate project metadata suggestions without creating the project. ' +
+            'Returns sounds_like (phonetic variants for transcription), explicit_phrases (content-matching trigger phrases), ' +
+            'topics and description from source content. Useful for interactive workflows where ' +
+            'AI assistant presents suggestions for user review before creating the project.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                name: {
+                    type: 'string',
+                    description: 'Project name for generating sounds_like and trigger phrases',
+                },
+                source: {
+                    type: 'string',
+                    description: 'URL or file path to analyze for topics, description, and suggested name',
+                },
+                contextDirectory: {
+                    type: 'string',
+                    description: 'Path to the .protokoll context directory',
+                },
+            },
         },
     },
     {
@@ -1301,6 +1337,7 @@ async function handleAddPerson(args: {
 async function handleAddProject(args: {
     name: string;
     id?: string;
+    source?: string;
     destination?: string;
     structure?: 'none' | 'year' | 'month' | 'day';
     contextType?: 'work' | 'personal' | 'mixed';
@@ -1308,6 +1345,7 @@ async function handleAddProject(args: {
     sounds_like?: string[];
     topics?: string[];
     description?: string;
+    useSmartAssist?: boolean;
     contextDirectory?: string;
 }) {
     const context = await Context.create({
@@ -1324,22 +1362,72 @@ async function handleAddProject(args: {
         throw new Error(`Project with ID "${id}" already exists`);
     }
 
+    // Smart assistance integration
+    const smartConfig = context.getSmartAssistanceConfig();
+    const useSmartAssist = args.useSmartAssist !== false && smartConfig.enabled;
+
+    let soundsLike = args.sounds_like || [];
+    let triggerPhrases = args.explicit_phrases || [];
+    let topics = args.topics || [];
+    let description = args.description;
+    let suggestedName: string | undefined;
+
+    if (useSmartAssist) {
+        const assist = ProjectAssist.create(smartConfig);
+        const fetcher = ContentFetcher.create();
+
+        // Fetch and analyze content if source provided
+        if (args.source) {
+            const fetchResult = await fetcher.fetch(args.source);
+
+            if (fetchResult.success && fetchResult.content) {
+                const suggestions = await assist.analyzeContent(fetchResult.content, args.name);
+
+                // Only use suggestions for fields not explicitly provided (undefined, not just empty)
+                if (args.sounds_like === undefined) {
+                    soundsLike = suggestions.soundsLike;
+                }
+                if (args.explicit_phrases === undefined) {
+                    triggerPhrases = suggestions.triggerPhrases;
+                }
+                if (args.topics === undefined && suggestions.topics) {
+                    topics = suggestions.topics;
+                }
+                if (!args.description && suggestions.description) {
+                    description = suggestions.description;
+                }
+                if (suggestions.name) {
+                    suggestedName = suggestions.name;
+                }
+            }
+        } else {
+            // Generate sounds_like and trigger phrases from name even without source
+            if (args.sounds_like === undefined) {
+                soundsLike = await assist.generateSoundsLike(args.name);
+            }
+            if (args.explicit_phrases === undefined) {
+                triggerPhrases = await assist.generateTriggerPhrases(args.name);
+            }
+        }
+    }
+
     const project: Project = {
         id,
         name: args.name,
         type: 'project',
         classification: {
             context_type: args.contextType || 'work',
-            explicit_phrases: args.explicit_phrases || [],
-            ...(args.topics && { topics: args.topics }),
+            explicit_phrases: triggerPhrases,
+            ...(topics.length && { topics }),
         },
         routing: {
             ...(args.destination && { destination: args.destination }),
             structure: args.structure || 'month',
             filename_options: ['date', 'time', 'subject'],
         },
-        ...(args.sounds_like && { sounds_like: args.sounds_like }),
-        ...(args.description && { description: args.description }),
+        // Include sounds_like if explicitly provided (even if empty) or if generated
+        ...((args.sounds_like !== undefined || soundsLike.length) && { sounds_like: soundsLike }),
+        ...(description && { description }),
         active: true,
     };
 
@@ -1349,6 +1437,14 @@ async function handleAddProject(args: {
         success: true,
         message: `Project "${args.name}" added successfully`,
         entity: formatEntity(project),
+        smartAssistUsed: useSmartAssist,
+        ...(suggestedName && { suggestedName }),
+        generated: {
+            soundsLike,
+            triggerPhrases,
+            topics,
+            description,
+        },
     };
 }
 
@@ -1629,6 +1725,68 @@ async function handleProvideFeedback(args: {
     };
 }
 
+async function handleSuggestProjectMetadata(args: {
+    name?: string;
+    source?: string;
+    contextDirectory?: string;
+}) {
+    const context = await Context.create({
+        startingDir: args.contextDirectory || process.cwd(),
+    });
+
+    const smartConfig = context.getSmartAssistanceConfig();
+
+    if (!smartConfig.enabled) {
+        throw new Error('Smart assistance is disabled in configuration.');
+    }
+
+    const assist = ProjectAssist.create(smartConfig);
+    const fetcher = ContentFetcher.create();
+
+    const result: {
+        soundsLike?: string[];
+        triggerPhrases?: string[];
+        topics?: string[];
+        description?: string;
+        suggestedName?: string;
+    } = {};
+
+    // Generate sounds_like and trigger phrases if name provided
+    if (args.name) {
+        // Generate in parallel for efficiency
+        const [soundsLike, triggerPhrases] = await Promise.all([
+            assist.generateSoundsLike(args.name),
+            assist.generateTriggerPhrases(args.name),
+        ]);
+        result.soundsLike = soundsLike;
+        result.triggerPhrases = triggerPhrases;
+    }
+
+    // Analyze source if provided
+    if (args.source) {
+        const fetchResult = await fetcher.fetch(args.source);
+
+        if (fetchResult.success && fetchResult.content) {
+            const suggestions = await assist.analyzeContent(fetchResult.content, args.name);
+
+            if (!args.name && suggestions.name) {
+                result.suggestedName = suggestions.name;
+                result.soundsLike = suggestions.soundsLike;
+                result.triggerPhrases = suggestions.triggerPhrases;
+            }
+            result.topics = suggestions.topics;
+            result.description = suggestions.description;
+        } else {
+            throw new Error(`Could not fetch content: ${fetchResult.error}`);
+        }
+    }
+
+    return {
+        success: true,
+        data: result,
+    };
+}
+
 // ============================================================================
 // Server Setup
 // ============================================================================
@@ -1721,6 +1879,9 @@ async function main() {
                     break;
                 case 'protokoll_delete_entity':
                     result = await handleDeleteEntity(args as Parameters<typeof handleDeleteEntity>[0]);
+                    break;
+                case 'protokoll_suggest_project_metadata':
+                    result = await handleSuggestProjectMetadata(args as Parameters<typeof handleSuggestProjectMetadata>[0]);
                     break;
 
                 // Transcript Actions
