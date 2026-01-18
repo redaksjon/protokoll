@@ -123,71 +123,115 @@ The formatted output makes it easy to read all fields. Arrays are displayed as b
 protokoll project add
 ```
 
-The interactive prompt guides you through each field with explanations:
+For the best experience, provide the project name on the command line:
+
+```bash
+protokoll project add --name "Client Alpha"
+```
+
+The streamlined process uses sensible defaults and focuses on the smart assistance features:
 
 ```
 [Add New Project]
 
-Projects define where transcripts are filed and how they're classified.
-Each field helps Protokoll route your audio notes to the right place.
-
 Project name: Client Alpha
 
-  ID is used for the filename to store project info (e.g., "client-alpha.yaml")
-  and as a reference when linking other entities to this project.
-ID (Enter for "client-alpha"): 
+[Generating phonetic variants...]
+  • Calling AI model...
+  (Phonetic variants help when Whisper mishears the project name)
+Sounds like (Enter for suggested, or edit):
+  client alpha,client alfa,klient alpha,clint alpha,...(+4 more)
+> 
 
-  Output destination is where transcripts for this project will be saved.
-  Leave blank to use the configured default: ~/notes
-Output destination path (Enter for default): ~/clients/alpha/notes
+[Generating trigger phrases...]
+  • Calling AI model...
+  (Trigger phrases indicate content belongs to this project)
+Trigger phrases (Enter for suggested, or edit):
+  client alpha,alpha project,working on alpha,alpha client,...(+8 more)
+> 
 
-  Directory structure determines how transcripts are organized by date:
-    none:  output/transcript.md
-    year:  output/2025/transcript.md
-    month: output/2025/01/transcript.md
-    day:   output/2025/01/15/transcript.md
-Directory structure (none/year/month/day, Enter for month): month
+Topic keywords (Enter for suggested, or edit):
+  client engagement,consulting,project management,...(+5 more)
+> 
 
-  Context type helps classify the nature of this project:
-    work:     Professional/business content
-    personal: Personal notes and ideas
-    mixed:    Contains both work and personal content
-Context type (work/personal/mixed, Enter for work): work
-
-  Trigger phrases are words/phrases that identify content belongs to this project.
-  When these phrases appear in your audio, Protokoll routes it here.
-  Examples: "client alpha", "alpha project", "working on alpha"
-Trigger phrases (comma-separated): client alpha, alpha project, working on alpha
-
-  Sounds-like variants help when Whisper mishears the project name.
-  Useful for non-English names (Norwegian, etc.) that may be transcribed differently.
-  Examples for "Protokoll": "protocol", "pro to call", "proto call"
-Sounds like (comma-separated, Enter to skip): 
-
-  Topic keywords are themes/subjects associated with this project.
-  These provide additional context for classification but are lower-confidence
-  than trigger phrases. Examples: "budget", "roadmap", "client engagement"
-Topic keywords (comma-separated, Enter to skip): client engagement, consulting
-
-  Description is a brief note about this project for your reference.
-Description (Enter to skip): Primary client project for Q1
+Description (Enter for suggested, or edit):
+  Primary client project for Q1
+> 
 
 Project "Client Alpha" saved successfully.
 ```
 
+The project creation now uses these sensible defaults:
+- **ID**: Auto-generated from name (e.g., "Client Alpha" → "client-alpha")
+- **Context type**: Defaults to "work"
+- **Directory structure**: Defaults to "month"
+- **Output destination**: Uses your configured default
+
+You can override any default using command-line options:
+
+```bash
+protokoll project add --name "Personal Notes" \
+  --context personal \
+  --structure day \
+  --destination ~/personal-notes
+```
+
+#### Non-Interactive Mode
+
+If you want to accept all AI-generated suggestions automatically without being prompted, use the `--yes` flag:
+
+```bash
+protokoll project add --name "FjellGrunn" --yes
+```
+
+This will generate phonetic variants, trigger phrases, topics, and description using AI, then immediately save the project without waiting for your confirmation. Output looks like:
+
+```
+[Add New Project]
+
+[Generating phonetic variants...]
+  • Calling AI model...
+  (Phonetic variants help when Whisper mishears the project name)
+  fyellgruhn,feelgrun,feellgrun,fyellgrunn,fyehlgrunn,fjehlgrun,...(+16 more)
+  ✓ Accepted (--yes mode)
+
+[Generating trigger phrases...]
+  • Calling AI model...
+  (Trigger phrases indicate content belongs to this project)
+  fjellgrunn,fjell grunn project,working on fjellgrunn,...(+12 more)
+  ✓ Accepted (--yes mode)
+
+Project "FjellGrunn" saved successfully.
+```
+
+This mode is useful for:
+- **Automation**: Scripts that create projects without manual intervention
+- **Trusting the AI**: When you're confident the AI will generate good suggestions
+- **Speed**: Quickly creating multiple projects in a batch
+
+You can combine `--yes` with other flags:
+
+```bash
+# Non-interactive with source URL
+protokoll project add https://github.com/myorg/myproject --name "My Project" --yes
+
+# Non-interactive with local README
+protokoll project add /path/to/README.md --name "Documentation" --yes
+```
+
 #### Project Field Reference
 
-| Field | Purpose | Examples |
-|-------|---------|----------|
-| **Name** | Display name for the project | "Client Alpha", "Personal Notes" |
-| **ID** | Filename and reference identifier | "client-alpha", "personal-notes" |
-| **Output destination** | Where transcripts are saved | "~/clients/alpha/notes" |
-| **Directory structure** | Date-based folder organization | none, year, month, day |
-| **Context type** | Nature of content | work, personal, mixed |
-| **Trigger phrases** | High-confidence matching phrases | "client alpha", "working on alpha" |
-| **Sounds like** | Phonetic variants for misheard names | "protocol" for "Protokoll" |
-| **Topic keywords** | Lower-confidence theme associations | "budget", "roadmap" |
-| **Description** | Your reference note | "Primary client project for Q1" |
+| Field | How Set | Purpose | Examples |
+|-------|---------|---------|----------|
+| **Name** | Prompted (or `--name` flag) | Display name for the project | "Client Alpha", "Personal Notes" |
+| **ID** | Auto-generated from name | Filename and reference identifier | "client-alpha", "personal-notes" |
+| **Context type** | Auto: "work" (override with `--context`) | Nature of content | work, personal, mixed |
+| **Directory structure** | Auto: "month" (override with `--structure`) | Date-based folder organization | none, year, month, day |
+| **Output destination** | Auto: configured default (override with `--destination`) | Where transcripts are saved | "~/clients/alpha/notes" |
+| **Sounds like** | AI-suggested (editable) | Phonetic variants for misheard names | "protocol" for "Protokoll" |
+| **Trigger phrases** | AI-suggested (editable) | High-confidence matching phrases | "client alpha", "working on alpha" |
+| **Topic keywords** | AI-suggested (editable) | Lower-confidence theme associations | "budget", "roadmap" |
+| **Description** | AI-suggested (editable) | Your reference note | "Primary client project for Q1" |
 
 ##### Understanding Trigger Phrases vs Sounds Like vs Topics
 
@@ -274,11 +318,12 @@ protokoll project add --no-smart    # Force disable
 ```yaml
 # .protokoll/config.yaml
 smartAssistance:
-  enabled: true                # Enable AI-assisted project creation
-  assistModel: "gpt-5.2-mini"  # Fast model for suggestions
-  soundsLikeOnAdd: true        # Auto-generate phonetic variants
-  triggerPhrasesOnAdd: true    # Auto-generate trigger phrases
-  promptForSource: true        # Ask for URL/file when creating projects
+  enabled: true                   # Enable AI-assisted project creation
+  phoneticModel: "gpt-5-nano"     # Fast model for phonetic variants
+  analysisModel: "gpt-5-mini"     # Model for content analysis
+  soundsLikeOnAdd: true           # Auto-generate phonetic variants
+  triggerPhrasesOnAdd: true       # Auto-generate trigger phrases
+  promptForSource: true           # Ask for URL/file when creating projects
 ```
 
 **How It Works**

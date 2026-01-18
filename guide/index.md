@@ -234,12 +234,17 @@ Protokoll's project data is automatically used by [Observasjon](https://github.c
 The Smart Projects feature (enabled by default) helps you configure projects with AI assistance:
 
 ```bash
+# Interactive mode (review AI suggestions)
 protokoll project add
+
+# Non-interactive mode (trust AI suggestions)
+protokoll project add --name "My Project" --yes
+
 # AI automatically suggests:
 # - Phonetic variations for the project name
 # - Classification signals (trigger phrases)
 # - Common mishearings to watch for
 ```
 
-This makes it easy to set up proactive phonetic enhancement without manually thinking through all the ways Whisper might mishear your project names.
+This makes it easy to set up proactive phonetic enhancement without manually thinking through all the ways Whisper might mishear your project names. Use `--yes` for automation or when you trust the AI completely.
 

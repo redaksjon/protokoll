@@ -302,6 +302,9 @@ sounds_like:
                                 <div className="code-line"><span className="code-comment"># AI-assisted project creation</span></div>
                                 <div className="code-line">protokoll project add --smart</div>
                                 <div className="code-line"></div>
+                                <div className="code-line"><span className="code-comment"># Non-interactive: trust AI suggestions</span></div>
+                                <div className="code-line">protokoll project add --name "My Project" --yes</div>
+                                <div className="code-line"></div>
                                 <div className="code-line"><span className="code-comment"># From GitHub repo</span></div>
                                 <div className="code-line">protokoll project add https://github.com/org/repo</div>
                                 <div className="code-line"></div>

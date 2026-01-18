@@ -93,6 +93,13 @@ describe('CLI Context Commands', () => {
             expect(addCmd).toBeDefined();
         });
 
+        it('should have --yes option on add subcommand', () => {
+            const projectCmd = program.commands.find(c => c.name() === 'project');
+            const addCmd = projectCmd?.commands.find(c => c.name() === 'add');
+            const yesOption = addCmd?.options.find(o => o.long === '--yes' || o.short === '-y');
+            expect(yesOption).toBeDefined();
+        });
+
         it('should have delete subcommand', () => {
             const projectCmd = program.commands.find(c => c.name() === 'project');
             const deleteCmd = projectCmd?.commands.find(c => c.name() === 'delete');

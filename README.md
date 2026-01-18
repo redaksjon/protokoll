@@ -409,11 +409,12 @@ debug: false                  # Debug mode
 
 # Smart assistance for project creation
 smartAssistance:
-  enabled: true                # Enable AI-assisted project creation
-  assistModel: "gpt-5.2-mini"  # Fast model for generating suggestions
-  soundsLikeOnAdd: true        # Auto-generate phonetic variants
-  triggerPhrasesOnAdd: true    # Auto-generate content-matching phrases
-  promptForSource: true        # Ask for URL/file when creating projects
+  enabled: true                   # Enable AI-assisted project creation
+  phoneticModel: "gpt-5-nano"     # Fast model for phonetic variant generation
+  analysisModel: "gpt-5-mini"     # Model for content analysis and suggestions
+  soundsLikeOnAdd: true           # Auto-generate phonetic variants
+  triggerPhrasesOnAdd: true       # Auto-generate content-matching phrases
+  promptForSource: true           # Ask for URL/file when creating projects
 
 # Advanced
 maxAudioSize: 26214400        # Max audio file size in bytes (25MB)
@@ -599,6 +600,7 @@ Options:
   --structure <type>       Directory structure: none, year, month, day (default: month)
   --smart                  Force enable smart assistance
   --no-smart               Force disable smart assistance
+  -y, --yes                Accept all AI-generated suggestions without prompting (non-interactive)
 ```
 
 #### Examples
@@ -612,6 +614,9 @@ protokoll project add --name "Quarterly Planning" --context work
 
 # Analyze local documentation
 protokoll project add ./docs/README.md --name "Documentation"
+
+# Non-interactive mode: accept all AI suggestions automatically
+protokoll project add https://github.com/myorg/myproject --name "My Project" --yes
 
 # Disable smart assistance for manual entry
 protokoll project add --no-smart
@@ -629,17 +634,20 @@ protokoll project add --no-smart
 
 3. **Editable Suggestions**: All suggestions are presented as defaults that you can accept (press Enter) or edit
 
+4. **Non-Interactive Mode**: Use the `--yes` flag to automatically accept all AI-generated suggestions without prompting. This is useful for automation or when you want to trust the AI completely
+
 #### Configuration
 
 Enable or disable smart assistance globally in your `.protokoll/config.yaml`:
 
 ```yaml
 smartAssistance:
-  enabled: true              # Enable smart assistance globally
-  assistModel: "gpt-5.2-mini"  # Model to use for suggestions
-  soundsLikeOnAdd: true      # Auto-generate phonetic variants
-  triggerPhrasesOnAdd: true  # Auto-generate content-matching phrases
-  promptForSource: true      # Ask about URL/file when not provided
+  enabled: true                   # Enable smart assistance globally
+  phoneticModel: "gpt-5-nano"     # Fast model for phonetic variant generation (default)
+  analysisModel: "gpt-5-mini"     # Model for content analysis and suggestions (default)
+  soundsLikeOnAdd: true           # Auto-generate phonetic variants
+  triggerPhrasesOnAdd: true       # Auto-generate content-matching phrases
+  promptForSource: true           # Ask about URL/file when not provided
 ```
 
 Override per-command with `--smart` or `--no-smart` flags.
