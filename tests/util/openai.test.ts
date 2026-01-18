@@ -81,13 +81,14 @@ describe('OpenAI utilities', () => {
             const result = await openAiUtils.transcribeAudio(mockFilePath);
 
             expect(result).toEqual(mockTranscription);
-            // Now logs at info level with filename and model
+            // Logs the completion with model, duration, and character count
             expect(mockLogger.info).toHaveBeenCalledWith(
-                'Transcribing audio with %s: %s ... this may take several minutes for long recordings',
+                '%s (%ss, %d chars)',
                 'whisper-1',
-                'audio.mp3'
+                expect.any(String),
+                18
             );
-            expect(mockLogger.debug).toHaveBeenCalledWith('Full path: %s', mockFilePath);
+            expect(mockLogger.debug).toHaveBeenCalledWith('Transcribing: %s (full path: %s)', 'audio.mp3', mockFilePath);
             expect(mockLogger.debug).toHaveBeenCalledWith('Received transcription from OpenAI: %s', mockTranscription);
         });
 
@@ -187,16 +188,25 @@ describe('OpenAI utilities', () => {
                             content: mockResponse
                         }
                     }
-                ]
+                ],
+                usage: {
+                    prompt_tokens: 10,
+                    completion_tokens: 20
+                }
             });
             process.env.OPENAI_API_KEY = 'test-key';
 
             const result = await openAiUtils.createCompletion(messages);
 
             expect(result).toBe(mockResponse);
+            // Logs the completion with model, duration, and token counts (with empty reason suffix)
             expect(mockLogger.info).toHaveBeenCalledWith(
-                'Sending request to reasoning model (%s)... this may take a minute',
-                'gpt-5.2'
+                '%s (%ss, %d→%d tokens)%s',
+                'gpt-5.2',
+                expect.any(String),
+                10,
+                20,
+                ''
             );
             expect(mockLogger.debug).toHaveBeenCalledWith(
                 'Sending prompt to OpenAI: %j',
@@ -224,6 +234,40 @@ describe('OpenAI utilities', () => {
 
             const callArgs = mockChatCompletionsCreate.mock.calls[0][0];
             expect(callArgs.model).toBe(customModel);
+        });
+
+        test('should include reason in log when provided', async () => {
+            const messages = [{ role: 'user', content: 'Hello' }];
+            const mockResponse = 'Generated response';
+            const testReason = 'testing purposes';
+
+            // @ts-ignore
+            mockChatCompletionsCreate.mockResolvedValue({
+                choices: [
+                    {
+                        message: {
+                            content: mockResponse
+                        }
+                    }
+                ],
+                usage: {
+                    prompt_tokens: 10,
+                    completion_tokens: 20
+                }
+            });
+            process.env.OPENAI_API_KEY = 'test-key';
+
+            await openAiUtils.createCompletion(messages, { reason: testReason });
+
+            // Logs should include the reason
+            expect(mockLogger.info).toHaveBeenCalledWith(
+                '%s (%ss, %d→%d tokens)%s',
+                'gpt-5.2',
+                expect.any(String),
+                10,
+                20,
+                ` - ${testReason}`
+            );
         });
 
         test('should use reasoning_effort for reasoning models', async () => {
