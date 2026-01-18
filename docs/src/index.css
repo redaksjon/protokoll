@@ -586,6 +586,11 @@ section {
     color: var(--color-success);
 }
 
+.terminal-ai {
+    color: #8b7dd8;
+    font-style: italic;
+}
+
 /* Interactive Features */
 .interactive-features {
     display: flex;
