@@ -127,7 +127,8 @@ export interface HierarchicalContextResult {
  */
 export interface SmartAssistanceConfig {
   enabled: boolean;
-  assistModel: string;
+  phoneticModel: string;          // Fast model for phonetic variants (e.g., gpt-5-nano)
+  analysisModel: string;          // More capable model for content analysis (e.g., gpt-5-mini)
   soundsLikeOnAdd: boolean;       // Generate phonetic variants for project name
   triggerPhrasesOnAdd: boolean;   // Generate content-matching phrases
   promptForSource: boolean;

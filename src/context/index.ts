@@ -24,7 +24,8 @@ import {
 import * as Storage from './storage';
 import * as Discovery from './discovery';
 import {
-    DEFAULT_ASSIST_MODEL,
+    DEFAULT_PHONETIC_MODEL,
+    DEFAULT_ANALYSIS_MODEL,
     DEFAULT_SMART_ASSISTANCE,
     DEFAULT_SOUNDS_LIKE_ON_ADD,
     DEFAULT_TRIGGER_PHRASES_ON_ADD,
@@ -88,7 +89,8 @@ const getSmartAssistanceConfig = (config: Record<string, unknown>): SmartAssista
   
     return {
         enabled: smartConfig?.enabled ?? DEFAULT_SMART_ASSISTANCE,
-        assistModel: smartConfig?.assistModel ?? DEFAULT_ASSIST_MODEL,
+        phoneticModel: smartConfig?.phoneticModel ?? DEFAULT_PHONETIC_MODEL,
+        analysisModel: smartConfig?.analysisModel ?? DEFAULT_ANALYSIS_MODEL,
         soundsLikeOnAdd: smartConfig?.soundsLikeOnAdd ?? DEFAULT_SOUNDS_LIKE_ON_ADD,
         triggerPhrasesOnAdd: smartConfig?.triggerPhrasesOnAdd ?? DEFAULT_TRIGGER_PHRASES_ON_ADD,
         promptForSource: smartConfig?.promptForSource ?? DEFAULT_PROMPT_FOR_SOURCE,

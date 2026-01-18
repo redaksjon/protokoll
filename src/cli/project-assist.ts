@@ -72,8 +72,10 @@ Example for "Grunnverk": ground work,grundverk,grunnwerk,grunverk,groon verk`;
             const response = await OpenAI.createCompletion(
                 [{ role: 'user', content: prompt }],
                 { 
-                    model: 'gpt-5-mini',
-                    reasoningLevel: 'none',
+                    model: config.phoneticModel,
+                    reasoningLevel: 'low',
+                    maxTokens: 4000,
+                    reason: `phonetic variants for "${name}"`,
                 }
             );
 
@@ -126,8 +128,10 @@ Example for "Quarterly Planning": quarterly planning,quarterly planning meeting,
             const response = await OpenAI.createCompletion(
                 [{ role: 'user', content: prompt }],
                 { 
-                    model: 'gpt-5-mini',
-                    reasoningLevel: 'none',
+                    model: config.analysisModel,
+                    reasoningLevel: 'low',
+                    maxTokens: 4000,
+                    reason: `trigger phrases for "${name}"`,
                 }
             );
 
@@ -171,7 +175,8 @@ Example for "Quarterly Planning": quarterly planning,quarterly planning meeting,
         }
 
         const content = fetchResult.content;
-        logger.debug('Analyzing content (%d chars) from %s', content.length, fetchResult.sourceName);
+        logger.info('Fetched %d chars from %s', content.length, fetchResult.sourceName);
+        logger.debug('Analyzing content with AI...');
 
         const nameInstruction = existingName 
             ? `The project name is already known: "${existingName}". Set "name" to null in your response.`
@@ -201,8 +206,10 @@ Respond ONLY with valid JSON in this exact format:
             const response = await OpenAI.createCompletion(
                 [{ role: 'user', content: prompt }],
                 { 
-                    model: 'gpt-5-mini',
-                    reasoningLevel: 'none',
+                    model: config.analysisModel,
+                    reasoningLevel: 'low',
+                    maxTokens: 3000,
+                    reason: 'content analysis',
                 }
             );
 
@@ -221,6 +228,7 @@ Respond ONLY with valid JSON in this exact format:
             
             if (projectName) {
                 // Generate in parallel for efficiency
+                logger.debug('Generating phonetic and trigger phrases for: %s', projectName);
                 [soundsLike, triggerPhrases] = await Promise.all([
                     generateSoundsLike(projectName),
                     generateTriggerPhrases(projectName),
@@ -240,6 +248,7 @@ Respond ONLY with valid JSON in this exact format:
             
             // Return partial result with sounds_like and trigger phrases if we have a name
             if (existingName) {
+                logger.debug('Generating phonetic and trigger phrases for existing name: %s', existingName);
                 const [soundsLike, triggerPhrases] = await Promise.all([
                     generateSoundsLike(existingName),
                     generateTriggerPhrases(existingName),
