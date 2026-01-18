@@ -1910,7 +1910,7 @@ async function main() {
 }
 
 // Only run main when this is the entry point, not when imported for testing
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
     main().catch((error) => {
         // eslint-disable-next-line no-console
         console.error(error);

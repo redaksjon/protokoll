@@ -21,6 +21,11 @@ vi.mock('@modelcontextprotocol/sdk/types.js', () => ({
     ListToolsRequestSchema: {},
 }));
 
+// Mock OpenAI to prevent API calls during tests
+vi.mock('../../src/util/openai', () => ({
+    createCompletion: vi.fn().mockResolvedValue('test variant 1,test variant 2,test phrase'),
+}));
+
 import {
     fileExists,
     getAudioMetadata,
