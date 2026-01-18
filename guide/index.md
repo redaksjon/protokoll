@@ -189,6 +189,8 @@ If you're an AI helping someone use Protokoll:
 3. **Interactive Learning**: Asks questions, remembers answers
 4. **Self-Reflection**: Reports on tool effectiveness (enabled by default)
 5. **Full Preservation**: Not a summarizer - keeps all content
+6. **Smart Projects**: AI-assisted project configuration with phonetic variants
+7. **Proactive Phonetic**: Integration with Observasjon for improved transcription accuracy
 
 ## Current Defaults
 
@@ -199,5 +201,45 @@ If you're an AI helping someone use Protokoll:
 | Transcription Model | `whisper-1` |
 | Self-Reflection | `true` (enabled) |
 | Interactive Mode | `true` (enabled, use `--batch` to disable) |
+| Smart Projects | `true` (enabled) |
 | Output Structure | `month` |
+
+## Integration with Observasjon
+
+Protokoll's project data is automatically used by [Observasjon](https://github.com/redaksjon/observasjon) to improve transcription accuracy through **Proactive Phonetic Enhancement**:
+
+### How It Works
+
+1. **You define projects in Protokoll** with names and phonetic variations:
+   ```bash
+   protokoll project add
+   # Name: "Observasjon"
+   # Sounds like: "observation", "observashun"
+   ```
+
+2. **Observasjon automatically detects your projects** from `~/.protokoll/context/projects/`
+
+3. **Project names are sent during transcription** (not after) so Whisper gets them right from the start
+
+4. **Results**: "Observasjon" transcribed correctly instead of "observation"
+
+### Benefits
+
+- **Better accuracy**: Project names spelled correctly in initial transcription
+- **Lower cost**: Fix names during transcription, not in post-processing
+- **No configuration**: Works automatically if you use both tools
+
+### Smart Projects Feature
+
+The Smart Projects feature (enabled by default) helps you configure projects with AI assistance:
+
+```bash
+protokoll project add
+# AI automatically suggests:
+# - Phonetic variations for the project name
+# - Classification signals (trigger phrases)
+# - Common mishearings to watch for
+```
+
+This makes it easy to set up proactive phonetic enhancement without manually thinking through all the ways Whisper might mishear your project names.
 
