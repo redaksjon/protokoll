@@ -125,15 +125,20 @@ const getEntityBriefDetails = (entity: Entity): string => {
     } else if (entity.type === 'project') {
         const project = entity as Project;
         const details = [];
+        
         if (project.active === false) {
             details.push('INACTIVE');
         }
-        if (project.routing?.destination) {
-            // Show just the last part of the path if it's long
+        
+        // Show description first if available, otherwise show destination
+        if (project.description) {
+            details.push(truncate(project.description, 40));
+        } else if (project.routing?.destination) {
+            // Only show destination if no description
             const dest = project.routing.destination;
-            const truncated = dest.length > 35 ? '...' + dest.substring(dest.length - 32) : dest;
-            details.push(`→ ${truncated}`);
+            details.push(`→ ${truncate(dest, 35)}`);
         }
+        
         return details.join(' ');
     } else if (entity.type === 'term') {
         const term = entity as Term;
