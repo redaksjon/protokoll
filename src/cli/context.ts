@@ -8,11 +8,52 @@
 import { Command } from 'commander';
 import * as readline from 'readline';
 import * as yaml from 'js-yaml';
+import Table from 'cli-table3';
 import * as Context from '../context';
 import { Entity, Person, Project, Company, Term, IgnoredTerm, EntityType } from '../context/types';
+import * as ProjectAssist from './project-assist';
+import * as ContentFetcher from './content-fetcher';
+
+// Options for adding a project
+interface AddProjectOptions {
+    source?: string;           // URL or file path
+    name?: string;             // Pre-specified name
+    id?: string;               // Pre-specified ID
+    context?: 'work' | 'personal' | 'mixed';
+    destination?: string;      // Output path
+    structure?: 'none' | 'year' | 'month' | 'day';
+    smart?: boolean;           // Override config to enable
+    noSmart?: boolean;         // Override config to disable (Commander uses this naming)
+}
 
 // Helper to print to stdout
 const print = (text: string) => process.stdout.write(text + '\n');
+
+/**
+ * Calculate a project ID from a name
+ */
+const calculateId = (name: string): string => {
+    return name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '');
+};
+
+/**
+ * Determine if smart assistance should be used
+ */
+const shouldUseSmartAssistance = (
+    context: Context.ContextInstance,
+    options: AddProjectOptions
+): boolean => {
+    // Explicit flag takes precedence
+    if (options.smart === true) return true;
+    if (options.noSmart === true) return false;
+    
+    // Fall back to config
+    const config = context.getSmartAssistanceConfig();
+    return config.enabled;
+};
 
 // Helper for interactive prompts
 const askQuestion = (rl: readline.Interface, question: string): Promise<string> => {
@@ -64,6 +105,53 @@ const formatEntity = (entity: Entity, verbose = false): string => {
 };
 
 /**
+ * Truncate a string to a maximum length, adding ellipsis if needed
+ */
+const truncate = (str: string, maxLength: number): string => {
+    if (str.length <= maxLength) return str;
+    return str.substring(0, maxLength - 3) + '...';
+};
+
+/**
+ * Get brief details for an entity (compact for table display)
+ */
+const getEntityBriefDetails = (entity: Entity): string => {
+    if (entity.type === 'person') {
+        const person = entity as Person;
+        const details = [];
+        if (person.role) details.push(person.role);
+        if (person.company) details.push(`@${person.company}`);
+        return details.join(' · ');
+    } else if (entity.type === 'project') {
+        const project = entity as Project;
+        const details = [];
+        if (project.active === false) {
+            details.push('INACTIVE');
+        }
+        if (project.routing?.destination) {
+            // Show just the last part of the path if it's long
+            const dest = project.routing.destination;
+            const truncated = dest.length > 35 ? '...' + dest.substring(dest.length - 32) : dest;
+            details.push(`→ ${truncated}`);
+        }
+        return details.join(' ');
+    } else if (entity.type === 'term') {
+        const term = entity as Term;
+        return term.expansion ? truncate(term.expansion, 50) : '';
+    } else if (entity.type === 'company') {
+        const company = entity as Company;
+        return company.industry || '';
+    } else if (entity.type === 'ignored') {
+        const ignored = entity as IgnoredTerm;
+        if (ignored.ignoredAt) {
+            const date = new Date(ignored.ignoredAt).toLocaleDateString();
+            return date;
+        }
+    }
+    return '';
+};
+
+/**
  * List entities of a given type
  */
 const listEntities = async (
@@ -91,15 +179,199 @@ const listEntities = async (
     
     print(`\n${type.charAt(0).toUpperCase() + type.slice(1)}s (${entities.length}):\n`);
     
-    for (const entity of entities.sort((a, b) => a.name.localeCompare(b.name))) {
-        if (options.verbose) {
+    if (options.verbose) {
+        // Verbose mode: keep the old format
+        for (const entity of entities.sort((a, b) => a.name.localeCompare(b.name))) {
             print('─'.repeat(60));
             print(formatEntity(entity, true));
-        } else {
-            print(`  ${formatEntity(entity)}`);
         }
+    } else {
+        // Table mode with row numbers - compact display
+        const table = new Table({
+            head: ['#', 'ID', 'Name', 'Info'],
+            colWidths: [5, 25, 25, 45],
+            style: {
+                head: ['cyan', 'bold']
+            },
+            wordWrap: true
+        });
+        
+        const sortedEntities = entities.sort((a, b) => a.name.localeCompare(b.name));
+        sortedEntities.forEach((entity, index) => {
+            table.push([
+                (index + 1).toString(),
+                entity.id,
+                entity.name,
+                getEntityBriefDetails(entity)
+            ]);
+        });
+        
+        print(table.toString());
+        print('');
+        print(`Use "${type} show <id>" or "${type} show <#>" to see full details for any entry.`);
     }
     print('');
+};
+
+/**
+ * Format a value for display in the details table
+ */
+const formatValue = (value: unknown, indent = 0): string => {
+    const indentStr = '  '.repeat(indent);
+    
+    if (value === null || value === undefined) {
+        return '';
+    }
+    
+    if (typeof value === 'boolean') {
+        return value ? 'true' : 'false';
+    }
+    
+    if (typeof value === 'string') {
+        return value;
+    }
+    
+    if (Array.isArray(value)) {
+        if (value.length === 0) return '';
+        return value.map(item => `${indentStr}• ${item}`).join('\n');
+    }
+    
+    if (typeof value === 'object') {
+        const lines: string[] = [];
+        for (const [key, val] of Object.entries(value)) {
+            const formattedKey = key.replace(/_/g, ' ');
+            if (typeof val === 'object' && !Array.isArray(val)) {
+                lines.push(`${indentStr}${formattedKey}:`);
+                lines.push(formatValue(val, indent + 1));
+            } else {
+                const formattedVal = formatValue(val, indent + 1);
+                if (formattedVal) {
+                    lines.push(`${indentStr}${formattedKey}: ${formattedVal}`);
+                }
+            }
+        }
+        return lines.join('\n');
+    }
+    
+    return String(value);
+};
+
+/**
+ * Display entity details in a formatted table
+ */
+const displayEntityDetails = (entity: Entity, filePath?: string): void => {
+    const table = new Table({
+        colWidths: [25, 75],
+        wordWrap: true,
+        style: {
+            head: []
+        }
+    });
+    
+    // Build rows based on entity type and available fields
+    const rows: [string, string][] = [];
+    
+    // Common fields
+    rows.push(['ID', entity.id]);
+    rows.push(['Name', entity.name]);
+    rows.push(['Type', entity.type]);
+    
+    // Type-specific fields
+    if (entity.type === 'person') {
+        const person = entity as Person;
+        if (person.firstName) rows.push(['First Name', person.firstName]);
+        if (person.lastName) rows.push(['Last Name', person.lastName]);
+        if (person.company) rows.push(['Company', person.company]);
+        if (person.role) rows.push(['Role', person.role]);
+        if (person.sounds_like && person.sounds_like.length > 0) {
+            rows.push(['Sounds Like', formatValue(person.sounds_like)]);
+        }
+        if (person.context) rows.push(['Context', person.context]);
+    } else if (entity.type === 'project') {
+        const project = entity as Project;
+        if (project.description) rows.push(['Description', project.description]);
+        
+        if (project.classification) {
+            rows.push(['Context Type', project.classification.context_type || '']);
+            if (project.classification.explicit_phrases && project.classification.explicit_phrases.length > 0) {
+                rows.push(['Trigger Phrases', formatValue(project.classification.explicit_phrases)]);
+            }
+            if (project.classification.topics && project.classification.topics.length > 0) {
+                rows.push(['Topics', formatValue(project.classification.topics)]);
+            }
+        }
+        
+        if (project.routing) {
+            if (project.routing.destination) {
+                rows.push(['Destination', project.routing.destination]);
+            }
+            rows.push(['Directory Structure', project.routing.structure || 'month']);
+            if (project.routing.filename_options && project.routing.filename_options.length > 0) {
+                rows.push(['Filename Options', formatValue(project.routing.filename_options)]);
+            }
+        }
+        
+        if (project.sounds_like && project.sounds_like.length > 0) {
+            rows.push(['Sounds Like', formatValue(project.sounds_like)]);
+        }
+        
+        rows.push(['Active', project.active !== false ? 'true' : 'false']);
+        
+        if (project.notes) rows.push(['Notes', project.notes]);
+    } else if (entity.type === 'term') {
+        const term = entity as Term;
+        if (term.expansion) rows.push(['Expansion', term.expansion]);
+        if (term.domain) rows.push(['Domain', term.domain]);
+        if (term.sounds_like && term.sounds_like.length > 0) {
+            rows.push(['Sounds Like', formatValue(term.sounds_like)]);
+        }
+        if (term.projects && term.projects.length > 0) {
+            rows.push(['Projects', formatValue(term.projects)]);
+        }
+    } else if (entity.type === 'company') {
+        const company = entity as Company;
+        if (company.fullName) rows.push(['Full Name', company.fullName]);
+        if (company.industry) rows.push(['Industry', company.industry]);
+        if (company.sounds_like && company.sounds_like.length > 0) {
+            rows.push(['Sounds Like', formatValue(company.sounds_like)]);
+        }
+    } else if (entity.type === 'ignored') {
+        const ignored = entity as IgnoredTerm;
+        if (ignored.ignoredAt) {
+            rows.push(['Ignored At', new Date(ignored.ignoredAt).toLocaleString()]);
+        }
+        if (ignored.reason) rows.push(['Reason', ignored.reason]);
+    }
+    
+    // Add all rows to table
+    rows.forEach(([field, value]) => {
+        table.push([field, value]);
+    });
+    
+    print(`\n${entity.type.charAt(0).toUpperCase() + entity.type.slice(1)}: ${entity.name}\n`);
+    print(table.toString());
+    
+    if (filePath) {
+        print(`\nFile: ${filePath}`);
+    }
+    print('');
+};
+
+/**
+ * Get all entities of a given type (helper for row number lookup)
+ */
+const getAllEntities = (context: Context.ContextInstance, type: EntityType): Entity[] => {
+    if (type === 'person') {
+        return context.getAllPeople();
+    } else if (type === 'project') {
+        return context.getAllProjects();
+    } else if (type === 'company') {
+        return context.getAllCompanies();
+    } else if (type === 'ignored') {
+        return context.getAllIgnored();
+    } else {
+        return context.getAllTerms();
+    }
 };
 
 /**
@@ -108,33 +380,43 @@ const listEntities = async (
 const showEntity = async (
     context: Context.ContextInstance,
     type: EntityType,
-    id: string
+    idOrNumber: string
 ) => {
     let entity: Entity | undefined;
-    if (type === 'person') {
-        entity = context.getPerson(id);
-    } else if (type === 'project') {
-        entity = context.getProject(id);
-    } else if (type === 'company') {
-        entity = context.getCompany(id);
-    } else if (type === 'ignored') {
-        entity = context.getIgnored(id);
+    
+    // Check if input is a number (row number from list)
+    const rowNumber = parseInt(idOrNumber, 10);
+    if (!isNaN(rowNumber) && rowNumber > 0) {
+        // Get sorted list (same order as list command)
+        const entities = getAllEntities(context, type);
+        const sortedEntities = entities.sort((a, b) => a.name.localeCompare(b.name));
+        
+        // Get entity at row number (1-indexed)
+        if (rowNumber <= sortedEntities.length) {
+            entity = sortedEntities[rowNumber - 1];
+        }
     } else {
-        entity = context.getTerm(id);
+        // Lookup by ID
+        if (type === 'person') {
+            entity = context.getPerson(idOrNumber);
+        } else if (type === 'project') {
+            entity = context.getProject(idOrNumber);
+        } else if (type === 'company') {
+            entity = context.getCompany(idOrNumber);
+        } else if (type === 'ignored') {
+            entity = context.getIgnored(idOrNumber);
+        } else {
+            entity = context.getTerm(idOrNumber);
+        }
     }
     
     if (!entity) {
-        print(`Error: ${type} "${id}" not found.`);
+        print(`Error: ${type} "${idOrNumber}" not found.`);
         process.exit(1);
     }
     
-    print(`\n${type.charAt(0).toUpperCase() + type.slice(1)}: ${entity.name}\n`);
-    print(yaml.dump(entity, { lineWidth: -1 }));
-    
     const filePath = context.getEntityFilePath(entity);
-    if (filePath) {
-        print(`File: ${filePath}`);
-    }
+    displayEntityDetails(entity, filePath);
 };
 
 /**
@@ -189,64 +471,300 @@ const addPerson = async (context: Context.ContextInstance): Promise<void> => {
 };
 
 /**
- * Interactive prompts for adding a project
+ * Interactive prompts for adding a project with optional smart assistance
  */
-const addProject = async (context: Context.ContextInstance): Promise<void> => {
+const addProject = async (
+    context: Context.ContextInstance,
+    options: AddProjectOptions = {}
+): Promise<void> => {
     const rl = createReadline();
+    const smartConfig = context.getSmartAssistanceConfig();
+    const useSmartAssist = shouldUseSmartAssistance(context, options);
     
+    // Initialize assist modules if smart assistance is enabled
+    const assist = useSmartAssist ? ProjectAssist.create(smartConfig) : null;
+    const fetcher = useSmartAssist ? ContentFetcher.create() : null;
+
     try {
         print('\n[Add New Project]\n');
         
-        const name = await askQuestion(rl, 'Project name: ');
+        // ===== PHASE 1: Basic Info =====
+        
+        // Get project name
+        let name = options.name;
+        let suggestedName: string | undefined;
+        let suggestions: ProjectAssist.ProjectSuggestions | undefined;
+        
+        // If source provided and no name, try to get suggestions first
+        if (options.source && !name && assist && fetcher) {
+            print('[Fetching content from source...]');
+            const fetchResult = await fetcher.fetch(options.source);
+            
+            if (fetchResult.success && fetchResult.content) {
+                print(`Found: ${fetchResult.sourceType} - ${fetchResult.sourceName}\n`);
+                
+                print('[Analyzing content...]');
+                suggestions = await assist.analyzeContent(fetchResult.content);
+                
+                if (suggestions.name) {
+                    suggestedName = suggestions.name;
+                }
+            } else {
+                print(`Warning: Could not fetch content: ${fetchResult.error}\n`);
+            }
+        }
+        
         if (!name) {
-            print('Name is required. Aborting.');
+            const namePrompt = suggestedName 
+                ? `Project name (Enter for "${suggestedName}"): `
+                : 'Project name: ';
+            
+            name = await askQuestion(rl, namePrompt);
+            if (!name && suggestedName) {
+                name = suggestedName;
+            }
+            if (!name) {
+                print('Name is required. Aborting.');
+                return;
+            }
+        }
+        
+        // Get/calculate ID
+        const suggestedId = calculateId(name);
+        let id = options.id;
+        
+        if (!id) {
+            print(`  (ID is used for the filename, e.g., "${suggestedId}.yaml")`);
+            const idInput = await askQuestion(rl, `ID (Enter for "${suggestedId}"): `);
+            id = idInput || suggestedId;
+        }
+        
+        // Check for existing project
+        if (context.getProject(id)) {
+            print(`Error: Project with ID "${id}" already exists.`);
             return;
         }
         
-        const suggestedId = name.toLowerCase().replace(/\s+/g, '-');
-        print(`  (ID is used for the filename to store project info, e.g., "${suggestedId}.yaml")`);
-        const id = await askQuestion(rl, `ID (Enter for "${suggestedId}"): `);
-        const finalId = id || suggestedId;
+        // ===== PHASE 2: Routing Config =====
         
-        if (context.getProject(finalId)) {
-            print(`Error: Project with ID "${finalId}" already exists.`);
-            return;
-        }
-        
-        // Get default output directory from config (if available)
         const config = context.getConfig();
         const defaultOutputDir = (config.outputDirectory as string) || '(configured default)';
-        print(`  (Leave blank to use the configured default: ${defaultOutputDir})`);
-        const destination = await askQuestion(rl, 'Output destination path (Enter for default): ');
         
-        // Structure examples
-        print('  Examples:');
-        print('    none:  output/transcript.md');
-        print('    year:  output/2025/transcript.md');
-        print('    month: output/2025/01/transcript.md');
-        print('    day:   output/2025/01/15/transcript.md');
-        const structure = await askQuestion(rl, 'Directory structure (none/year/month/day, Enter for month): ');
+        let destination = options.destination;
+        if (!destination) {
+            print(`\n  (Leave blank to use the configured default: ${defaultOutputDir})`);
+            destination = await askQuestion(rl, 'Output destination path (Enter for default): ');
+        }
         
-        const contextType = await askQuestion(rl, 'Context type (work/personal/mixed, Enter for work): ');
-        const phrasesStr = await askQuestion(rl, 'Trigger phrases (comma-separated): ');
-        const topicsStr = await askQuestion(rl, 'Topic keywords (comma-separated, Enter to skip): ');
-        const description = await askQuestion(rl, 'Description (Enter to skip): ');
+        let structure = options.structure;
+        if (!structure) {
+            print('  Examples:');
+            print('    none:  output/transcript.md');
+            print('    year:  output/2025/transcript.md');
+            print('    month: output/2025/01/transcript.md');
+            print('    day:   output/2025/01/15/transcript.md');
+            const structureInput = await askQuestion(rl, 'Directory structure (none/year/month/day, Enter for month): ');
+            structure = (structureInput || 'month') as 'none' | 'year' | 'month' | 'day';
+        }
+        
+        let contextType = options.context;
+        if (!contextType) {
+            print('\n  Context type:');
+            print('    work:     Professional/business content');
+            print('    personal: Personal notes and ideas');
+            print('    mixed:    Contains both work and personal content');
+            const contextInput = await askQuestion(rl, 'Context type (work/personal/mixed, Enter for work): ');
+            contextType = (contextInput || 'work') as 'work' | 'personal' | 'mixed';
+        }
+        
+        // ===== PHASE 3: Smart Assistance Fields =====
+        
+        let soundsLike: string[] = [];
+        let triggerPhrases: string[] = [];
+        let topics: string[] = [];
+        let description: string | undefined;
+        
+        if (useSmartAssist && assist) {
+            // Generate sounds_like (phonetic variants of the project NAME)
+            print('\n[Generating phonetic variants...]');
+            
+            if (suggestions?.soundsLike?.length) {
+                soundsLike = suggestions.soundsLike;
+            } else {
+                soundsLike = await assist.generateSoundsLike(name);
+            }
+            
+            if (soundsLike.length > 0) {
+                const soundsPreview = soundsLike.slice(0, 6).join(',');
+                const moreCount = soundsLike.length - 6;
+                const preview = moreCount > 0 ? `${soundsPreview},...(+${moreCount} more)` : soundsPreview;
+                
+                print('  (Phonetic variants help when Whisper mishears the project name)');
+                const soundsInput = await askQuestion(rl, `Sounds like (Enter for suggested, or edit):\n  ${preview}\n> `);
+                
+                if (soundsInput.trim()) {
+                    soundsLike = soundsInput.split(',').map(s => s.trim()).filter(s => s.length > 0);
+                }
+            } else {
+                print('  (Phonetic variants help when Whisper mishears the project name)');
+                const soundsInput = await askQuestion(rl, 'Sounds like (comma-separated, Enter to skip): ');
+                if (soundsInput.trim()) {
+                    soundsLike = soundsInput.split(',').map(s => s.trim()).filter(s => s.length > 0);
+                }
+            }
+            
+            // Generate trigger phrases (content-matching phrases)
+            print('\n[Generating trigger phrases...]');
+            
+            if (suggestions?.triggerPhrases?.length) {
+                triggerPhrases = suggestions.triggerPhrases;
+            } else {
+                triggerPhrases = await assist.generateTriggerPhrases(name);
+            }
+            
+            if (triggerPhrases.length > 0) {
+                const phrasesPreview = triggerPhrases.slice(0, 8).join(',');
+                const moreCount = triggerPhrases.length - 8;
+                const preview = moreCount > 0 ? `${phrasesPreview},...(+${moreCount} more)` : phrasesPreview;
+                
+                print('  (Trigger phrases indicate content belongs to this project)');
+                const phrasesInput = await askQuestion(rl, `Trigger phrases (Enter for suggested, or edit):\n  ${preview}\n> `);
+                
+                if (phrasesInput.trim()) {
+                    triggerPhrases = phrasesInput.split(',').map(s => s.trim()).filter(s => s.length > 0);
+                }
+            } else {
+                print('  (Trigger phrases indicate content belongs to this project)');
+                const phrasesInput = await askQuestion(rl, 'Trigger phrases (comma-separated): ');
+                if (phrasesInput.trim()) {
+                    triggerPhrases = phrasesInput.split(',').map(s => s.trim()).filter(s => s.length > 0);
+                }
+            }
+            
+            // Handle topics and description
+            if (suggestions?.topics?.length || suggestions?.description) {
+                // We have suggestions from content analysis
+                if (suggestions.topics?.length) {
+                    const topicsPreview = suggestions.topics.slice(0, 10).join(',');
+                    const moreCount = suggestions.topics.length - 10;
+                    const preview = moreCount > 0 ? `${topicsPreview},...(+${moreCount} more)` : topicsPreview;
+                    
+                    const topicsInput = await askQuestion(rl, `\nTopic keywords (Enter for suggested, or edit):\n  ${preview}\n> `);
+                    
+                    if (topicsInput.trim()) {
+                        topics = topicsInput.split(',').map(s => s.trim()).filter(s => s.length > 0);
+                    } else {
+                        topics = suggestions.topics;
+                    }
+                }
+                
+                if (suggestions.description) {
+                    const descPreview = suggestions.description.length > 200 
+                        ? suggestions.description.substring(0, 200) + '...'
+                        : suggestions.description;
+                    
+                    const descInput = await askQuestion(rl, `\nDescription (Enter for suggested, or edit):\n  ${descPreview}\n> `);
+                    
+                    if (descInput.trim()) {
+                        description = descInput;
+                    } else {
+                        description = suggestions.description;
+                    }
+                }
+            } else if (!options.source && smartConfig.promptForSource) {
+                // No source provided yet, ask if user wants to provide one
+                print('\nWould you like to provide a URL or file path for auto-generating');
+                const sourceInput = await askQuestion(rl, 'keywords and description? (Enter path, or press Enter to skip): ');
+                
+                if (sourceInput.trim() && fetcher) {
+                    print('[Fetching content...]');
+                    const fetchResult = await fetcher.fetch(sourceInput.trim());
+                    
+                    if (fetchResult.success && fetchResult.content) {
+                        print(`Found: ${fetchResult.sourceType} - ${fetchResult.sourceName}`);
+                        print('[Analyzing content...]');
+                        
+                        const contentSuggestions = await assist.analyzeContent(fetchResult.content, name);
+                        
+                        if (contentSuggestions.topics?.length) {
+                            const topicsPreview = contentSuggestions.topics.slice(0, 10).join(',');
+                            const topicsInput = await askQuestion(rl, `\nTopic keywords (Enter for suggested, or edit):\n  ${topicsPreview}\n> `);
+                            
+                            topics = topicsInput.trim() 
+                                ? topicsInput.split(',').map(s => s.trim()).filter(s => s.length > 0)
+                                : contentSuggestions.topics;
+                        }
+                        
+                        if (contentSuggestions.description) {
+                            const descPreview = contentSuggestions.description.length > 200 
+                                ? contentSuggestions.description.substring(0, 200) + '...'
+                                : contentSuggestions.description;
+                            const descInput = await askQuestion(rl, `\nDescription (Enter for suggested, or edit):\n  ${descPreview}\n> `);
+                            
+                            description = descInput.trim() || contentSuggestions.description;
+                        }
+                    } else {
+                        print(`Warning: Could not fetch content: ${fetchResult.error}`);
+                    }
+                }
+                
+                // Fall back to manual entry if no source or fetch failed
+                if (!topics.length) {
+                    const topicsInput = await askQuestion(rl, '\nTopic keywords (comma-separated, Enter to skip): ');
+                    if (topicsInput.trim()) {
+                        topics = topicsInput.split(',').map(s => s.trim()).filter(s => s.length > 0);
+                    }
+                }
+                
+                if (!description) {
+                    const descInput = await askQuestion(rl, 'Description (Enter to skip): ');
+                    if (descInput.trim()) {
+                        description = descInput.trim();
+                    }
+                }
+            }
+        } else {
+            // Smart assistance disabled - manual entry only
+            print('\n  (Phonetic variants help when Whisper mishears the project name)');
+            const soundsStr = await askQuestion(rl, 'Sounds like (comma-separated, Enter to skip): ');
+            if (soundsStr.trim()) {
+                soundsLike = soundsStr.split(',').map(s => s.trim()).filter(s => s.length > 0);
+            }
+            
+            print('\n  (Trigger phrases indicate content belongs to this project)');
+            const phrasesStr = await askQuestion(rl, 'Trigger phrases (comma-separated): ');
+            if (phrasesStr.trim()) {
+                triggerPhrases = phrasesStr.split(',').map(s => s.trim()).filter(s => s.length > 0);
+            }
+            
+            const topicsStr = await askQuestion(rl, '\nTopic keywords (comma-separated, Enter to skip): ');
+            if (topicsStr.trim()) {
+                topics = topicsStr.split(',').map(s => s.trim()).filter(s => s.length > 0);
+            }
+            
+            const descInput = await askQuestion(rl, 'Description (Enter to skip): ');
+            if (descInput.trim()) {
+                description = descInput.trim();
+            }
+        }
+        
+        // ===== PHASE 4: Create Project =====
         
         const project: Project = {
-            id: finalId,
+            id,
             name,
             type: 'project',
             classification: {
-                context_type: (contextType || 'work') as 'work' | 'personal' | 'mixed',
-                explicit_phrases: phrasesStr ? phrasesStr.split(',').map(s => s.trim()) : [],
-                ...(topicsStr && { topics: topicsStr.split(',').map(s => s.trim()) }),
+                context_type: contextType,
+                explicit_phrases: triggerPhrases,
+                ...(topics.length && { topics }),
             },
             routing: {
-                // Only include destination if explicitly provided - otherwise uses global default
                 ...(destination && { destination }),
-                structure: (structure || 'month') as 'none' | 'year' | 'month' | 'day',
+                structure: structure as 'none' | 'year' | 'month' | 'day',
                 filename_options: ['date', 'time', 'subject'],
             },
+            ...(soundsLike.length && { sounds_like: soundsLike }),
             ...(description && { description }),
             active: true,
         };
@@ -464,7 +982,7 @@ const createEntityCommand = (
     
     cmd
         .command('show <id>')
-        .description(`Show details of a ${type}`)
+        .description(`Show details of a ${type} (use ID or row number from list)`)
         .action(async (id) => {
             const context = await Context.create();
             await showEntity(context, type, id);
@@ -495,10 +1013,65 @@ const createEntityCommand = (
 };
 
 /**
+ * Create specialized project command with smart assistance options
+ */
+const createProjectCommand = (): Command => {
+    const cmd = new Command('project')
+        .description('Manage projects');
+    
+    cmd
+        .command('list')
+        .description('List all projects')
+        .option('-v, --verbose', 'Show full details')
+        .action(async (options) => {
+            const context = await Context.create();
+            await listEntities(context, 'project', options);
+        });
+    
+    cmd
+        .command('show <id>')
+        .description('Show details of a project (use ID or row number from list)')
+        .action(async (id) => {
+            const context = await Context.create();
+            await showEntity(context, 'project', id);
+        });
+    
+    cmd
+        .command('add [source]')
+        .description('Add a new project (optionally provide URL or file path for context)')
+        .option('--name <name>', 'Project name (skips name prompt)')
+        .option('--id <id>', 'Project ID (auto-calculated from name if not provided)')
+        .option('--context <type>', 'Context type: work, personal, or mixed')
+        .option('--destination <path>', 'Output destination path')
+        .option('--structure <type>', 'Directory structure: none, year, month, day')
+        .option('--smart', 'Enable smart assistance (override config)')
+        .option('--no-smart', 'Disable smart assistance (override config)')
+        .action(async (source, cmdOptions) => {
+            const context = await Context.create();
+            if (!context.hasContext()) {
+                print('Error: No .protokoll directory found. Run "protokoll --init-config" first.');
+                process.exit(1);
+            }
+            await addProject(context, { source, ...cmdOptions });
+        });
+    
+    cmd
+        .command('delete <id>')
+        .description('Delete a project')
+        .option('-f, --force', 'Skip confirmation')
+        .action(async (id, options) => {
+            const context = await Context.create();
+            await deleteEntity(context, 'project', id, options);
+        });
+    
+    return cmd;
+};
+
+/**
  * Register all context management subcommands
  */
 export const registerContextCommands = (program: Command): void => {
-    program.addCommand(createEntityCommand('project', 'projects', addProject));
+    program.addCommand(createProjectCommand());
     program.addCommand(createEntityCommand('person', 'people', addPerson));
     program.addCommand(createEntityCommand('term', 'terms', addTerm));
     program.addCommand(createEntityCommand('company', 'companies', addCompany));

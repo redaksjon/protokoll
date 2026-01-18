@@ -447,6 +447,141 @@ describe('Agentic Tools', () => {
             expect(result.data.message).toContain('ignore list');
         });
 
+        it('should find project by sounds_like phonetic variant', async () => {
+            // Mock findBySoundsLike to return a project
+            mockContext.contextInstance.findBySoundsLike = vi.fn((phonetic: string) => {
+                if (phonetic === 'protocol' || phonetic === 'pro to call') {
+                    return {
+                        id: 'protokoll',
+                        name: 'Protokoll',
+                        type: 'project',
+                        classification: { context_type: 'work' },
+                        routing: { destination: '~/work/protokoll', structure: 'month', filename_options: ['date'] },
+                        sounds_like: ['protocol', 'pro to call', 'proto call'],
+                    };
+                }
+                return undefined;
+            });
+      
+            const tool = LookupProject.create(mockContext);
+            const result = await tool.execute({ name: 'protocol' });
+      
+            expect(result.success).toBe(true);
+            expect(result.data.found).toBe(true);
+            expect(result.data.project.name).toBe('Protokoll');
+            expect(result.data.matchedVia).toBe('sounds_like');
+        });
+
+        it('should find Norwegian project by English phonetic transcription', async () => {
+            // Simulates Whisper transcribing Norwegian "Kronologi" as "chronology"
+            mockContext.contextInstance.findBySoundsLike = vi.fn((phonetic: string) => {
+                if (phonetic.toLowerCase() === 'chronology') {
+                    return {
+                        id: 'kronologi',
+                        name: 'Kronologi',
+                        type: 'project',
+                        classification: { context_type: 'work' },
+                        routing: { destination: '~/work/kronologi', structure: 'month', filename_options: ['date'] },
+                        sounds_like: ['chronology', 'crono logy', 'crow no logy'],
+                    };
+                }
+                return undefined;
+            });
+      
+            const tool = LookupProject.create(mockContext);
+            const result = await tool.execute({ name: 'chronology' });
+      
+            expect(result.success).toBe(true);
+            expect(result.data.found).toBe(true);
+            expect(result.data.project.name).toBe('Kronologi');
+            expect(result.data.matchedVia).toBe('sounds_like');
+        });
+
+        it('should prefer exact project match over sounds_like match', async () => {
+            // If there's an exact match in search, it should be used before sounds_like
+            mockContext.contextInstance.search = vi.fn((query: string) => {
+                if (query.toLowerCase() === 'exact-match') {
+                    return [{
+                        id: 'exact-match',
+                        name: 'Exact Match Project',
+                        type: 'project',
+                        classification: { context_type: 'work' },
+                        routing: { destination: '~/work', structure: 'month', filename_options: ['date'] },
+                    }];
+                }
+                return [];
+            });
+            mockContext.contextInstance.findBySoundsLike = vi.fn(() => ({
+                id: 'sounds-like-match',
+                name: 'Sounds Like Match',
+                type: 'project',
+                classification: { context_type: 'work' },
+                routing: { destination: '~/work', structure: 'month', filename_options: ['date'] },
+            }));
+      
+            const tool = LookupProject.create(mockContext);
+            const result = await tool.execute({ name: 'exact-match' });
+      
+            expect(result.success).toBe(true);
+            expect(result.data.found).toBe(true);
+            expect(result.data.project.name).toBe('Exact Match Project');
+            // findBySoundsLike should not be called when exact match is found
+        });
+
+        it('should fall back to sounds_like when no exact match found', async () => {
+            // No exact match in search
+            mockContext.contextInstance.search = vi.fn(() => []);
+            // But sounds_like finds it
+            mockContext.contextInstance.findBySoundsLike = vi.fn((phonetic: string) => {
+                if (phonetic === 'observashun') {
+                    return {
+                        id: 'observasjon',
+                        name: 'Observasjon',
+                        type: 'project',
+                        classification: { context_type: 'work' },
+                        routing: { destination: '~/work/obs', structure: 'month', filename_options: ['date'] },
+                        sounds_like: ['observation', 'observashun'],
+                    };
+                }
+                return undefined;
+            });
+      
+            const tool = LookupProject.create(mockContext);
+            const result = await tool.execute({ name: 'observashun' });
+      
+            expect(result.success).toBe(true);
+            expect(result.data.found).toBe(true);
+            expect(result.data.project.name).toBe('Observasjon');
+            expect(result.data.matchedVia).toBe('sounds_like');
+        });
+
+        it('should handle project sounds_like returning non-project entity gracefully', async () => {
+            // findBySoundsLike returns a term (not a project)
+            mockContext.contextInstance.search = vi.fn(() => []);
+            mockContext.contextInstance.findBySoundsLike = vi.fn(() => ({
+                id: 'some-term',
+                name: 'Some Term',
+                type: 'term',
+                projects: ['associated-project'],
+            }));
+            mockContext.contextInstance.getAllProjects = vi.fn(() => [{
+                id: 'associated-project',
+                name: 'Associated Project',
+                type: 'project',
+                classification: { context_type: 'work' },
+                routing: { destination: '~/work', structure: 'month', filename_options: ['date'] },
+            }]);
+      
+            const tool = LookupProject.create(mockContext);
+            const result = await tool.execute({ name: 'some term' });
+      
+            expect(result.success).toBe(true);
+            // Should find via term_sounds_like -> associated project
+            expect(result.data.found).toBe(true);
+            expect(result.data.matchedVia).toBe('term_sounds_like');
+            expect(result.data.project.name).toBe('Associated Project');
+        });
+
         it('should include transcript context in user prompt when term is found in transcript', async () => {
             mockContext.transcriptText = 'First sentence. The Alpha project is important. Third sentence.';
             mockContext.contextInstance.getAllProjects = vi.fn(() => []);

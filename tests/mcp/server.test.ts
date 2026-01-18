@@ -539,11 +539,94 @@ routing:
                 destination: '/tmp/classified',
                 explicit_phrases: ['classified', 'secret'],
                 topics: ['security'],
-                context_type: 'work',
+                contextType: 'work',
                 contextDirectory: protokollDir
             });
 
             expect(result.success).toBe(true);
+        });
+
+        it('should add project with sounds_like phonetic variants', async () => {
+            const result = await handleAddProject({
+                name: 'Protokoll',
+                destination: '/tmp/protokoll',
+                sounds_like: ['protocol', 'pro to call', 'proto call'],
+                contextDirectory: protokollDir
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.entity).toBeTruthy();
+            expect(result.entity.sounds_like).toBeDefined();
+            expect(result.entity.sounds_like).toContain('protocol');
+            expect(result.entity.sounds_like).toContain('pro to call');
+            expect(result.entity.sounds_like).toContain('proto call');
+            expect(result.message).toContain('added successfully');
+        });
+
+        it('should add project with sounds_like and explicit_phrases together', async () => {
+            const result = await handleAddProject({
+                name: 'Kronologi',
+                destination: '/tmp/kronologi',
+                explicit_phrases: ['work on kronologi', 'kronologi project'],
+                sounds_like: ['chronology', 'crono logy', 'crow no logy'],
+                topics: ['timeline', 'history'],
+                contextType: 'work',
+                contextDirectory: protokollDir
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.entity).toBeTruthy();
+            // Check explicit_phrases (in classification)
+            expect(result.entity.classification?.explicit_phrases).toContain('work on kronologi');
+            // Check sounds_like
+            expect(result.entity.sounds_like).toContain('chronology');
+            expect(result.entity.sounds_like).toContain('crono logy');
+            // Check topics
+            expect(result.entity.classification?.topics).toContain('timeline');
+        });
+
+        it('should add project with empty sounds_like array', async () => {
+            const result = await handleAddProject({
+                name: 'Empty Sounds Like',
+                destination: '/tmp/empty-sounds',
+                sounds_like: [],
+                contextDirectory: protokollDir
+            });
+
+            expect(result.success).toBe(true);
+            // Empty array is saved as-is (falsy check in handler means empty array is saved)
+            expect(result.entity.sounds_like).toEqual([]);
+        });
+
+        it('should add Norwegian project with sounds_like for English transcription', async () => {
+            const result = await handleAddProject({
+                name: 'Observasjon',
+                destination: '/tmp/observasjon',
+                explicit_phrases: ['observasjon note', 'observation project'],
+                sounds_like: ['observation', 'observe asian', 'obs er vah shun'],
+                contextType: 'work',
+                contextDirectory: protokollDir
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.entity.name).toBe('Observasjon');
+            expect(result.entity.sounds_like).toContain('observation');
+            expect(result.entity.sounds_like).toContain('observe asian');
+        });
+
+        it('should add project with custom id and sounds_like', async () => {
+            const result = await handleAddProject({
+                id: 'custom-norwegian-id',
+                name: 'Redaksjon',
+                destination: '/tmp/redaksjon',
+                sounds_like: ['redaction', 'red action', 'red ox on'],
+                contextDirectory: protokollDir
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.entity.id).toBe('custom-norwegian-id');
+            expect(result.entity.name).toBe('Redaksjon');
+            expect(result.entity.sounds_like).toContain('redaction');
         });
     });
 

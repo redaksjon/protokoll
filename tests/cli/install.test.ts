@@ -478,6 +478,71 @@ describe('CLI Install Command', () => {
             expect(projectWithOptionals.destination).toBe('~/notes/work');
         });
 
+        it('should support sounds_like field for phonetic variants', () => {
+            const projectWithSoundsLike = {
+                name: 'Protokoll',
+                id: 'protokoll',
+                contextType: 'work' as const,
+                structure: 'month' as const,
+                triggerPhrases: ['work on protokoll'],
+                sounds_like: ['protocol', 'pro to call', 'proto call'],
+            };
+            
+            expect(projectWithSoundsLike.sounds_like).toBeDefined();
+            expect(projectWithSoundsLike.sounds_like).toHaveLength(3);
+            expect(projectWithSoundsLike.sounds_like).toContain('protocol');
+        });
+
+        it('should support Norwegian project names with English sounds_like', () => {
+            const norwegianProjects = [
+                {
+                    name: 'Kronologi',
+                    id: 'kronologi',
+                    contextType: 'work' as const,
+                    structure: 'month' as const,
+                    triggerPhrases: ['kronologi project'],
+                    sounds_like: ['chronology', 'crono logy', 'crow no logy'],
+                },
+                {
+                    name: 'Observasjon',
+                    id: 'observasjon',
+                    contextType: 'work' as const,
+                    structure: 'month' as const,
+                    triggerPhrases: ['observasjon note'],
+                    sounds_like: ['observation', 'observe asian', 'obs er vah shun'],
+                },
+                {
+                    name: 'Redaksjon',
+                    id: 'redaksjon',
+                    contextType: 'work' as const,
+                    structure: 'month' as const,
+                    triggerPhrases: ['redaksjon work'],
+                    sounds_like: ['redaction', 'red action', 'red ox on'],
+                },
+            ];
+            
+            for (const project of norwegianProjects) {
+                expect(project.name).toBeDefined();
+                expect(project.sounds_like).toBeDefined();
+                expect(project.sounds_like.length).toBeGreaterThan(0);
+                // Sounds like should be English approximations
+                expect(project.sounds_like[0]).not.toBe(project.name.toLowerCase());
+            }
+        });
+
+        it('should allow project without sounds_like field', () => {
+            const projectWithoutSoundsLike = {
+                name: 'Simple Project',
+                id: 'simple-project',
+                contextType: 'work' as const,
+                structure: 'month' as const,
+                triggerPhrases: ['simple project'],
+            };
+            
+            expect(projectWithoutSoundsLike.name).toBeDefined();
+            expect('sounds_like' in projectWithoutSoundsLike).toBe(false);
+        });
+
         it('should have valid contextType values', () => {
             const validContextTypes = ['work', 'personal', 'mixed'];
             

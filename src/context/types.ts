@@ -57,6 +57,10 @@ export interface Project extends BaseEntity {
   // Routing configuration (uses Dreadcabinet structures)
   routing: ProjectRouting;
   
+  // Phonetic variants for when Whisper mishears the project name
+  // Useful for non-English names (Norwegian, etc.) that may be transcribed differently
+  sounds_like?: string[];
+  
   active?: boolean;
 }
 
@@ -115,5 +119,28 @@ export interface HierarchicalContextResult {
   config: Record<string, unknown>;
   discoveredDirs: DiscoveredContextDir[];
   contextDirs: string[];  // All context subdirectories to load
+}
+
+/**
+ * Smart Assistance Configuration
+ * Controls LLM-assisted project metadata generation
+ */
+export interface SmartAssistanceConfig {
+  enabled: boolean;
+  assistModel: string;
+  soundsLikeOnAdd: boolean;       // Generate phonetic variants for project name
+  triggerPhrasesOnAdd: boolean;   // Generate content-matching phrases
+  promptForSource: boolean;
+  timeout?: number;
+}
+
+/**
+ * Protokoll Configuration
+ * Top-level configuration structure
+ */
+export interface ProtokollConfig {
+  version?: number;
+  smartAssistance?: SmartAssistanceConfig;
+  // Other config fields can be added here as needed
 }
 

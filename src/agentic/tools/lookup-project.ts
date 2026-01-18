@@ -158,7 +158,6 @@ export const create = (ctx: ToolContext): TranscriptionTool => ({
         // Check if we found a term that's associated with projects
         if (termMatches.length > 0) {
             const term = termMatches[0];
-            // @ts-expect-error - term type has projects field
             const termProjects = term.projects || [];
             
             if (termProjects.length > 0) {
@@ -193,7 +192,6 @@ export const create = (ctx: ToolContext): TranscriptionTool => ({
                     },
                 };
             } else if (soundsLikeMatch.type === 'term') {
-                // @ts-expect-error - term type has projects field
                 const termProjects = soundsLikeMatch.projects || [];
                 
                 if (termProjects.length > 0) {
