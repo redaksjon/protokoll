@@ -30,6 +30,11 @@ import {
     DEFAULT_SOUNDS_LIKE_ON_ADD,
     DEFAULT_TRIGGER_PHRASES_ON_ADD,
     DEFAULT_PROMPT_FOR_SOURCE,
+    DEFAULT_TERMS_ENABLED,
+    DEFAULT_TERM_SOUNDS_LIKE_ON_ADD,
+    DEFAULT_TERM_DESCRIPTION_ON_ADD,
+    DEFAULT_TERM_TOPICS_ON_ADD,
+    DEFAULT_TERM_PROJECT_SUGGESTIONS,
     ASSIST_TIMEOUT_MS
 } from '../constants';
 
@@ -91,9 +96,19 @@ const getSmartAssistanceConfig = (config: Record<string, unknown>): SmartAssista
         enabled: smartConfig?.enabled ?? DEFAULT_SMART_ASSISTANCE,
         phoneticModel: smartConfig?.phoneticModel ?? DEFAULT_PHONETIC_MODEL,
         analysisModel: smartConfig?.analysisModel ?? DEFAULT_ANALYSIS_MODEL,
+        
+        // Project settings
         soundsLikeOnAdd: smartConfig?.soundsLikeOnAdd ?? DEFAULT_SOUNDS_LIKE_ON_ADD,
         triggerPhrasesOnAdd: smartConfig?.triggerPhrasesOnAdd ?? DEFAULT_TRIGGER_PHRASES_ON_ADD,
         promptForSource: smartConfig?.promptForSource ?? DEFAULT_PROMPT_FOR_SOURCE,
+        
+        // Term settings
+        termsEnabled: smartConfig?.termsEnabled ?? DEFAULT_TERMS_ENABLED,
+        termSoundsLikeOnAdd: smartConfig?.termSoundsLikeOnAdd ?? DEFAULT_TERM_SOUNDS_LIKE_ON_ADD,
+        termDescriptionOnAdd: smartConfig?.termDescriptionOnAdd ?? DEFAULT_TERM_DESCRIPTION_ON_ADD,
+        termTopicsOnAdd: smartConfig?.termTopicsOnAdd ?? DEFAULT_TERM_TOPICS_ON_ADD,
+        termProjectSuggestions: smartConfig?.termProjectSuggestions ?? DEFAULT_TERM_PROJECT_SUGGESTIONS,
+        
         timeout: smartConfig?.timeout ?? ASSIST_TIMEOUT_MS,
     };
 };

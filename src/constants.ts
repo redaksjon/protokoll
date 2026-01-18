@@ -77,11 +77,24 @@ export const DEFAULT_REASONING_LEVEL = 'medium';
 export const DEFAULT_PHONETIC_MODEL = 'gpt-5-nano';
 export const DEFAULT_ANALYSIS_MODEL = 'gpt-5-mini';
 export const DEFAULT_SMART_ASSISTANCE = true;
+
+// Project-specific smart assistance
 export const DEFAULT_SOUNDS_LIKE_ON_ADD = true;      // Generate phonetic variants
 export const DEFAULT_TRIGGER_PHRASES_ON_ADD = true;  // Generate content-matching phrases
 export const DEFAULT_PROMPT_FOR_SOURCE = true;
+
+// Term-specific smart assistance
+export const DEFAULT_TERMS_ENABLED = true;
+export const DEFAULT_TERM_SOUNDS_LIKE_ON_ADD = true;
+export const DEFAULT_TERM_DESCRIPTION_ON_ADD = true;
+export const DEFAULT_TERM_TOPICS_ON_ADD = true;
+export const DEFAULT_TERM_PROJECT_SUGGESTIONS = true;
+
+// Content limits
 export const MAX_CONTENT_LENGTH = 15000;  // Max characters to send to LLM
+export const MAX_TERM_CONTEXT_LENGTH = 10000;  // Max characters for term context
 export const ASSIST_TIMEOUT_MS = 30000;   // 30 second timeout for LLM calls
+export const TERM_ASSIST_TIMEOUT_MS = 20000;   // 20 second timeout for term LLM calls
 
 export const DEFAULT_OVERRIDES = false;
 export const DEFAULT_MAX_AUDIO_SIZE = 26214400; // 25MB in bytes
