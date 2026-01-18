@@ -125,14 +125,16 @@ sounds_like:
                             <div className="file-card">
                                 <div className="file-header">
                                     <span className="file-icon file-icon-text">R</span>
-                                    <span className="file-name">projects/work.yaml</span>
+                                    <span className="file-name">projects/protokoll.yaml</span>
                                 </div>
-                                <pre className="file-content">{`id: work
+                                <pre className="file-content">{`id: protokoll
 destination: ~/work/notes
-triggers:
-  - "work meeting"
-  - "standup"
-  - "sprint"`}</pre>
+explicit_phrases:
+  - "work on protokoll"
+  - "protokoll project"
+sounds_like:
+  - "protocol"
+  - "pro to call"`}</pre>
                             </div>
                             <div className="file-card">
                                 <div className="file-header">
@@ -331,6 +333,68 @@ sounds_like:
                             <div className="terminal-line">
                                 <span className="terminal-success">Person "Priya Sharma" saved successfully.</span>
                             </div>
+                        </div>
+                    </div>
+
+                    <div className="terminal-demo" style={{marginTop: '2rem'}}>
+                        <div className="terminal-header">
+                            <span className="terminal-dot red"></span>
+                            <span className="terminal-dot yellow"></span>
+                            <span className="terminal-dot green"></span>
+                            <span className="terminal-title">protokoll project add</span>
+                        </div>
+                        <div className="terminal-body">
+                            <div className="terminal-line">
+                                <span className="terminal-highlight">[Add New Project]</span>
+                            </div>
+                            <div className="terminal-line"></div>
+                            <div className="terminal-line">
+                                <span className="terminal-dim">Project name: </span>
+                                <span className="terminal-user">Protokoll</span>
+                            </div>
+                            <div className="terminal-line indent">
+                                <span className="terminal-dim">  Trigger phrases identify content for this project.</span>
+                            </div>
+                            <div className="terminal-line">
+                                <span className="terminal-dim">Trigger phrases: </span>
+                                <span className="terminal-user">work on protokoll, protokoll project</span>
+                            </div>
+                            <div className="terminal-line indent">
+                                <span className="terminal-dim">  Sounds-like variants catch misheard project names.</span>
+                            </div>
+                            <div className="terminal-line">
+                                <span className="terminal-dim">Sounds like: </span>
+                                <span className="terminal-user">protocol, pro to call</span>
+                            </div>
+                            <div className="terminal-line indent">
+                                <span className="terminal-dim">  Topic keywords are lower-confidence associations.</span>
+                            </div>
+                            <div className="terminal-line">
+                                <span className="terminal-dim">Topic keywords: </span>
+                                <span className="terminal-user">transcription, audio</span>
+                            </div>
+                            <div className="terminal-line"></div>
+                            <div className="terminal-line">
+                                <span className="terminal-success">Project "Protokoll" saved successfully.</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="context-features" style={{marginTop: '2rem'}}>
+                        <div className="context-feature">
+                            <div className="feature-number">T</div>
+                            <h3>Trigger Phrases</h3>
+                            <p>High-confidence content matching. Routes transcripts when these phrases appear in your audio.</p>
+                        </div>
+                        <div className="context-feature">
+                            <div className="feature-number">S</div>
+                            <h3>Sounds Like</h3>
+                            <p>Phonetic variants for when Whisper mishears the project name itself. Great for Norwegian names!</p>
+                        </div>
+                        <div className="context-feature">
+                            <div className="feature-number">K</div>
+                            <h3>Topic Keywords</h3>
+                            <p>Lower-confidence theme associations. Helps with classification but shouldn't be relied on alone.</p>
                         </div>
                     </div>
                 </div>

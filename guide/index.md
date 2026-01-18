@@ -142,7 +142,7 @@ protokoll feedback --help-me
 
 ### MCP / AI Integration
 
-Instead of CLI commands, you can talk to an AI assistant:
+Instead of CLI commands, you can use natural language with an AI assistant:
 
 ```
 "Can you transcribe ~/Downloads/meeting.m4a?"

@@ -73,6 +73,15 @@ export const DEFAULT_TRANSCRIPTION_MODEL = 'whisper-1';
 export const DEFAULT_MODEL = 'gpt-5.2';
 export const DEFAULT_REASONING_LEVEL = 'medium';
 
+// Smart Assistance Constants
+export const DEFAULT_ASSIST_MODEL = 'gpt-5.2-mini';
+export const DEFAULT_SMART_ASSISTANCE = true;
+export const DEFAULT_SOUNDS_LIKE_ON_ADD = true;      // Generate phonetic variants
+export const DEFAULT_TRIGGER_PHRASES_ON_ADD = true;  // Generate content-matching phrases
+export const DEFAULT_PROMPT_FOR_SOURCE = true;
+export const MAX_CONTENT_LENGTH = 15000;  // Max characters to send to LLM
+export const ASSIST_TIMEOUT_MS = 30000;   // 30 second timeout for LLM calls
+
 export const DEFAULT_OVERRIDES = false;
 export const DEFAULT_MAX_AUDIO_SIZE = 26214400; // 25MB in bytes
 export const DEFAULT_TEMP_DIRECTORY = os.tmpdir(); // Use OS default temp directory

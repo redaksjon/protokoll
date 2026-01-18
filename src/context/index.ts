@@ -18,10 +18,19 @@ import {
     IgnoredTerm,
     ContextDiscoveryOptions,
     DiscoveredContextDir,
-    HierarchicalContextResult 
+    HierarchicalContextResult,
+    SmartAssistanceConfig 
 } from './types';
 import * as Storage from './storage';
 import * as Discovery from './discovery';
+import {
+    DEFAULT_ASSIST_MODEL,
+    DEFAULT_SMART_ASSISTANCE,
+    DEFAULT_SOUNDS_LIKE_ON_ADD,
+    DEFAULT_TRIGGER_PHRASES_ON_ADD,
+    DEFAULT_PROMPT_FOR_SOURCE,
+    ASSIST_TIMEOUT_MS
+} from '../constants';
 
 export interface ContextInstance {
   // Initialization
@@ -32,6 +41,9 @@ export interface ContextInstance {
   getDiscoveredDirs(): DiscoveredContextDir[];
   getConfig(): Record<string, unknown>;
   getContextDirs(): string[];
+  
+  // Smart Assistance config
+  getSmartAssistanceConfig(): SmartAssistanceConfig;
   
   // Entity access
   getPerson(id: string): Person | undefined;
@@ -67,6 +79,22 @@ export interface CreateOptions {
   configDirName?: string;
   configFileName?: string;
 }
+
+/**
+ * Get smart assistance configuration with defaults
+ */
+const getSmartAssistanceConfig = (config: Record<string, unknown>): SmartAssistanceConfig => {
+    const smartConfig = config.smartAssistance as Partial<SmartAssistanceConfig> | undefined;
+  
+    return {
+        enabled: smartConfig?.enabled ?? DEFAULT_SMART_ASSISTANCE,
+        assistModel: smartConfig?.assistModel ?? DEFAULT_ASSIST_MODEL,
+        soundsLikeOnAdd: smartConfig?.soundsLikeOnAdd ?? DEFAULT_SOUNDS_LIKE_ON_ADD,
+        triggerPhrasesOnAdd: smartConfig?.triggerPhrasesOnAdd ?? DEFAULT_TRIGGER_PHRASES_ON_ADD,
+        promptForSource: smartConfig?.promptForSource ?? DEFAULT_PROMPT_FOR_SOURCE,
+        timeout: smartConfig?.timeout ?? ASSIST_TIMEOUT_MS,
+    };
+};
 
 /**
  * Create a new context instance
@@ -105,6 +133,8 @@ export const create = async (options: CreateOptions = {}): Promise<ContextInstan
         getDiscoveredDirs: () => discoveryResult.discoveredDirs,
         getConfig: () => discoveryResult.config,
         getContextDirs: () => discoveryResult.contextDirs,
+        
+        getSmartAssistanceConfig: () => getSmartAssistanceConfig(discoveryResult.config),
     
         getPerson: (id) => storage.get<Person>('person', id),
         getProject: (id) => storage.get<Project>('project', id),

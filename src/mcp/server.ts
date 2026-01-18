@@ -580,7 +580,8 @@ const tools: Tool[] = [
         description:
             'Add a new project to the context. ' +
             'Projects define where transcripts should be routed based on classification signals. ' +
-            'Include explicit_phrases that should trigger routing to this project.',
+            'Include explicit_phrases that should trigger routing to this project. ' +
+            'Include sounds_like variants for phonetic matching of non-English project names.',
         inputSchema: {
             type: 'object',
             properties: {
@@ -609,12 +610,17 @@ const tools: Tool[] = [
                 explicit_phrases: {
                     type: 'array',
                     items: { type: 'string' },
-                    description: 'Phrases that trigger routing to this project',
+                    description: 'High-confidence phrases that trigger routing to this project when they appear in audio',
+                },
+                sounds_like: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Phonetic variants for when Whisper mishears the project name (useful for non-English names like Norwegian)',
                 },
                 topics: {
                     type: 'array',
                     items: { type: 'string' },
-                    description: 'Topic keywords for classification',
+                    description: 'Lower-confidence topic keywords for classification',
                 },
                 description: {
                     type: 'string',
@@ -879,6 +885,7 @@ const formatEntity = (entity: Entity): Record<string, unknown> => {
         if (project.description) result.description = project.description;
         if (project.classification) result.classification = project.classification;
         if (project.routing) result.routing = project.routing;
+        if (project.sounds_like) result.sounds_like = project.sounds_like;
         result.active = project.active !== false;
     } else if (entity.type === 'term') {
         const term = entity as Term;
@@ -1298,6 +1305,7 @@ async function handleAddProject(args: {
     structure?: 'none' | 'year' | 'month' | 'day';
     contextType?: 'work' | 'personal' | 'mixed';
     explicit_phrases?: string[];
+    sounds_like?: string[];
     topics?: string[];
     description?: string;
     contextDirectory?: string;
@@ -1330,6 +1338,7 @@ async function handleAddProject(args: {
             structure: args.structure || 'month',
             filename_options: ['date', 'time', 'subject'],
         },
+        ...(args.sounds_like && { sounds_like: args.sounds_like }),
         ...(args.description && { description: args.description }),
         active: true,
     };

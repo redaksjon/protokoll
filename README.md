@@ -41,11 +41,12 @@ When you first start using Protokoll, it doesn't know anything about you. It doe
    name: Project Alpha
    classification:
      context_type: work
-     explicit_phrases: ["project alpha", "update on alpha"]
-     topics: ["client engagement", "Q1 planning"]
+     explicit_phrases: ["project alpha", "update on alpha"]  # Routes when these appear in audio
+     topics: ["client engagement", "Q1 planning"]            # Lower-confidence associations
    routing:
      destination: ~/notes/projects/alpha
      structure: month
+   sounds_like: ["project alfa"]  # Phonetic variants for misheard project names
    ```
 
    **You can read these files. You can edit them. You can version control them.** This is YOUR context, not a proprietary model hidden in someone else's cloud.
@@ -542,22 +543,67 @@ Person "Priya Sharma" saved successfully.
 
 ### Example: Adding a Project
 
+The interactive prompt guides you through each field with explanations:
+
 ```bash
 $ protokoll project add
 
 [Add New Project]
 
+Projects define where transcripts are filed and how they're classified.
+Each field helps Protokoll route your audio notes to the right place.
+
 Project name: Client Alpha
+
+  ID is used for the filename to store project info (e.g., "client-alpha.yaml")
+  and as a reference when linking other entities to this project.
 ID (Enter for "client-alpha"): 
-Output destination path: ~/clients/alpha/notes
+
+  Output destination is where transcripts for this project will be saved.
+  Leave blank to use the configured default: ~/notes
+Output destination path (Enter for default): ~/clients/alpha/notes
+
+  Directory structure determines how transcripts are organized by date:
+    none:  output/transcript.md
+    year:  output/2025/transcript.md
+    month: output/2025/01/transcript.md
+    day:   output/2025/01/15/transcript.md
 Directory structure (none/year/month/day, Enter for month): month
+
+  Context type helps classify the nature of this project:
+    work:     Professional/business content
+    personal: Personal notes and ideas
+    mixed:    Contains both work and personal content
 Context type (work/personal/mixed, Enter for work): work
+
+  Trigger phrases are words/phrases that identify content belongs to this project.
+  When these phrases appear in your audio, Protokoll routes it here.
+  Examples: "client alpha", "alpha project", "working on alpha"
 Trigger phrases (comma-separated): client alpha, alpha project
+
+  Sounds-like variants help when Whisper mishears the project name.
+  Useful for non-English names (Norwegian, etc.) that may be transcribed differently.
+  Examples for "Protokoll": "protocol", "pro to call", "proto call"
+Sounds like (comma-separated, Enter to skip): 
+
+  Topic keywords are themes/subjects associated with this project.
+  These provide additional context for classification but are lower-confidence
+  than trigger phrases. Examples: "budget", "roadmap", "client engagement"
 Topic keywords (comma-separated, Enter to skip): client engagement
+
+  Description is a brief note about this project for your reference.
 Description (Enter to skip): Primary client project
 
 Project "Client Alpha" saved successfully.
 ```
+
+#### Project Field Reference
+
+| Field | Purpose |
+|-------|---------|
+| **Trigger phrases** | High-confidence matching - routes transcripts when these phrases appear in audio |
+| **Sounds like** | Phonetic variants for when Whisper mishears the project name (useful for non-English names) |
+| **Topic keywords** | Lower-confidence theme associations for classification |
 
 ### Options
 
@@ -861,10 +907,13 @@ type: project
 
 classification:
   context_type: work
+  # Trigger phrases: high-confidence content matching
+  # When these phrases appear in audio, route to this project
   explicit_phrases:
     - "quarterly planning"
     - "Q1 planning"
     - "roadmap review"
+  # Topic keywords: lower-confidence theme associations
   topics:
     - "roadmap"
     - "budget"
@@ -876,6 +925,12 @@ routing:
     - date
     - time
     - subject
+
+# Phonetic variants: how Whisper might mishear the project name
+# Useful for non-English names (Norwegian, etc.)
+sounds_like:
+  - "quarterly plan"
+  - "quarter planning"
 
 active: true
 ```
@@ -1277,7 +1332,7 @@ Traditional workflow:
 4. Copy-paste file paths
 5. Run commands
 
-With MCP, you just talk naturally:
+With MCP, you can use natural language:
 - *"Can you transcribe this meeting recording?"*
 - *"Add Sanjay Gupta as a person - Whisper mishears him as 'San Jay Grouper'"*  
 - *"This should be in the Quantum Readiness project"*
@@ -1300,28 +1355,28 @@ When you ask to transcribe a file, the AI:
 #### Example: Ambiguous Location
 
 ```
-You: "Can you transcribe ~/Downloads/meeting.m4a?"
+User: Can you transcribe ~/Downloads/meeting.m4a?
 
-AI: "I found your Protokoll configuration with 3 projects configured. 
-     Based on the file location in Downloads, I can't automatically 
-     determine which project this belongs to. Is this for:
-     1. Client Alpha
-     2. Internal Notes
-     3. Personal
-     Which project should I use?"
+AI: I found your Protokoll configuration with 3 projects configured. 
+    Based on the file location in Downloads, I can't automatically 
+    determine which project this belongs to. Is this for:
+    1. Client Alpha
+    2. Internal Notes
+    3. Personal
+    Which project should I use?
 
-You: "It's for Client Alpha"
+User: It's for Client Alpha
 
-AI: "Got it! Processing with Client Alpha configuration..."
+AI: Got it! Processing with Client Alpha configuration...
     [transcribes and routes to ~/notes/client-alpha/]
 ```
 
 #### Example: Clear Location
 
 ```
-You: "Transcribe ~/work/client-alpha/recordings/standup.m4a"
+User: Transcribe ~/work/client-alpha/recordings/standup.m4a
 
-AI: "Found Client Alpha configuration nearby. Processing..."
+AI: Found Client Alpha configuration nearby. Processing...
     [automatically uses the right config and routing]
 ```
 
@@ -1391,45 +1446,45 @@ Or if installed globally (`npm install -g @redaksjon/protokoll`):
 
 **Basic Transcription:**
 ```
-Human: Transcribe ~/recordings/standup.m4a
+User: Transcribe ~/recordings/standup.m4a
 
 AI: [discovers config, suggests project]
 
-AI: Done! Transcript saved to ~/notes/2026/01/16-0900-standup.md
+Done! Transcript saved to ~/notes/2026/01/16-0900-standup.md
     Project: Daily Standups (95% confidence)
     People recognized: Sarah Chen, Mike Johnson
 ```
 
 **Add Context:**
 ```
-Human: "San Jay" should be "Sanjay Gupta" - he's a product manager at Acme
+User: "San Jay" should be "Sanjay Gupta" - he's a product manager at Acme
 
 AI: [calls protokoll_add_person]
 
-AI: Added Sanjay Gupta to your context. Future transcripts will 
+Added Sanjay Gupta to your context. Future transcripts will 
     recognize "San Jay", "Sanjay", and similar variations.
 ```
 
 **Provide Feedback:**
 ```
-Human: In that last transcript, WCMP should be WCNP
+User: In that last transcript, WCMP should be WCNP
 
 AI: [calls protokoll_provide_feedback]
 
-AI: Fixed! I replaced "WCMP" with "WCNP" (3 occurrences) and added 
+Fixed! I replaced "WCMP" with "WCNP" (3 occurrences) and added 
     WCNP to your vocabulary for future transcripts.
 ```
 
 **Combine Transcripts:**
 ```
-Human: Combine these three meeting parts into one:
-       ~/notes/meeting-part1.md
-       ~/notes/meeting-part2.md
-       ~/notes/meeting-part3.md
+User: Combine these three meeting parts into one:
+      ~/notes/meeting-part1.md
+      ~/notes/meeting-part2.md
+      ~/notes/meeting-part3.md
 
 AI: [calls protokoll_combine_transcripts]
 
-AI: Combined into ~/notes/16-1400-full-meeting.md
+Combined into ~/notes/16-1400-full-meeting.md
     The source files have been deleted.
 ```
 
@@ -1458,7 +1513,7 @@ When processing a file, the nearest `.protokoll` takes precedence, but inherits 
 1. **Create project-specific configs** when you have different routing needs
 2. **Use global config** for shared context (common terms, general contacts)
 3. **Let the AI discover** - it will ask when clarification is needed
-4. **Accept context suggestions** - when the AI offers to add terms/people, say yes
+4. **Accept context suggestions** - when the AI offers to add terms/people, accept the suggestions
 
 For complete documentation, see the [MCP Integration Guide](./guide/mcp-integration.md).
 

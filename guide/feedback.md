@@ -175,7 +175,7 @@ For comprehensive corrections, the system typically:
 
 ### Example: Complete Term Correction
 
-When you say: *"WCMP should be WCNP - Walmart's Native Cloud Platform"*
+When you provide feedback: *"WCMP should be WCNP - Walmart's Native Cloud Platform"*
 
 The model executes:
 

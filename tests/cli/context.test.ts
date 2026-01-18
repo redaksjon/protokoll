@@ -178,4 +178,85 @@ describe('CLI Context Commands', () => {
             expect(searchCmd).toBeDefined();
         });
     });
+
+    describe('project sounds_like parsing', () => {
+        it('should parse comma-separated sounds_like values', () => {
+            const parseSoundsLike = (input: string) => {
+                return input.split(',').map(s => s.trim()).filter(Boolean);
+            };
+            
+            expect(parseSoundsLike('protocol, pro to call, proto call')).toEqual([
+                'protocol', 
+                'pro to call', 
+                'proto call'
+            ]);
+        });
+
+        it('should handle single sounds_like value', () => {
+            const parseSoundsLike = (input: string) => {
+                return input.split(',').map(s => s.trim()).filter(Boolean);
+            };
+            
+            expect(parseSoundsLike('protocol')).toEqual(['protocol']);
+        });
+
+        it('should handle empty sounds_like input', () => {
+            const parseSoundsLike = (input: string) => {
+                return input.split(',').map(s => s.trim()).filter(Boolean);
+            };
+            
+            expect(parseSoundsLike('')).toEqual([]);
+        });
+
+        it('should filter empty strings from sounds_like', () => {
+            const parseSoundsLike = (input: string) => {
+                return input.split(',').map(s => s.trim()).filter(Boolean);
+            };
+            
+            expect(parseSoundsLike('protocol, , pro to call')).toEqual(['protocol', 'pro to call']);
+        });
+
+        it('should handle Norwegian project names with English sounds_like', () => {
+            const parseSoundsLike = (input: string) => {
+                return input.split(',').map(s => s.trim()).filter(Boolean);
+            };
+            
+            // Common Norwegian project names and their English transcriptions
+            expect(parseSoundsLike('chronology, crono logy')).toEqual(['chronology', 'crono logy']);
+            expect(parseSoundsLike('observation, observe asian')).toEqual(['observation', 'observe asian']);
+            expect(parseSoundsLike('redaction, red action')).toEqual(['redaction', 'red action']);
+        });
+    });
+
+    describe('project field explanations', () => {
+        it('should distinguish trigger phrases from sounds_like', () => {
+            // This test documents the conceptual difference between the two fields
+            // Trigger phrases: match CONTENT (what appears in the transcript text)
+            // Sounds like: match PROJECT NAME (when Whisper mishears the project name itself)
+            
+            const triggerPhrases = ['work on protokoll', 'protokoll project'];
+            const soundsLike = ['protocol', 'pro to call'];
+            
+            // Trigger phrases identify content about the project
+            expect(triggerPhrases.every(p => p.toLowerCase().includes('protokoll'))).toBe(true);
+            
+            // Sounds like are phonetic approximations of the project name
+            expect(soundsLike.every(s => !s.includes('protokoll'))).toBe(true);
+            expect(soundsLike[0]).toBe('protocol'); // English approximation
+        });
+
+        it('should distinguish sounds_like from topics', () => {
+            // Topics: lower-confidence theme associations
+            // Sounds like: phonetic variants of the project name
+            
+            const topics = ['transcription', 'audio', 'notes'];
+            const soundsLike = ['protocol', 'pro to call'];
+            
+            // Topics are thematic keywords
+            expect(topics.some(t => t === 'transcription')).toBe(true);
+            
+            // Sounds like are pronunciation variants
+            expect(soundsLike[0]).toBe('protocol');
+        });
+    });
 });
