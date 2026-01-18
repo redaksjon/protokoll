@@ -85,6 +85,7 @@ The goal is simple: **After a few weeks of use, Protokoll should understand your
   - [Quick Configuration Commands](#quick-configuration-commands)
 - [Command Line Options](#command-line-options)
 - [Context Management Commands](#context-management-commands)
+  - [Smart Project Creation](#smart-project-creation)
 - [Transcript Actions](#transcript-actions)
 - [Feedback Command](#feedback-command)
 - [Key Features](#key-features)
@@ -406,6 +407,14 @@ selfReflection: true          # Generate reports by default
 silent: false                 # Sound notifications
 debug: false                  # Debug mode
 
+# Smart assistance for project creation
+smartAssistance:
+  enabled: true                # Enable AI-assisted project creation
+  assistModel: "gpt-5.2-mini"  # Fast model for generating suggestions
+  soundsLikeOnAdd: true        # Auto-generate phonetic variants
+  triggerPhrasesOnAdd: true    # Auto-generate content-matching phrases
+  promptForSource: true        # Ask for URL/file when creating projects
+
 # Advanced
 maxAudioSize: 26214400        # Max audio file size in bytes (25MB)
 tempDirectory: "/tmp"         # Temporary file storage
@@ -540,6 +549,105 @@ Context notes (Enter to skip): Colleague from product team
 
 Person "Priya Sharma" saved successfully.
 ```
+
+### Smart Project Creation
+
+Protokoll can use AI assistance to help create projects faster by automatically generating:
+
+- **Sounds like**: Phonetic variants of your project NAME for when Whisper mishears it (e.g., "Protokoll" → "protocol", "pro to call")
+- **Trigger phrases**: Content-matching phrases that indicate audio content belongs to this project (e.g., "working on protokoll", "protokoll meeting")
+- **Topic keywords**: Relevant keywords extracted from project documentation
+- **Description**: A contextual description of your project
+
+#### Understanding Sounds Like vs Trigger Phrases
+
+| Field | Purpose | Example for "Protokoll" |
+|-------|---------|------------------------|
+| **Sounds like** | Correct misheard project NAME | "protocol", "pro to call" |
+| **Trigger phrases** | Match content to project | "working on protokoll", "protokoll meeting" |
+
+- `sounds_like` is used during transcription to correct the project name when Whisper mishears it
+- `trigger phrases` are used during classification to route content to the right project
+
+#### Basic Usage
+
+```bash
+# Interactive mode with smart assistance (default when configured)
+protokoll project add
+
+# With a source URL for full context analysis
+protokoll project add https://github.com/myorg/myproject
+
+# With a local file or directory
+protokoll project add ./README.md
+protokoll project add /path/to/project
+```
+
+#### Command-Line Options
+
+```bash
+protokoll project add [source] [options]
+
+Arguments:
+  source                    URL or file path to analyze for project context
+
+Options:
+  --name <name>            Project name (skips name prompt)
+  --id <id>                Project ID (auto-generated from name if not provided)
+  --context <type>         Context type: work, personal, or mixed (default: work)
+  --destination <path>     Output destination path for transcripts
+  --structure <type>       Directory structure: none, year, month, day (default: month)
+  --smart                  Force enable smart assistance
+  --no-smart               Force disable smart assistance
+```
+
+#### Examples
+
+```bash
+# Quick project from GitHub repo
+protokoll project add https://github.com/myorg/myproject --name "My Project"
+
+# Create project with pre-set options
+protokoll project add --name "Quarterly Planning" --context work
+
+# Analyze local documentation
+protokoll project add ./docs/README.md --name "Documentation"
+
+# Disable smart assistance for manual entry
+protokoll project add --no-smart
+```
+
+#### How It Works
+
+1. **Name Entry**: When you provide a project name, smart assistance generates:
+   - **Sounds like**: Phonetic variants for when Whisper mishears the name
+   - **Trigger phrases**: Content-matching phrases for classification
+
+2. **Content Analysis**: When you provide a URL or file path, smart assistance:
+   - Fetches the content (supports GitHub repos, web pages, local files)
+   - Analyzes it to suggest topic keywords and description
+
+3. **Editable Suggestions**: All suggestions are presented as defaults that you can accept (press Enter) or edit
+
+#### Configuration
+
+Enable or disable smart assistance globally in your `.protokoll/config.yaml`:
+
+```yaml
+smartAssistance:
+  enabled: true              # Enable smart assistance globally
+  assistModel: "gpt-5.2-mini"  # Model to use for suggestions
+  soundsLikeOnAdd: true      # Auto-generate phonetic variants
+  triggerPhrasesOnAdd: true  # Auto-generate content-matching phrases
+  promptForSource: true      # Ask about URL/file when not provided
+```
+
+Override per-command with `--smart` or `--no-smart` flags.
+
+#### Requirements
+
+- OpenAI API key set in environment (`OPENAI_API_KEY`)
+- Network access for URL fetching and API calls
 
 ### Example: Adding a Project
 
@@ -1305,6 +1413,31 @@ sounds_like:
   - "exactly as whisper hears it"
   - "another variant"
 ```
+
+#### Smart Project Creation Issues
+
+**"Smart assistance not available"**
+- Ensure `OPENAI_API_KEY` is set in your environment
+- Check that smart assistance is enabled in config or use `--smart` flag
+
+**Slow sounds_like/trigger phrase generation**
+- The first call may take a few seconds as the model generates variations
+- Subsequent calls are typically faster
+- Both sounds_like and trigger phrases are generated in parallel for efficiency
+
+**URL fetch failing**
+- Ensure network connectivity
+- For private repositories, use local file paths instead
+- Check that the URL is accessible (not behind authentication)
+
+**Sounds like variants not matching your project**
+- For Norwegian or non-English project names, you may need to manually add English phonetic variants
+- Example: "Protokoll" might need "protocol", "pro to call" added manually
+
+**Suggestions don't match my project**
+- You can edit all suggestions before saving
+- Try providing more context with a README or documentation file
+- Adjust the topics and description manually as needed
 
 ### Debug Mode
 
