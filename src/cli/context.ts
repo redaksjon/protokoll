@@ -12,8 +12,46 @@ import Table from 'cli-table3';
 import * as Context from '../context';
 import { Entity, Person, Project, Company, Term, IgnoredTerm, EntityType } from '../context/types';
 
+// Options for adding a project
+interface AddProjectOptions {
+    source?: string;           // URL or file path
+    name?: string;             // Pre-specified name
+    id?: string;               // Pre-specified ID
+    context?: 'work' | 'personal' | 'mixed';
+    destination?: string;      // Output path
+    structure?: 'none' | 'year' | 'month' | 'day';
+    smart?: boolean;           // Override config to enable
+    noSmart?: boolean;         // Override config to disable (Commander uses this naming)
+}
+
 // Helper to print to stdout
 const print = (text: string) => process.stdout.write(text + '\n');
+
+/**
+ * Calculate a project ID from a name
+ */
+const calculateId = (name: string): string => {
+    return name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '');
+};
+
+/**
+ * Determine if smart assistance should be used
+ */
+const shouldUseSmartAssistance = (
+    context: Context.ContextInstance,
+    options: AddProjectOptions
+): boolean => {
+    // Explicit flag takes precedence
+    if (options.smart === true) return true;
+    if (options.noSmart === true) return false;
+    
+    // Fall back to config
+    const config = context.getSmartAssistanceConfig();
+    return config.enabled;
+};
 
 // Helper for interactive prompts
 const askQuestion = (rl: readline.Interface, question: string): Promise<string> => {
@@ -431,9 +469,12 @@ const addPerson = async (context: Context.ContextInstance): Promise<void> => {
 };
 
 /**
- * Interactive prompts for adding a project
+ * Interactive prompts for adding a project with optional smart assistance
  */
-const addProject = async (context: Context.ContextInstance): Promise<void> => {
+const addProject = async (
+    context: Context.ContextInstance,
+    options: AddProjectOptions = {}
+): Promise<void> => {
     const rl = createReadline();
     
     try {
@@ -776,10 +817,65 @@ const createEntityCommand = (
 };
 
 /**
+ * Create specialized project command with smart assistance options
+ */
+const createProjectCommand = (): Command => {
+    const cmd = new Command('project')
+        .description('Manage projects');
+    
+    cmd
+        .command('list')
+        .description('List all projects')
+        .option('-v, --verbose', 'Show full details')
+        .action(async (options) => {
+            const context = await Context.create();
+            await listEntities(context, 'project', options);
+        });
+    
+    cmd
+        .command('show <id>')
+        .description('Show details of a project (use ID or row number from list)')
+        .action(async (id) => {
+            const context = await Context.create();
+            await showEntity(context, 'project', id);
+        });
+    
+    cmd
+        .command('add [source]')
+        .description('Add a new project (optionally provide URL or file path for context)')
+        .option('--name <name>', 'Project name (skips name prompt)')
+        .option('--id <id>', 'Project ID (auto-calculated from name if not provided)')
+        .option('--context <type>', 'Context type: work, personal, or mixed')
+        .option('--destination <path>', 'Output destination path')
+        .option('--structure <type>', 'Directory structure: none, year, month, day')
+        .option('--smart', 'Enable smart assistance (override config)')
+        .option('--no-smart', 'Disable smart assistance (override config)')
+        .action(async (source, cmdOptions) => {
+            const context = await Context.create();
+            if (!context.hasContext()) {
+                print('Error: No .protokoll directory found. Run "protokoll --init-config" first.');
+                process.exit(1);
+            }
+            await addProject(context, { source, ...cmdOptions });
+        });
+    
+    cmd
+        .command('delete <id>')
+        .description('Delete a project')
+        .option('-f, --force', 'Skip confirmation')
+        .action(async (id, options) => {
+            const context = await Context.create();
+            await deleteEntity(context, 'project', id, options);
+        });
+    
+    return cmd;
+};
+
+/**
  * Register all context management subcommands
  */
 export const registerContextCommands = (program: Command): void => {
-    program.addCommand(createEntityCommand('project', 'projects', addProject));
+    program.addCommand(createProjectCommand());
     program.addCommand(createEntityCommand('person', 'people', addPerson));
     program.addCommand(createEntityCommand('term', 'terms', addTerm));
     program.addCommand(createEntityCommand('company', 'companies', addCompany));
