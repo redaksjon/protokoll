@@ -74,7 +74,7 @@ export const DEFAULT_MODEL = 'gpt-5.2';
 export const DEFAULT_REASONING_LEVEL = 'medium';
 
 // Smart Assistance Constants
-export const DEFAULT_ASSIST_MODEL = 'gpt-5.2-mini';
+export const DEFAULT_ASSIST_MODEL = 'gpt-5.2';
 export const DEFAULT_SMART_ASSISTANCE = true;
 export const DEFAULT_SOUNDS_LIKE_ON_ADD = true;      // Generate phonetic variants
 export const DEFAULT_TRIGGER_PHRASES_ON_ADD = true;  // Generate content-matching phrases

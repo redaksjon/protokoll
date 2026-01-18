@@ -23,7 +23,7 @@ export type ReasoningModel =
     | 'o3-mini'
     | string;  // Allow any model string
 
-export type ReasoningLevel = 'low' | 'medium' | 'high';
+export type ReasoningLevel = 'none' | 'low' | 'medium' | 'high';
 
 export interface ReasoningConfig {
     model: ReasoningModel;

@@ -16,7 +16,7 @@ export class OpenAIError extends Error {
 }
 
 
-export async function createCompletion(messages: ChatCompletionMessageParam[], options: { responseFormat?: any, model?: string, reasoningLevel?: 'low' | 'medium' | 'high', debug?: boolean, debugFile?: string } = {}): Promise<string | any> {
+export async function createCompletion(messages: ChatCompletionMessageParam[], options: { responseFormat?: any, model?: string, reasoningLevel?: 'none' | 'low' | 'medium' | 'high', debug?: boolean, debugFile?: string } = {}): Promise<string | any> {
     const logger = getLogger();
     const storage = Storage.create({ log: logger.debug });
     try {
@@ -46,10 +46,9 @@ export async function createCompletion(messages: ChatCompletionMessageParam[], o
             response_format: options.responseFormat,
         };
         
-        if (supportsReasoning) {
-            const reasoningLevel = options.reasoningLevel || 'medium';
-            requestParams.reasoning_effort = reasoningLevel;
-            logger.debug('Using reasoning_effort: %s', reasoningLevel);
+        if (supportsReasoning && options.reasoningLevel && options.reasoningLevel !== 'none') {
+            requestParams.reasoning_effort = options.reasoningLevel;
+            logger.debug('Using reasoning_effort: %s', options.reasoningLevel);
         }
         
         const completion = await openai.chat.completions.create(

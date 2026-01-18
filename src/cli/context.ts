@@ -12,7 +12,6 @@ import Table from 'cli-table3';
 import * as Context from '../context';
 import { Entity, Person, Project, Company, Term, IgnoredTerm, EntityType } from '../context/types';
 import * as ProjectAssist from './project-assist';
-import * as ContentFetcher from './content-fetcher';
 
 // Options for adding a project
 interface AddProjectOptions {
@@ -486,9 +485,8 @@ const addProject = async (
     const smartConfig = context.getSmartAssistanceConfig();
     const useSmartAssist = shouldUseSmartAssistance(context, options);
     
-    // Initialize assist modules if smart assistance is enabled
+    // Initialize assist module if smart assistance is enabled
     const assist = useSmartAssist ? ProjectAssist.create(smartConfig) : null;
-    const fetcher = useSmartAssist ? ContentFetcher.create() : null;
 
     try {
         print('\n[Add New Project]\n');
@@ -501,21 +499,12 @@ const addProject = async (
         let suggestions: ProjectAssist.ProjectSuggestions | undefined;
         
         // If source provided and no name, try to get suggestions first
-        if (options.source && !name && assist && fetcher) {
-            print('[Fetching content from source...]');
-            const fetchResult = await fetcher.fetch(options.source);
+        if (options.source && !name && assist) {
+            print('[Analyzing source...]');
+            suggestions = await assist.analyzeSource(options.source);
             
-            if (fetchResult.success && fetchResult.content) {
-                print(`Found: ${fetchResult.sourceType} - ${fetchResult.sourceName}\n`);
-                
-                print('[Analyzing content...]');
-                suggestions = await assist.analyzeContent(fetchResult.content);
-                
-                if (suggestions.name) {
-                    suggestedName = suggestions.name;
-                }
-            } else {
-                print(`Warning: Could not fetch content: ${fetchResult.error}\n`);
+            if (suggestions.name) {
+                suggestedName = suggestions.name;
             }
         }
         
@@ -681,35 +670,26 @@ const addProject = async (
                 print('\nWould you like to provide a URL or file path for auto-generating');
                 const sourceInput = await askQuestion(rl, 'keywords and description? (Enter path, or press Enter to skip): ');
                 
-                if (sourceInput.trim() && fetcher) {
-                    print('[Fetching content...]');
-                    const fetchResult = await fetcher.fetch(sourceInput.trim());
+                if (sourceInput.trim()) {
+                    print('[Analyzing source...]');
+                    const contentSuggestions = await assist.analyzeSource(sourceInput.trim(), name);
                     
-                    if (fetchResult.success && fetchResult.content) {
-                        print(`Found: ${fetchResult.sourceType} - ${fetchResult.sourceName}`);
-                        print('[Analyzing content...]');
+                    if (contentSuggestions.topics?.length) {
+                        const topicsPreview = contentSuggestions.topics.slice(0, 10).join(',');
+                        const topicsInput = await askQuestion(rl, `\nTopic keywords (Enter for suggested, or edit):\n  ${topicsPreview}\n> `);
                         
-                        const contentSuggestions = await assist.analyzeContent(fetchResult.content, name);
+                        topics = topicsInput.trim() 
+                            ? topicsInput.split(',').map(s => s.trim()).filter(s => s.length > 0)
+                            : contentSuggestions.topics;
+                    }
+                    
+                    if (contentSuggestions.description) {
+                        const descPreview = contentSuggestions.description.length > 200 
+                            ? contentSuggestions.description.substring(0, 200) + '...'
+                            : contentSuggestions.description;
+                        const descInput = await askQuestion(rl, `\nDescription (Enter for suggested, or edit):\n  ${descPreview}\n> `);
                         
-                        if (contentSuggestions.topics?.length) {
-                            const topicsPreview = contentSuggestions.topics.slice(0, 10).join(',');
-                            const topicsInput = await askQuestion(rl, `\nTopic keywords (Enter for suggested, or edit):\n  ${topicsPreview}\n> `);
-                            
-                            topics = topicsInput.trim() 
-                                ? topicsInput.split(',').map(s => s.trim()).filter(s => s.length > 0)
-                                : contentSuggestions.topics;
-                        }
-                        
-                        if (contentSuggestions.description) {
-                            const descPreview = contentSuggestions.description.length > 200 
-                                ? contentSuggestions.description.substring(0, 200) + '...'
-                                : contentSuggestions.description;
-                            const descInput = await askQuestion(rl, `\nDescription (Enter for suggested, or edit):\n  ${descPreview}\n> `);
-                            
-                            description = descInput.trim() || contentSuggestions.description;
-                        }
-                    } else {
-                        print(`Warning: Could not fetch content: ${fetchResult.error}`);
+                        description = descInput.trim() || contentSuggestions.description;
                     }
                 }
                 

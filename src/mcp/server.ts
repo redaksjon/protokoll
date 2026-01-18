@@ -46,7 +46,6 @@ import * as Storage from '@/util/storage';
 import * as Reasoning from '@/reasoning';
 import { getLogger } from '@/logging';
 import * as ProjectAssist from '@/cli/project-assist';
-import * as ContentFetcher from '@/cli/content-fetcher';
 import {
     DEFAULT_OUTPUT_DIRECTORY,
     DEFAULT_OUTPUT_STRUCTURE,
@@ -1374,31 +1373,26 @@ async function handleAddProject(args: {
 
     if (useSmartAssist) {
         const assist = ProjectAssist.create(smartConfig);
-        const fetcher = ContentFetcher.create();
 
-        // Fetch and analyze content if source provided
+        // Analyze source if provided
         if (args.source) {
-            const fetchResult = await fetcher.fetch(args.source);
+            const suggestions = await assist.analyzeSource(args.source, args.name);
 
-            if (fetchResult.success && fetchResult.content) {
-                const suggestions = await assist.analyzeContent(fetchResult.content, args.name);
-
-                // Only use suggestions for fields not explicitly provided (undefined, not just empty)
-                if (args.sounds_like === undefined) {
-                    soundsLike = suggestions.soundsLike;
-                }
-                if (args.explicit_phrases === undefined) {
-                    triggerPhrases = suggestions.triggerPhrases;
-                }
-                if (args.topics === undefined && suggestions.topics) {
-                    topics = suggestions.topics;
-                }
-                if (!args.description && suggestions.description) {
-                    description = suggestions.description;
-                }
-                if (suggestions.name) {
-                    suggestedName = suggestions.name;
-                }
+            // Only use suggestions for fields not explicitly provided (undefined, not just empty)
+            if (args.sounds_like === undefined) {
+                soundsLike = suggestions.soundsLike;
+            }
+            if (args.explicit_phrases === undefined) {
+                triggerPhrases = suggestions.triggerPhrases;
+            }
+            if (args.topics === undefined && suggestions.topics) {
+                topics = suggestions.topics;
+            }
+            if (!args.description && suggestions.description) {
+                description = suggestions.description;
+            }
+            if (suggestions.name) {
+                suggestedName = suggestions.name;
             }
         } else {
             // Generate sounds_like and trigger phrases from name even without source
@@ -1741,7 +1735,6 @@ async function handleSuggestProjectMetadata(args: {
     }
 
     const assist = ProjectAssist.create(smartConfig);
-    const fetcher = ContentFetcher.create();
 
     const result: {
         soundsLike?: string[];
@@ -1764,21 +1757,15 @@ async function handleSuggestProjectMetadata(args: {
 
     // Analyze source if provided
     if (args.source) {
-        const fetchResult = await fetcher.fetch(args.source);
+        const suggestions = await assist.analyzeSource(args.source, args.name);
 
-        if (fetchResult.success && fetchResult.content) {
-            const suggestions = await assist.analyzeContent(fetchResult.content, args.name);
-
-            if (!args.name && suggestions.name) {
-                result.suggestedName = suggestions.name;
-                result.soundsLike = suggestions.soundsLike;
-                result.triggerPhrases = suggestions.triggerPhrases;
-            }
-            result.topics = suggestions.topics;
-            result.description = suggestions.description;
-        } else {
-            throw new Error(`Could not fetch content: ${fetchResult.error}`);
+        if (!args.name && suggestions.name) {
+            result.suggestedName = suggestions.name;
+            result.soundsLike = suggestions.soundsLike;
+            result.triggerPhrases = suggestions.triggerPhrases;
         }
+        result.topics = suggestions.topics;
+        result.description = suggestions.description;
     }
 
     return {

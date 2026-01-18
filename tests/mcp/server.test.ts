@@ -329,6 +329,8 @@ routing:
                 id: 'list-test',
                 name: 'List Test Project',
                 destination: '/tmp/list-test',
+                sounds_like: [],  // Bypass smart assistance
+                explicit_phrases: [],
                 contextDirectory: protokollDir
             });
 
@@ -343,6 +345,8 @@ routing:
                 id: 'active-filter-test',
                 name: 'Active Project',
                 destination: '/tmp/active',
+                sounds_like: [],  // Bypass smart assistance
+                explicit_phrases: [],
                 contextDirectory: protokollDir
             });
             // Create inactive project by writing file directly (can't set inactive via handler)
@@ -363,6 +367,8 @@ routing:
                 id: 'include-test-project',
                 name: 'Include Test Project',
                 destination: '/tmp/include-test',
+                sounds_like: [],  // Bypass smart assistance
+                explicit_phrases: [],
                 contextDirectory: protokollDir
             });
 
@@ -474,6 +480,8 @@ routing:
                 id: 'get-test-project',
                 name: 'Get Test Project',
                 destination: '/tmp/get-test',
+                sounds_like: [],  // Bypass smart assistance
+                explicit_phrases: [],
                 contextDirectory: protokollDir
             });
 
@@ -524,6 +532,8 @@ routing:
             const result = await handleAddProject({
                 name: 'New Project',
                 destination: '/tmp/new-project',
+                sounds_like: [],  // Bypass smart assistance
+                explicit_phrases: [],
                 contextDirectory: protokollDir
             });
 
@@ -538,6 +548,7 @@ routing:
                 name: 'Classified Project',
                 destination: '/tmp/classified',
                 explicit_phrases: ['classified', 'secret'],
+                sounds_like: [],  // Bypass smart assistance
                 topics: ['security'],
                 contextType: 'work',
                 contextDirectory: protokollDir
@@ -873,6 +884,8 @@ Content from part 2.
                 id: 'duplicate-project',
                 name: 'Duplicate Project',
                 destination: '/tmp/dup',
+                sounds_like: [],  // Bypass smart assistance
+                explicit_phrases: [],
                 contextDirectory: protokollDir
             });
 
@@ -881,6 +894,8 @@ Content from part 2.
                 id: 'duplicate-project',
                 name: 'Duplicate Project Again',
                 destination: '/tmp/dup2',
+                sounds_like: [],  // Bypass smart assistance
+                explicit_phrases: [],
                 contextDirectory: protokollDir
             })).rejects.toThrow('already exists');
         });

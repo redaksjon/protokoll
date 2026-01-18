@@ -11,6 +11,7 @@
 import { getLogger } from '../logging';
 import * as OpenAI from '../util/openai';
 import { SmartAssistanceConfig } from '../context/types';
+import * as ContentFetcher from './content-fetcher';
 
 export interface ProjectSuggestions {
     name?: string;
@@ -23,7 +24,7 @@ export interface ProjectSuggestions {
 export interface ProjectAssistInstance {
     generateSoundsLike(name: string): Promise<string[]>;
     generateTriggerPhrases(name: string): Promise<string[]>;
-    analyzeContent(content: string, existingName?: string): Promise<ProjectSuggestions>;
+    analyzeSource(source: string, existingName?: string): Promise<ProjectSuggestions>;
     isAvailable(): boolean;
 }
 
@@ -35,6 +36,7 @@ interface ContentAnalysisResponse {
 
 export const create = (config: SmartAssistanceConfig): ProjectAssistInstance => {
     const logger = getLogger();
+    const fetcher = ContentFetcher.create();
     
     const isAvailable = (): boolean => {
         return !!process.env.OPENAI_API_KEY && config.enabled;
@@ -70,8 +72,8 @@ Example for "Grunnverk": ground work,grundverk,grunnwerk,grunverk,groon verk`;
             const response = await OpenAI.createCompletion(
                 [{ role: 'user', content: prompt }],
                 { 
-                    model: config.assistModel,
-                    reasoningLevel: 'low',
+                    model: 'gpt-5-mini',
+                    reasoningLevel: 'none',
                 }
             );
 
@@ -124,8 +126,8 @@ Example for "Quarterly Planning": quarterly planning,quarterly planning meeting,
             const response = await OpenAI.createCompletion(
                 [{ role: 'user', content: prompt }],
                 { 
-                    model: config.assistModel,
-                    reasoningLevel: 'low',
+                    model: 'gpt-5-mini',
+                    reasoningLevel: 'none',
                 }
             );
 
@@ -153,13 +155,23 @@ Example for "Quarterly Planning": quarterly planning,quarterly planning meeting,
         }
     };
 
-    const analyzeContent = async (content: string, existingName?: string): Promise<ProjectSuggestions> => {
+    const analyzeSource = async (source: string, existingName?: string): Promise<ProjectSuggestions> => {
         if (!isAvailable()) {
             logger.debug('Smart assistance not available, skipping content analysis');
             return { soundsLike: [], triggerPhrases: [] };
         }
 
-        logger.debug('Analyzing content (%d chars)', content.length);
+        // Fetch content from source (file path, URL, or directory)
+        logger.debug('Fetching content from source: %s', source);
+        const fetchResult = await fetcher.fetch(source);
+        
+        if (!fetchResult.success || !fetchResult.content) {
+            logger.error('Failed to fetch content: %s', fetchResult.error);
+            return { soundsLike: [], triggerPhrases: [] };
+        }
+
+        const content = fetchResult.content;
+        logger.debug('Analyzing content (%d chars) from %s', content.length, fetchResult.sourceName);
 
         const nameInstruction = existingName 
             ? `The project name is already known: "${existingName}". Set "name" to null in your response.`
@@ -189,8 +201,8 @@ Respond ONLY with valid JSON in this exact format:
             const response = await OpenAI.createCompletion(
                 [{ role: 'user', content: prompt }],
                 { 
-                    model: config.assistModel,
-                    reasoningLevel: 'low',
+                    model: 'gpt-5-mini',
+                    reasoningLevel: 'none',
                 }
             );
 
@@ -242,7 +254,7 @@ Respond ONLY with valid JSON in this exact format:
     return {
         generateSoundsLike,
         generateTriggerPhrases,
-        analyzeContent,
+        analyzeSource,
         isAvailable,
     };
 };
