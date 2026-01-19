@@ -9,6 +9,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { MAX_CONTENT_LENGTH } from '../constants';
 import { getLogger } from '../logging';
+import { htmlToText } from 'html-to-text';
 
 export interface FetchResult {
     success: boolean;
@@ -53,23 +54,20 @@ export const create = (): ContentFetcherInstance => {
 
     // Simple HTML tag stripper
     const stripHtml = (html: string): string => {
-        // Remove script and style tags with content
-        let text = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
-        text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
-        
-        // Remove HTML tags
-        text = text.replace(/<[^>]+>/g, ' ');
-        
-        // Decode common HTML entities
-        text = text.replace(/&nbsp;/g, ' ');
-        text = text.replace(/&amp;/g, '&');
-        text = text.replace(/&lt;/g, '<');
-        text = text.replace(/&gt;/g, '>');
-        text = text.replace(/&quot;/g, '"');
-        
+        // Use a well-tested library to convert HTML to plain text,
+        // which removes tags, scripts, and styles safely.
+        let text = htmlToText(html, {
+            wordwrap: false,
+            // Keep links and other markup as simple text when possible.
+            selectors: [
+                { selector: 'script', format: 'skip' },
+                { selector: 'style', format: 'skip' }
+            ]
+        });
+
         // Normalize whitespace
         text = text.replace(/\s+/g, ' ').trim();
-        
+
         return text;
     };
 
