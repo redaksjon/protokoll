@@ -32,7 +32,23 @@ export const create = (): ContentFetcherInstance => {
     };
 
     const isGitHubUrl = (source: string): boolean => {
-        return source.includes('github.com/');
+        try {
+            const parsed = new URL(source);
+            if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+                return false;
+            }
+
+            const hostname = parsed.hostname.toLowerCase();
+            const allowedGitHubHosts = new Set([
+                'github.com',
+                'raw.githubusercontent.com',
+            ]);
+
+            return allowedGitHubHosts.has(hostname);
+        } catch {
+            // If the URL cannot be parsed, it is not a valid GitHub URL
+            return false;
+        }
     };
 
     // Simple HTML tag stripper
