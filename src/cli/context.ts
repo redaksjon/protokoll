@@ -1077,12 +1077,71 @@ const createProjectCommand = (): Command => {
 };
 
 /**
+ * Create specialized term command with smart assistance options
+ */
+const createTermCommand = (): Command => {
+    const cmd = new Command('term')
+        .description('Manage terms');
+    
+    cmd
+        .command('list')
+        .description('List all terms')
+        .option('-v, --verbose', 'Show full details')
+        .action(async (options) => {
+            const context = await Context.create();
+            await listEntities(context, 'term', options);
+        });
+    
+    cmd
+        .command('show <id>')
+        .description('Show details of a term (use ID or row number from list)')
+        .action(async (id) => {
+            const context = await Context.create();
+            await showEntity(context, 'term', id);
+        });
+    
+    cmd
+        .command('add [source]')
+        .description('Add a new term (optionally provide URL or file path for context)')
+        .option('--term <name>', 'Term name')
+        .option('--id <id>', 'Term ID (auto-calculated from name if not provided)')
+        .option('--expansion <text>', 'Full expansion if acronym')
+        .option('--domain <domain>', 'Domain category (e.g., devops, engineering)')
+        .option('--description <text>', 'Term description (skips LLM generation if provided)')
+        .option('--topics <keywords>', 'Comma-separated topic keywords (skips LLM generation if provided)')
+        .option('--projects <ids>', 'Comma-separated project IDs to associate with')
+        .option('--smart', 'Enable smart assistance (override config)')
+        .option('--no-smart', 'Disable smart assistance (override config)')
+        .action(async (_source, _cmdOptions) => {
+            const context = await Context.create();
+            if (!context.hasContext()) {
+                print('Error: No .protokoll directory found. Run "protokoll --init-config" first.');
+                process.exit(1);
+            }
+            // For Step 03, we just pass through to the old addTerm
+            // Step 04 will implement the full smart assistance flow
+            await addTerm(context);
+        });
+    
+    cmd
+        .command('delete <id>')
+        .description('Delete a term')
+        .option('-f, --force', 'Skip confirmation')
+        .action(async (id, options) => {
+            const context = await Context.create();
+            await deleteEntity(context, 'term', id, options);
+        });
+    
+    return cmd;
+};
+
+/**
  * Register all context management subcommands
  */
 export const registerContextCommands = (program: Command): void => {
     program.addCommand(createProjectCommand());
     program.addCommand(createEntityCommand('person', 'people', addPerson));
-    program.addCommand(createEntityCommand('term', 'terms', addTerm));
+    program.addCommand(createTermCommand());
     program.addCommand(createEntityCommand('company', 'companies', addCompany));
     program.addCommand(createEntityCommand('ignored', 'ignored terms', addIgnored));
     
