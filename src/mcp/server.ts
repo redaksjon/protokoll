@@ -46,6 +46,9 @@ import * as Storage from '@/util/storage';
 import * as Reasoning from '@/reasoning';
 import { getLogger } from '@/logging';
 import * as ProjectAssist from '@/cli/project-assist';
+import * as TermAssist from '@/cli/term-assist';
+import * as TermContext from '@/cli/term-context';
+import * as ContentFetcher from '@/cli/content-fetcher';
 import {
     DEFAULT_OUTPUT_DIRECTORY,
     DEFAULT_OUTPUT_STRUCTURE,
@@ -712,6 +715,35 @@ const tools: Tool[] = [
                     type: 'array',
                     items: { type: 'string' },
                     description: 'Associated project IDs where this term is relevant',
+                },
+                contextDirectory: {
+                    type: 'string',
+                    description: 'Path to the .protokoll context directory',
+                },
+            },
+            required: ['term'],
+        },
+    },
+    {
+        name: 'protokoll_suggest_term_metadata',
+        description:
+            'Generate term metadata suggestions without creating the term. ' +
+            'Returns sounds_like (phonetic variants), description, topics, domain, and suggested projects. ' +
+            'Useful for interactive workflows where AI assistant presents suggestions for user review before creating the term.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                term: {
+                    type: 'string',
+                    description: 'Term name for generating metadata',
+                },
+                source: {
+                    type: 'string',
+                    description: 'URL or file path to analyze for richer suggestions (optional)',
+                },
+                expansion: {
+                    type: 'string',
+                    description: 'Full expansion if acronym (helps with analysis)',
                 },
                 contextDirectory: {
                     type: 'string',
@@ -1787,6 +1819,65 @@ async function handleSuggestProjectMetadata(args: {
     };
 }
 
+async function handleSuggestTermMetadata(args: {
+    term: string;
+    source?: string;
+    expansion?: string;
+    contextDirectory?: string;
+}) {
+    const context = await Context.create({
+        startingDir: args.contextDirectory || process.cwd(),
+    });
+
+    const smartConfig = context.getSmartAssistanceConfig();
+
+    if (!smartConfig.enabled || smartConfig.termsEnabled === false) {
+        throw new Error('Term smart assistance is disabled in configuration.');
+    }
+
+    const termAssist = TermAssist.create(smartConfig);
+    const termContextHelper = TermContext.create(context);
+    const contentFetcher = ContentFetcher.create();
+
+    // Gather internal context
+    const internalContext = termContextHelper.gatherInternalContext(args.term, args.expansion);
+
+    // Fetch external content if source provided
+    let fetchResult: ContentFetcher.FetchResult | undefined;
+    if (args.source) {
+        fetchResult = await contentFetcher.fetch(args.source);
+    }
+
+    // Build analysis context
+    const analysisContext = TermContext.buildAnalysisContext(
+        args.term,
+        args.expansion,
+        fetchResult,
+        internalContext
+    );
+
+    // Generate suggestions
+    const suggestions = await termAssist.generateAll(args.term, analysisContext);
+
+    // Find related projects based on generated topics
+    let suggestedProjects: string[] = [];
+    if (suggestions.topics.length > 0) {
+        const projects = termContextHelper.findProjectsByTopic(suggestions.topics);
+        suggestedProjects = projects.map(p => p.id);
+    }
+
+    return {
+        success: true,
+        data: {
+            soundsLike: suggestions.soundsLike,
+            description: suggestions.description,
+            topics: suggestions.topics,
+            domain: suggestions.domain,
+            suggestedProjects,
+        },
+    };
+}
+
 // ============================================================================
 // Server Setup
 // ============================================================================
@@ -1882,6 +1973,9 @@ async function main() {
                     break;
                 case 'protokoll_suggest_project_metadata':
                     result = await handleSuggestProjectMetadata(args as Parameters<typeof handleSuggestProjectMetadata>[0]);
+                    break;
+                case 'protokoll_suggest_term_metadata':
+                    result = await handleSuggestTermMetadata(args as Parameters<typeof handleSuggestTermMetadata>[0]);
                     break;
 
                 // Transcript Actions
