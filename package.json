@@ -1,6 +1,6 @@
 {
   "name": "@redaksjon/protokoll",
-  "version": "0.3.0",
+  "version": "0.3.0-dev.0",
   "description": "Focused audio transcription with intelligent context integration",
   "main": "dist/main.js",
   "type": "module",
