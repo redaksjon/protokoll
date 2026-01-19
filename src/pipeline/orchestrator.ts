@@ -369,6 +369,57 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
             // Step 6: Write final output using Output module with metadata
             log('debug', 'Writing final transcript...');
             if (state.enhancedText) {
+                // Build entity metadata from referenced entities
+                const buildEntityReferences = (): Metadata.TranscriptMetadata['entities'] => {
+                    const refs = agenticResult.state.referencedEntities;
+                    if (!refs) return undefined;
+                    
+                    const entities: NonNullable<Metadata.TranscriptMetadata['entities']> = {
+                        people: [],
+                        projects: [],
+                        terms: [],
+                        companies: [],
+                    };
+                    
+                    // Convert sets of IDs to EntityReference arrays
+                    for (const personId of refs.people) {
+                        const person = context.getPerson(personId);
+                        if (person) {
+                            entities.people!.push({ id: person.id, name: person.name, type: 'person' });
+                        }
+                    }
+                    
+                    for (const projectId of refs.projects) {
+                        const project = context.getProject(projectId);
+                        if (project) {
+                            entities.projects!.push({ id: project.id, name: project.name, type: 'project' });
+                        }
+                    }
+                    
+                    for (const termId of refs.terms) {
+                        const term = context.getTerm(termId);
+                        if (term) {
+                            entities.terms!.push({ id: term.id, name: term.name, type: 'term' });
+                        }
+                    }
+                    
+                    for (const companyId of refs.companies) {
+                        const company = context.getCompany(companyId);
+                        if (company) {
+                            entities.companies!.push({ id: company.id, name: company.name, type: 'company' });
+                        }
+                    }
+                    
+                    // Only return if we found any entities
+                    const hasEntities = 
+                        entities.people!.length > 0 ||
+                        entities.projects!.length > 0 ||
+                        entities.terms!.length > 0 ||
+                        entities.companies!.length > 0;
+                    
+                    return hasEntities ? entities : undefined;
+                };
+                
                 // Build metadata from routing decision and input
                 const transcriptMetadata: Metadata.TranscriptMetadata = {
                     title: extractTitleFromPath(paths.final),
@@ -378,6 +429,7 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
                     routing: Metadata.createRoutingMetadata(routeResult),
                     tags: Metadata.extractTagsFromSignals(routeResult.signals),
                     confidence: routeResult.confidence,
+                    entities: buildEntityReferences(),
                 };
                 
                 await output.writeTranscript(paths, state.enhancedText, transcriptMetadata);

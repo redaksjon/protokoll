@@ -21,7 +21,8 @@ Protokoll transforms audio recordings into intelligent, context-enhanced transcr
 - [**Context Commands**](./context-commands.md): CLI for managing entities
 - [**Routing**](./routing.md): Intelligent note routing
 - [**Reasoning**](./reasoning.md): Reasoning model integration
-- [**Transcript Actions**](./action.md): Post-processing commands (combine, etc.)
+- [**Transcript Listing**](./transcript-listing.md): Browse, search, and filter transcripts
+- [**Transcript Actions**](./action.md): Edit, combine, and manage transcripts
 - [**Feedback**](./feedback.md): Intelligent feedback for corrections
 
 ### AI Integration
@@ -95,6 +96,21 @@ protokoll person delete <id> --force
 # Context overview
 protokoll context status
 protokoll context search <query>
+```
+
+### Transcript Management
+
+```bash
+# List transcripts with search and filtering
+protokoll transcript list <directory>
+protokoll transcript list ~/notes --search "kubernetes"
+protokoll transcript list ~/notes --start-date 2026-01-01 --limit 25
+
+# Compare raw vs enhanced
+protokoll transcript compare <file>
+
+# Show transcript info
+protokoll transcript info <file>
 ```
 
 ### Transcript Actions

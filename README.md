@@ -745,7 +745,74 @@ For complete documentation, see the [Context Commands Guide](./guide/context-com
 
 ## Transcript Actions
 
-Protokoll includes the `action` command for editing and combining existing transcripts. This is useful for post-processing, organizing, and managing your transcript library.
+Protokoll includes commands for working with transcripts: listing, editing, combining, and analyzing your transcript library.
+
+### List Transcripts
+
+Search, filter, and browse your transcript library with pagination:
+
+```bash
+# List recent transcripts (default: 50 most recent)
+protokoll transcript list ~/notes
+
+# Search for transcripts containing specific text
+protokoll transcript list ~/notes --search "kubernetes"
+
+# Filter by date range
+protokoll transcript list ~/notes --start-date 2026-01-01 --end-date 2026-01-31
+
+# Sort by filename or title instead of date
+protokoll transcript list ~/notes --sort-by title
+
+# Pagination - show next 50 results
+protokoll transcript list ~/notes --limit 50 --offset 50
+
+# Combine filters
+protokoll transcript list ~/notes \
+  --search "meeting" \
+  --start-date 2026-01-01 \
+  --sort-by date \
+  --limit 25
+```
+
+**Example Output:**
+
+```
+📂 Transcripts in: ~/notes
+📊 Showing 1-3 of 45 total
+
+✅ 2026-01-18 14:30 - Meeting with Priya about Q1 Planning
+   2026-01-18-1430_Meeting_with_Priya.md
+
+✅ 2026-01-17 - Quick Ideas for New Feature
+   2026-01-17_Quick_Ideas.md
+
+   2026-01-16 09:15 - Sprint Planning Session
+   2026-01-16-0915_Sprint_Planning.md
+
+💡 More results available. Use --offset 50 to see the next page.
+```
+
+**List Options:**
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--limit <number>` | Max results to return | 50 |
+| `--offset <number>` | Results to skip (pagination) | 0 |
+| `--sort-by <field>` | Sort by: date, filename, title | date |
+| `--start-date <YYYY-MM-DD>` | Filter from this date | none |
+| `--end-date <YYYY-MM-DD>` | Filter to this date | none |
+| `--search <text>` | Search filename and content | none |
+
+**What Gets Displayed:**
+
+- ✅ or space (indicates if raw transcript exists)
+- Date from filename (YYYY-MM-DD format)
+- Time if available (HH:MM format)
+- Extracted title from document heading
+- Filename
+
+**MCP Tool:** Also available as `protokoll_list_transcripts` for AI assistants.
 
 ### Edit a Single Transcript
 
@@ -1238,6 +1305,195 @@ Welcome to Protokoll!
 Configuration saved to ~/.protokoll/config.yaml
 ```
 
+### Interactive Session Tracking & Control
+
+Protokoll now provides comprehensive tracking and control during interactive sessions:
+
+#### Per-File Progress Monitoring
+
+Every prompt shows your progress for the current file:
+
+```
+[File: recording1.m4a] [Prompts: 3]
+(Type 'S' to skip remaining prompts for this file)
+
+────────────────────────────────────────────────────────────
+[Unknown: "Kubernetes"]
+...
+```
+
+#### Skip Rest of File
+
+When processing long recordings with many prompts, you can skip ahead:
+
+```
+> S
+
+[Skipping remaining prompts for this file...]
+```
+
+This is useful when:
+- You've answered enough questions for one file
+- A recording has too many unknown terms to process now
+- You want to move to the next file quickly
+
+The file will still be transcribed, but no more interactive prompts will appear for it.
+
+#### Session Summary Report
+
+At the end of every interactive session, you get a comprehensive summary:
+
+```
+═══════════════════════════════════════════════════════════
+  INTERACTIVE SESSION SUMMARY
+═══════════════════════════════════════════════════════════
+
+Duration: 8m 23s
+Total prompts answered: 12
+
+────────────────────────────────────────────────────────────
+  FILES PROCESSED
+────────────────────────────────────────────────────────────
+
+1. /recordings/meeting1.m4a
+   Prompts answered: 5
+   Status: Completed
+   Transcript: ~/notes/2026/01/2026-01-18_Meeting_Notes.md
+   Audio moved to: ~/archive/2026/01/meeting1.m4a
+
+2. /recordings/ideas.m4a
+   Prompts answered: 3
+   Status: SKIPPED (user requested)
+   Transcript: ~/notes/2026/01/2026-01-18_Quick_Ideas.md
+
+────────────────────────────────────────────────────────────
+  CHANGES MADE
+────────────────────────────────────────────────────────────
+
+✓ Terms added (3):
+  - Kubernetes
+  - Docker
+  - GraphQL
+
+✓ Projects added (1):
+  - Project Alpha
+
+✓ Aliases created (2):
+  - "K8s" → "Kubernetes"
+  - "Chronology" → "Kronologi"
+
+═══════════════════════════════════════════════════════════
+```
+
+This summary shows:
+- **Session duration** and total prompts answered
+- **Each file** processed with prompt counts, status, and output locations
+- **All changes** made to your context (new terms, projects, aliases)
+
+#### Mid-Session Stop
+
+Press `Ctrl+C` at any time during an interactive session to stop and see the summary:
+
+```
+^C
+[Session interrupted by user]
+
+═══════════════════════════════════════════════════════════
+  INTERACTIVE SESSION SUMMARY
+═══════════════════════════════════════════════════════════
+...
+```
+
+All progress up to that point is saved. You can resume processing the remaining files later.
+
+### Streamlined Learning Flow
+
+The interactive wizard has been redesigned for speed and efficiency:
+
+#### Smart Similarity Matching
+
+Protokoll automatically detects similar existing terms:
+
+```
+────────────────────────────────────────────────────────────
+[Unknown: "Chronology"]
+────────────────────────────────────────────────────────────
+
+Found similar term(s): Kronologi
+Is "Chronology" the same as "Kronologi"? (Y/N): Y
+
+info: Added alias "Chronology" to existing term "Kronologi"
+```
+
+No more duplicate entries for similar spellings!
+
+#### Automated Content Analysis
+
+Instead of answering multiple questions, just provide a URL or file:
+
+```
+────────────────────────────────────────────────────────────
+[Unknown: "Cursor"]
+────────────────────────────────────────────────────────────
+
+Ignore this? (X to ignore, or Enter to continue): 
+
+[How should I learn about this?]
+Options:
+  1. Provide a file path (e.g., ~/docs/project.md)
+  2. Provide a URL (e.g., https://example.com)
+  3. Paste text directly
+  4. Enter details manually
+
+Enter 1-4, or paste path/URL directly: https://cursor.com
+
+Fetching content from: https://cursor.com...
+Analyzing content from cursor.com...
+
+────────────────────────────────────────────────────────────
+[Analysis Results]
+Type: TERM
+Name: Cursor
+Description: Cursor is an AI-powered code editor...
+Topics: ai, code-editor, vscode, development
+Confidence: high
+────────────────────────────────────────────────────────────
+
+Use this? (Y/N, or Enter to accept): 
+
+Which project(s) is this related to?
+  1. FjellGrunn
+  2. Redaksjon
+  3. Grunnverk
+  N. Create new project
+
+Enter numbers (comma-separated) or N, or Enter to skip: 2
+Associated with: Redaksjon
+
+info: Added term "Cursor" to Redaksjon
+```
+
+**95% automated**: Just provide documentation and let AI extract:
+- Entity type (Project vs Term)
+- Correct name
+- Description
+- Related topics
+- Acronym expansions
+
+#### Clean Project Selection
+
+Project lists now show only names, not full descriptions:
+
+```
+Which project(s) is this related to?
+  1. FjellGrunn
+  2. Grunnverk
+  3. Redaksjon
+  4. Utilarium
+```
+
+Much easier to scan and select!
+
 ## Self-Reflection Reports
 
 Enable with `--self-reflection` to generate detailed reports:
@@ -1332,6 +1588,32 @@ Each transcript includes:
 ---
 
 # Your Transcript Content Here
+
+...transcript content...
+
+---
+
+## Entity References
+
+<!-- Machine-readable entity metadata for indexing and querying -->
+
+### People
+
+- `priya-sharma`: Priya Sharma
+- `john-smith`: John Smith
+
+### Projects
+
+- `project-alpha`: Project Alpha
+
+### Terms
+
+- `kubernetes`: Kubernetes
+- `graphql`: GraphQL
+
+### Companies
+
+- `acme-corp`: Acme Corp
 ```
 
 ### Metadata Fields
@@ -1349,6 +1631,17 @@ Each transcript includes:
 | **Reasoning** | Explanation of routing decision |
 | **Tags** | Auto-extracted from signals (people, companies, topics) |
 | **Duration** | Audio duration in human-readable format |
+
+### Entity References (Footer)
+
+At the bottom of each transcript, Protokoll automatically includes structured entity metadata showing all entities (people, projects, terms, companies) that were referenced or used during processing. This metadata:
+
+- **Enables querying**: Find all transcripts that mention a specific person or project
+- **Machine-readable**: Structured format for programmatic access
+- **Auto-generated**: Tracks everything used during transcription enhancement
+- **Indexable**: Perfect for building search indexes or knowledge graphs
+
+The entity metadata is tracked automatically as Protokoll processes the transcript - whenever a lookup tool finds a person, project, term, or company in your context, it's recorded in the footer.
 
 ### Using Metadata
 

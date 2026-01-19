@@ -21,6 +21,14 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
     CallToolRequestSchema,
     ListToolsRequestSchema,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    ListResourcesRequestSchema,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    ReadResourceRequestSchema,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    ListPromptsRequestSchema,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    GetPromptRequestSchema,
     type Tool,
 // eslint-disable-next-line import/extensions
 } from '@modelcontextprotocol/sdk/types.js';
@@ -61,6 +69,7 @@ import {
     DEFAULT_TEMP_DIRECTORY,
 } from '@/constants';
 import { parseTranscript, combineTranscripts, editTranscript } from '@/cli/action';
+import { listTranscripts } from '@/cli/transcript';
 import { processFeedback, applyChanges, type FeedbackContext } from '@/cli/feedback';
 import type { Person, Project, Term, Company, IgnoredTerm, Entity, EntityType } from '@/context/types';
 
@@ -974,6 +983,52 @@ const tools: Tool[] = [
         },
     },
     {
+        name: 'protokoll_list_transcripts',
+        description:
+            'List transcripts in a directory with pagination, filtering, and search. ' +
+            'Returns transcript metadata including date, time, title, and file path. ' +
+            'Supports sorting by date (default), filename, or title. ' +
+            'Can filter by date range and search within transcript content.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                directory: {
+                    type: 'string',
+                    description: 'Directory to search for transcripts (searches recursively)',
+                },
+                limit: {
+                    type: 'number',
+                    description: 'Maximum number of results to return (default: 50)',
+                    default: 50,
+                },
+                offset: {
+                    type: 'number',
+                    description: 'Number of results to skip for pagination (default: 0)',
+                    default: 0,
+                },
+                sortBy: {
+                    type: 'string',
+                    enum: ['date', 'filename', 'title'],
+                    description: 'Field to sort by (default: date)',
+                    default: 'date',
+                },
+                startDate: {
+                    type: 'string',
+                    description: 'Filter transcripts from this date onwards (YYYY-MM-DD format)',
+                },
+                endDate: {
+                    type: 'string',
+                    description: 'Filter transcripts up to this date (YYYY-MM-DD format)',
+                },
+                search: {
+                    type: 'string',
+                    description: 'Search for transcripts containing this text (searches filename and content)',
+                },
+            },
+            required: ['directory'],
+        },
+    },
+    {
         name: 'protokoll_provide_feedback',
         description:
             'Provide natural language feedback to correct a transcript. ' +
@@ -1796,6 +1851,57 @@ async function handleReadTranscript(args: { transcriptPath: string }) {
     };
 }
 
+async function handleListTranscripts(args: {
+    directory: string;
+    limit?: number;
+    offset?: number;
+    sortBy?: 'date' | 'filename' | 'title';
+    startDate?: string;
+    endDate?: string;
+    search?: string;
+}) {
+    const directory = resolve(args.directory);
+
+    if (!await fileExists(directory)) {
+        throw new Error(`Directory not found: ${directory}`);
+    }
+
+    const result = await listTranscripts({
+        directory,
+        limit: args.limit ?? 50,
+        offset: args.offset ?? 0,
+        sortBy: args.sortBy ?? 'date',
+        startDate: args.startDate,
+        endDate: args.endDate,
+        search: args.search,
+    });
+
+    return {
+        directory,
+        transcripts: result.transcripts.map(t => ({
+            path: t.path,
+            filename: t.filename,
+            date: t.date,
+            time: t.time,
+            title: t.title,
+            hasRawTranscript: t.hasRawTranscript,
+        })),
+        pagination: {
+            total: result.total,
+            limit: result.limit,
+            offset: result.offset,
+            hasMore: result.hasMore,
+            nextOffset: result.hasMore ? result.offset + result.limit : null,
+        },
+        filters: {
+            sortBy: args.sortBy ?? 'date',
+            startDate: args.startDate,
+            endDate: args.endDate,
+            search: args.search,
+        },
+    };
+}
+
 async function handleProvideFeedback(args: {
     transcriptPath: string;
     feedback: string;
@@ -2180,7 +2286,7 @@ async function main() {
     const server = new Server(
         {
             name: 'protokoll',
-            version: '0.0.1',
+            version: '0.1.0',
             description:
                 'Intelligent audio transcription with context-aware enhancement. ' +
                 'Process audio files through a pipeline that transcribes with Whisper, ' +
@@ -2191,6 +2297,13 @@ async function main() {
         {
             capabilities: {
                 tools: {},
+                resources: {
+                    subscribe: false,
+                    listChanged: true,
+                },
+                prompts: {
+                    listChanged: false,
+                },
             },
         }
     );
@@ -2290,6 +2403,9 @@ async function main() {
                     break;
                 case 'protokoll_read_transcript':
                     result = await handleReadTranscript(args as Parameters<typeof handleReadTranscript>[0]);
+                    break;
+                case 'protokoll_list_transcripts':
+                    result = await handleListTranscripts(args as Parameters<typeof handleListTranscripts>[0]);
                     break;
                 case 'protokoll_provide_feedback':
                     result = await handleProvideFeedback(args as Parameters<typeof handleProvideFeedback>[0]);

@@ -23,7 +23,12 @@
     "lint:fix": "eslint . --ext .ts --fix",
     "clean": "rm -rf dist",
     "precommit": "npm run lint && npm run test",
-    "prepublishOnly": "npm run clean && npm run build"
+    "prepublishOnly": "npm run clean && npm run build",
+    "mcp:build": "npm run build && echo 'MCP server built'",
+    "mcp:inspect": "npm run build && npx @modelcontextprotocol/inspector dist/mcp/server.js",
+    "mcp:inspect:dev": "nodemon --watch src --ext ts --exec 'npm run mcp:inspect'",
+    "mcp:test": "node scripts/test-mcp-compliance.js",
+    "mcp:start": "node dist/mcp/server.js"
   },
   "keywords": [
     "focus",
@@ -60,6 +65,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.1",
     "@eslint/js": "^9.39.1",
+    "@modelcontextprotocol/inspector": "^0.18.0",
     "@rollup/plugin-replace": "^6.0.3",
     "@swc/core": "^1.15.1",
     "@types/js-yaml": "^4.0.9",

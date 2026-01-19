@@ -50,6 +50,12 @@ export const create = (
             correctedText: transcriptText,
             unknownEntities: [],
             resolvedEntities: new Map(),
+            referencedEntities: {
+                people: new Set(),
+                projects: new Set(),
+                terms: new Set(),
+                companies: new Set(),
+            },
             confidence: 0,
         };
     
@@ -711,6 +717,18 @@ Remember: preserve ALL content, only fix transcription errors.`;
                         // Update state based on tool results
                         if (result.data?.person) {
                             state.resolvedEntities.set(result.data.person.name, result.data.suggestion);
+                            // Track person entity reference
+                            state.referencedEntities.people.add(result.data.person.id);
+                        }
+                        
+                        // Track term entities
+                        if (result.data?.term) {
+                            state.referencedEntities.terms.add(result.data.term.id);
+                        }
+                        
+                        // Track company entities
+                        if (result.data?.company) {
+                            state.referencedEntities.companies.add(result.data.company.id);
                         }
                         
                         // Capture routing from route_note tool
@@ -723,6 +741,11 @@ Remember: preserve ALL content, only fix transcription errors.`;
                                 signals: routingDecision.signals,
                                 reasoning: routingDecision.reasoning || 'Determined by route_note tool',
                             };
+                            
+                            // Track project if routing decision includes it
+                            if (routingDecision.projectId) {
+                                state.referencedEntities.projects.add(routingDecision.projectId);
+                            }
                         }
                         
                         // Capture routing from lookup_project when project has routing config
@@ -740,6 +763,9 @@ Remember: preserve ALL content, only fix transcription errors.`;
                             };
                             logger.debug('Captured routing from project lookup: %s -> %s', 
                                 project.name, project.routing.destination);
+                            
+                            // Track project entity reference
+                            state.referencedEntities.projects.add(project.id);
                         }
           
                     } catch (error) {

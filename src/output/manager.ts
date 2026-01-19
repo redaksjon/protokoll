@@ -133,11 +133,18 @@ export const create = (config: OutputConfig): ManagerInstance => {
         content: string,
         metadata?: Metadata.TranscriptMetadata
     ): Promise<string> => {
-        // Prepend metadata if provided
         let finalContent = content;
+        
         if (metadata) {
+            // Prepend header metadata
             const metadataSection = Metadata.formatMetadataMarkdown(metadata);
             finalContent = metadataSection + content;
+            
+            // Append entity metadata at the end
+            const entitySection = Metadata.formatEntityMetadataMarkdown(metadata);
+            if (entitySection) {
+                finalContent = finalContent + entitySection;
+            }
         }
         
         await fs.writeFile(paths.final, finalContent, 'utf-8');

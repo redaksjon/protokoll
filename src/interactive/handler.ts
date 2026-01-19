@@ -17,6 +17,8 @@ import {
 } from './types';
 import * as Logging from '../logging';
 import * as Sound from '../util/sound';
+import * as ContentFetcher from '../cli/content-fetcher';
+import * as OpenAI from '../util/openai';
 
 export interface HandlerInstance {
     startSession(): void;
@@ -24,6 +26,21 @@ export interface HandlerInstance {
     handleClarification(request: ClarificationRequest): Promise<ClarificationResponse>;
     isEnabled(): boolean;
     getSession(): InteractiveSession | null;
+    // File tracking
+    startFile(filePath: string): void;
+    endFile(outputPath?: string, movedTo?: string): void;
+    // Entity tracking
+    trackTermAdded(termName: string): void;
+    trackTermUpdated(termName: string): void;
+    trackProjectAdded(projectName: string): void;
+    trackProjectUpdated(projectName: string): void;
+    trackPersonAdded(personName: string): void;
+    trackAlias(alias: string, linkedTo: string): void;
+    // Session control
+    requestStop(): void;
+    shouldStopSession(): boolean;
+    // Summary
+    printSummary(): void;
 }
 
 const createReadlineInterface = () => {
@@ -55,6 +72,88 @@ const askQuestion = (rl: readline.Interface, question: string): Promise<string> 
 
 // Helper to write to stdout without triggering no-console lint rule
 const write = (text: string) => process.stdout.write(text + '\n');
+
+/**
+ * Analyze content from URL/file to determine if it's a Project or Term
+ * and extract relevant metadata
+ */
+interface ContentAnalysis {
+    entityType: 'project' | 'term' | 'unknown';
+    name: string;
+    description?: string;
+    expansion?: string;  // For terms that are acronyms
+    topics?: string[];
+    confidence: 'high' | 'medium' | 'low';
+    reasoning: string;
+}
+
+const analyzeContentForEntity = async (
+    content: string,
+    sourceName: string,
+    originalTerm: string
+): Promise<ContentAnalysis> => {
+    const logger = Logging.getLogger();
+    
+    logger.debug('Analyzing content to determine entity type for: %s', originalTerm);
+    
+    const prompt = `You are analyzing content to determine if "${originalTerm}" refers to a PROJECT or a TERM.
+
+DEFINITIONS:
+- PROJECT: A specific initiative, codebase, client engagement, or ongoing work effort with deliverables
+- TERM: A technology, concept, tool, methodology, or technical term that needs to be understood and referenced
+
+SOURCE: ${sourceName}
+CONTENT:
+---
+${content.substring(0, 8000)}
+---
+
+Based on this content, determine:
+1. Is "${originalTerm}" a PROJECT or a TERM?
+2. What is the correct/full name?
+3. What is a brief description (1-2 sentences)?
+4. If it's a TERM and an acronym, what does it stand for?
+5. What are related topics/keywords (5-10 words)?
+6. How confident are you? (high/medium/low)
+
+Respond in JSON format:
+{
+    "entityType": "project" | "term",
+    "name": "string",
+    "description": "string",
+    "expansion": "string or null",
+    "topics": ["keyword1", "keyword2", ...],
+    "confidence": "high" | "medium" | "low",
+    "reasoning": "Brief explanation of your determination"
+}`;
+
+    try {
+        const response = await OpenAI.createCompletion(
+            [{ role: 'user', content: prompt }],
+            { 
+                responseFormat: { type: 'json_object' },
+                reasoningLevel: 'medium',
+                maxTokens: 2000,
+                reason: `analyze content for "${originalTerm}"`,
+            }
+        );
+        
+        const analysis = response as ContentAnalysis;
+        logger.debug('Content analysis result: %j', analysis);
+        
+        return analysis;
+    } catch (error: any) {
+        logger.error('Failed to analyze content: %s', error.message);
+        
+        // Return fallback analysis
+        return {
+            entityType: 'unknown',
+            name: originalTerm,
+            confidence: 'low',
+            reasoning: `Failed to analyze: ${error.message}`,
+        };
+    }
+};
 
 // Simplified project creation (used when creating project from term/person association)
 const runCreateProjectFlow = async (
@@ -88,149 +187,272 @@ const runCreateProjectFlow = async (
     };
 };
 
+/**
+ * Calculate string similarity (simple Levenshtein-based)
+ * Returns a score from 0 (completely different) to 1 (identical)
+ */
+const calculateSimilarity = (str1: string, str2: string): number => {
+    const s1 = str1.toLowerCase();
+    const s2 = str2.toLowerCase();
+    
+    if (s1 === s2) return 1.0;
+    
+    // Simple character overlap heuristic
+    const set1 = new Set(s1.split(''));
+    const set2 = new Set(s2.split(''));
+    const intersection = new Set([...set1].filter(x => set2.has(x)));
+    const union = new Set([...set1, ...set2]);
+    
+    return intersection.size / union.size;
+};
+
+/**
+ * Find similar existing terms
+ */
+const findSimilarTerms = (term: string, existingTerms: string[]): string[] => {
+    const similarities = existingTerms.map(existing => ({
+        term: existing,
+        score: calculateSimilarity(term, existing),
+    }));
+    
+    // Return terms with similarity > 0.6, sorted by score
+    return similarities
+        .filter(s => s.score > 0.6)
+        .sort((a, b) => b.score - a.score)
+        .map(s => s.term);
+};
+
+/**
+ * New streamlined wizard flow
+ */
 const runNewProjectWizard = async (
     rl: readline.Interface,
     term: string,
     context: string | undefined,
     projectOptions: string[] | undefined
 ): Promise<NewProjectWizardResult> => {
+    const fetcher = ContentFetcher.create();
+    
     write('');
     write('─'.repeat(60));
-    write(`[Unknown Project/Term]`);
-    write(`Term: "${term}"`);
-    write('');
+    write(`[Unknown: "${term}"]`);
     if (context) {
-        // Display context with proper formatting (it now includes file info)
         write(context);
     }
     write('─'.repeat(60));
     
-    // Step 1: Is this a project or a term?
-    const entityType = await askQuestion(rl, '\nIs this a Project or a Term? (P/T/X to ignore, or Enter to skip): ');
-    
-    if (entityType === '' || entityType.toLowerCase() === 's' || entityType.toLowerCase() === 'skip') {
-        return { action: 'skip' };
-    }
-    
-    // IGNORE FLOW - user doesn't want to be asked about this term again
-    if (entityType.toLowerCase() === 'x' || entityType.toLowerCase() === 'i' || entityType.toLowerCase() === 'ignore') {
-        write(`\n[Adding "${term}" to ignore list - you won't be asked about this again]`);
+    // Quick ignore option
+    const ignoreCheck = await askQuestion(rl, '\nIgnore this? (X to ignore, or Enter to continue): ');
+    if (ignoreCheck.toLowerCase() === 'x' || ignoreCheck.toLowerCase() === 'ignore') {
+        write(`\n[Adding "${term}" to ignore list]`);
         return { action: 'ignore', ignoredTerm: term };
     }
     
-    // PROJECT FLOW
+    // TODO: Get existing terms from context to check for similar matches
+    // For now, we'll skip this step but the infrastructure is here
+    const existingTerms: string[] = []; // Would come from context.getTerms()
+    const similarTerms = findSimilarTerms(term, existingTerms);
+    
+    if (similarTerms.length > 0) {
+        write(`\nFound similar term(s): ${similarTerms.join(', ')}`);
+        const useSimilar = await askQuestion(rl, `Is "${term}" the same as "${similarTerms[0]}"? (Y/N): `);
+        
+        if (useSimilar.toLowerCase() === 'y' || useSimilar.toLowerCase() === 'yes') {
+            return {
+                action: 'link',
+                linkedTermName: similarTerms[0],
+                aliasName: term,
+            };
+        }
+    }
+    
+    // Step 1: Get source of information
+    write('\n[How should I learn about this?]');
+    write('Options:');
+    write('  1. Provide a file path (e.g., ~/docs/project.md)');
+    write('  2. Provide a URL (e.g., https://example.com)');
+    write('  3. Paste text directly');
+    write('  4. Enter details manually');
+    
+    const sourceChoice = await askQuestion(rl, '\nEnter 1-4, or paste path/URL directly: ');
+    
+    let analysis: ContentAnalysis | null = null;
+    
+    // Check if user pasted a URL or path directly
+    if (fetcher.isUrl(sourceChoice) || sourceChoice.includes('/') || sourceChoice.includes('\\')) {
+        write(`\nFetching content from: ${sourceChoice}...`);
+        const fetchResult = await fetcher.fetch(sourceChoice);
+        
+        if (fetchResult.success && fetchResult.content) {
+            write(`Analyzing content from ${fetchResult.sourceName}...`);
+            analysis = await analyzeContentForEntity(fetchResult.content, fetchResult.sourceName, term);
+        } else {
+            write(`\nError: ${fetchResult.error}`);
+        }
+    } else if (sourceChoice === '1') {
+        // File path
+        const filePath = await askQuestion(rl, '\nFile path: ');
+        write(`\nReading file: ${filePath}...`);
+        const fetchResult = await fetcher.fetch(filePath);
+        
+        if (fetchResult.success && fetchResult.content) {
+            write(`Analyzing content...`);
+            analysis = await analyzeContentForEntity(fetchResult.content, fetchResult.sourceName, term);
+        } else {
+            write(`\nError: ${fetchResult.error}`);
+        }
+    } else if (sourceChoice === '2') {
+        // URL
+        const url = await askQuestion(rl, '\nURL: ');
+        write(`\nFetching from: ${url}...`);
+        const fetchResult = await fetcher.fetch(url);
+        
+        if (fetchResult.success && fetchResult.content) {
+            write(`Analyzing content from ${fetchResult.sourceName}...`);
+            analysis = await analyzeContentForEntity(fetchResult.content, fetchResult.sourceName, term);
+        } else {
+            write(`\nError: ${fetchResult.error}`);
+        }
+    } else if (sourceChoice === '3') {
+        // Paste text
+        write('\nPaste or type text (end with empty line):');
+        const lines: string[] = [];
+        let line: string;
+        do {
+            line = await askQuestion(rl, '');
+            if (line) lines.push(line);
+        } while (line);
+        
+        const pastedText = lines.join('\n');
+        if (pastedText) {
+            write('\nAnalyzing pasted text...');
+            analysis = await analyzeContentForEntity(pastedText, 'pasted text', term);
+        }
+    }
+    
+    // If we have analysis, show results and confirm
+    if (analysis && analysis.entityType !== 'unknown') {
+        write('\n─'.repeat(60));
+        write('[Analysis Results]');
+        write(`Type: ${analysis.entityType.toUpperCase()}`);
+        write(`Name: ${analysis.name}`);
+        if (analysis.description) {
+            write(`Description: ${analysis.description}`);
+        }
+        if (analysis.expansion) {
+            write(`Stands for: ${analysis.expansion}`);
+        }
+        if (analysis.topics && analysis.topics.length > 0) {
+            write(`Topics: ${analysis.topics.join(', ')}`);
+        }
+        write(`Confidence: ${analysis.confidence}`);
+        write('─'.repeat(60));
+        
+        const confirm = await askQuestion(rl, '\nUse this? (Y/N, or Enter to accept): ');
+        
+        if (confirm.toLowerCase() !== 'n' && confirm.toLowerCase() !== 'no') {
+            // User accepted the analysis
+            if (analysis.entityType === 'project') {
+                return {
+                    action: 'create',
+                    projectName: analysis.name,
+                    description: analysis.description,
+                };
+            } else {
+                // It's a term - ask which project(s)
+                const selectedProjects = await promptProjectSelection(rl, analysis.name, projectOptions);
+                
+                return {
+                    action: 'term',
+                    termName: analysis.name,
+                    termExpansion: analysis.expansion,
+                    termDescription: analysis.description,
+                    termProjects: selectedProjects,
+                };
+            }
+        }
+    }
+    
+    // Fall back to manual entry
+    write('\n[Manual Entry]');
+    const entityType = await askQuestion(rl, 'Is this a Project or a Term? (P/T): ');
+    
     if (entityType.toLowerCase() === 'p' || entityType.toLowerCase() === 'project') {
-        // Step 2: Project name
-        const projectName = await askQuestion(rl, `\nWhat is this project's name? [${term}]: `);
+        const projectName = await askQuestion(rl, `Project name [${term}]: `);
         const finalName = projectName || term;
-        
-        // Step 3: Destination
-        const destination = await askQuestion(rl, '\nWhere should output be routed to? (Enter for default): ');
-        
-        // Step 4: Description
-        const description = await askQuestion(rl, '\nCan you tell me something about this project? (Enter to skip): ');
+        const description = await askQuestion(rl, 'Description (Enter to skip): ');
         
         return {
             action: 'create',
             projectName: finalName,
-            destination: destination || undefined,
             description: description || undefined,
         };
-    }
-    
-    // TERM FLOW
-    if (entityType.toLowerCase() === 't' || entityType.toLowerCase() === 'term') {
-        // Step 2: Check if this is an alias for an existing term
-        const isAlias = await askQuestion(rl, `\nIs "${term}" the same as an existing term you've already defined? (Y/N, or Enter to skip): `);
+    } else {
+        const termName = await askQuestion(rl, `Term name [${term}]: `);
+        const finalName = termName || term;
+        const expansion = await askQuestion(rl, 'Expansion (if acronym, Enter to skip): ');
+        const description = await askQuestion(rl, 'Description (Enter to skip): ');
         
-        if (isAlias.toLowerCase() === 'y' || isAlias.toLowerCase() === 'yes') {
-            const existingTermName = await askQuestion(rl, `\nWhich existing term is this the same as? (Enter the term name): `);
-            
-            if (existingTermName) {
-                return {
-                    action: 'link',
-                    linkedTermName: existingTermName.trim(),
-                    aliasName: term,
-                };
-            }
-        }
-        
-        // Step 3: Validate spelling
-        const termCorrection = await askQuestion(rl, `\nIs "${term}" spelled correctly? (Enter to accept, or type correction): `);
-        const finalTermName = termCorrection || term;
-        
-        if (termCorrection) {
-            write(`Term updated to: "${finalTermName}"`);
-        }
-        
-        // Step 4: Is this an acronym?
-        const expansion = await askQuestion(rl, `\nIf "${finalTermName}" is an acronym, what does it stand for? (Enter to skip): `);
-        
-        // Step 5: Which project(s) is this term associated with?
-        const termProjects: number[] = [];
-        let createdProject: NewProjectWizardResult | undefined;
-        
-        if (projectOptions && projectOptions.length > 0) {
-            write('\nExisting projects:');
-            projectOptions.forEach((opt, i) => {
-                write(`  ${i + 1}. ${opt}`);
-            });
-            write(`  N. Create a new project`);
-            
-            const projectSelection = await askQuestion(rl, `\nWhich project(s) is "${finalTermName}" associated with? (Enter numbers separated by commas, N for new, or Enter to skip): `);
-            
-            if (projectSelection.toLowerCase().includes('n')) {
-                // User wants to create a new project to associate with this term
-                write('');
-                write(`[Create New Project for Term "${finalTermName}"]`);
-                createdProject = await runCreateProjectFlow(rl, `The term "${finalTermName}" will be associated with this new project.`);
-                
-                if (createdProject.action === 'create' && createdProject.projectName) {
-                    write(`\n[Project "${createdProject.projectName}" will be created and associated with term "${finalTermName}"]`);
-                }
-            } else if (projectSelection) {
-                const indices = projectSelection.split(',').map(s => parseInt(s.trim(), 10) - 1);
-                for (const idx of indices) {
-                    if (!isNaN(idx) && idx >= 0 && idx < projectOptions.length) {
-                        termProjects.push(idx);
-                    }
-                }
-                
-                if (termProjects.length > 0) {
-                    write(`Associated with: ${termProjects.map(i => projectOptions[i].split(' - ')[0]).join(', ')}`);
-                }
-            }
-        } else {
-            // No existing projects - offer to create one
-            const createNew = await askQuestion(rl, `\nNo existing projects found. Create a new project for term "${finalTermName}"? (Y/N, or Enter to skip): `);
-            
-            if (createNew.toLowerCase() === 'y' || createNew.toLowerCase() === 'yes') {
-                write('');
-                write(`[Create New Project for Term "${finalTermName}"]`);
-                createdProject = await runCreateProjectFlow(rl, `The term "${finalTermName}" will be associated with this new project.`);
-                
-                if (createdProject.action === 'create' && createdProject.projectName) {
-                    write(`\n[Project "${createdProject.projectName}" will be created and associated with term "${finalTermName}"]`);
-                }
-            }
-        }
-        
-        // Step 6: Description
-        const termDesc = await askQuestion(rl, `\nBrief description of "${finalTermName}"? (Enter to skip): `);
+        const selectedProjects = await promptProjectSelection(rl, finalName, projectOptions);
         
         return {
             action: 'term',
-            termName: finalTermName,
+            termName: finalName,
             termExpansion: expansion || undefined,
-            termProjects: termProjects.length > 0 ? termProjects : undefined,
-            termDescription: termDesc || undefined,
-            createdProject,
+            termDescription: description || undefined,
+            termProjects: selectedProjects,
         };
     }
+};
+
+/**
+ * Prompt for project selection with clean UI (just names)
+ */
+const promptProjectSelection = async (
+    rl: readline.Interface,
+    termName: string,
+    projectOptions: string[] | undefined
+): Promise<number[] | undefined> => {
+    if (!projectOptions || projectOptions.length === 0) {
+        return undefined;
+    }
     
-    // Unrecognized input
-    write('\nUnrecognized input. Please enter P for Project, T for Term, or press Enter to skip.');
-    return { action: 'skip' };
+    write('\nWhich project(s) is this related to?');
+    
+    // Extract just the project names (before " - ")
+    const projectNames = projectOptions.map(opt => {
+        const match = opt.match(/^([^-]+)/);
+        return match ? match[1].trim() : opt;
+    });
+    
+    projectNames.forEach((name, i) => {
+        write(`  ${i + 1}. ${name}`);
+    });
+    write(`  N. Create new project`);
+    
+    const selection = await askQuestion(rl, '\nEnter numbers (comma-separated) or N, or Enter to skip: ');
+    
+    if (!selection) {
+        return undefined;
+    }
+    
+    if (selection.toLowerCase().includes('n')) {
+        // TODO: Handle new project creation
+        write('[New project creation not yet implemented in this flow]');
+        return undefined;
+    }
+    
+    const indices = selection
+        .split(',')
+        .map(s => parseInt(s.trim(), 10) - 1)
+        .filter(idx => !isNaN(idx) && idx >= 0 && idx < projectNames.length);
+    
+    if (indices.length > 0) {
+        write(`Associated with: ${indices.map(i => projectNames[i]).join(', ')}`);
+        return indices;
+    }
+    
+    return undefined;
 };
 
 const runNewPersonWizard = async (
@@ -463,6 +685,16 @@ export const create = (config: InteractiveConfig): HandlerInstance => {
             requests: [],
             responses: [],
             startedAt: new Date(),
+            filesProcessed: [],
+            changes: {
+                termsAdded: [],
+                termsUpdated: [],
+                projectsAdded: [],
+                projectsUpdated: [],
+                peopleAdded: [],
+                aliasesAdded: [],
+            },
+            shouldStop: false,
         };
         
         // Check if we can run interactively:
@@ -476,6 +708,15 @@ export const create = (config: InteractiveConfig): HandlerInstance => {
             if (!rl) {
                 rl = createReadlineInterface();
                 logger.info('Interactive session started - will prompt for clarifications');
+                
+                // Setup Ctrl+C handler for graceful summary output
+                process.on('SIGINT', () => {
+                    if (session) {
+                        write('\n\n[Session interrupted by user]\n');
+                        printSummary();
+                        process.exit(0);
+                    }
+                });
             } else {
                 logger.debug('Interactive session continued (readline already active)');
             }
@@ -489,6 +730,13 @@ export const create = (config: InteractiveConfig): HandlerInstance => {
     const endSession = (): InteractiveSession => {
         if (!session) {
             throw new Error('No active session');
+        }
+        
+        session.completedAt = new Date();
+        
+        // Print summary before closing
+        if (config.enabled && session.responses.length > 0) {
+            printSummary();
         }
         
         if (rl) {
@@ -506,7 +754,6 @@ export const create = (config: InteractiveConfig): HandlerInstance => {
             }
         }
         
-        session.completedAt = new Date();
         const completed = session;
         session = null;
         
@@ -572,6 +819,12 @@ export const create = (config: InteractiveConfig): HandlerInstance => {
             
             if (session) {
                 session.responses.push(response);
+                
+                // Increment prompt counter for current file
+                const fileIndex = session.filesProcessed.length - 1;
+                if (fileIndex >= 0) {
+                    session.filesProcessed[fileIndex].promptsAnswered++;
+                }
             }
             
             logger.debug('New project wizard completed', {
@@ -602,6 +855,12 @@ export const create = (config: InteractiveConfig): HandlerInstance => {
             
             if (session) {
                 session.responses.push(response);
+                
+                // Increment prompt counter for current file
+                const fileIndex = session.filesProcessed.length - 1;
+                if (fileIndex >= 0) {
+                    session.filesProcessed[fileIndex].promptsAnswered++;
+                }
             }
             
             logger.debug('New person wizard completed', {
@@ -614,8 +873,45 @@ export const create = (config: InteractiveConfig): HandlerInstance => {
         }
         
         // Standard single-prompt flow for other types
-        const prompt = formatClarificationPrompt(request);
-        const userInput = await askQuestion(rl, prompt);
+        // Show file context if available
+        let promptWithContext = formatClarificationPrompt(request);
+        if (session && session.currentFile) {
+            const fileIndex = session.filesProcessed.length - 1;
+            if (fileIndex >= 0) {
+                const fileProc = session.filesProcessed[fileIndex];
+                promptWithContext = `[File: ${fileProc.inputPath}] [Prompts: ${fileProc.promptsAnswered}]\n` +
+                    `(Type 'S' to skip remaining prompts for this file)\n\n` +
+                    promptWithContext;
+            }
+        }
+        
+        const userInput = await askQuestion(rl, promptWithContext);
+        
+        // Check for skip rest of file command
+        if (userInput.toLowerCase() === 's' || userInput.toLowerCase() === 'skip') {
+            write('\n[Skipping remaining prompts for this file...]');
+            
+            const response: ClarificationResponse = {
+                type: request.type,
+                term: request.term,
+                response: 'skip',
+                shouldRemember: false,
+                skipRestOfFile: true,
+            };
+            
+            if (session) {
+                session.responses.push(response);
+                
+                // Mark current file as skipped
+                const fileIndex = session.filesProcessed.length - 1;
+                if (fileIndex >= 0) {
+                    session.filesProcessed[fileIndex].skipped = true;
+                }
+            }
+            
+            logger.info('User requested to skip rest of file');
+            return response;
+        }
         
         // Process the user's response
         let finalResponse: string;
@@ -647,6 +943,12 @@ export const create = (config: InteractiveConfig): HandlerInstance => {
     
         if (session) {
             session.responses.push(response);
+            
+            // Increment prompt counter for current file
+            const fileIndex = session.filesProcessed.length - 1;
+            if (fileIndex >= 0) {
+                session.filesProcessed[fileIndex].promptsAnswered++;
+            }
         }
     
         logger.debug('Clarification resolved via user input', { 
@@ -662,6 +964,199 @@ export const create = (config: InteractiveConfig): HandlerInstance => {
     const isEnabled = () => config.enabled;
   
     const getSession = () => session;
+    
+    // File tracking methods
+    const startFile = (filePath: string) => {
+        if (!session) return;
+        
+        session.currentFile = filePath;
+        session.filesProcessed.push({
+            inputPath: filePath,
+            promptsAnswered: 0,
+            skipped: false,
+            startedAt: new Date(),
+        });
+        
+        logger.debug('Started processing file: %s', filePath);
+    };
+    
+    const endFile = (outputPath?: string, movedTo?: string) => {
+        if (!session || !session.currentFile) return;
+        
+        const fileIndex = session.filesProcessed.length - 1;
+        if (fileIndex >= 0) {
+            const fileProc = session.filesProcessed[fileIndex];
+            fileProc.completedAt = new Date();
+            fileProc.outputPath = outputPath;
+            fileProc.movedTo = movedTo;
+            
+            logger.debug('Completed file: %s (%d prompts)', fileProc.inputPath, fileProc.promptsAnswered);
+        }
+        
+        session.currentFile = undefined;
+    };
+    
+    // Entity tracking methods
+    const trackTermAdded = (termName: string) => {
+        if (!session) return;
+        if (!session.changes.termsAdded.includes(termName)) {
+            session.changes.termsAdded.push(termName);
+            logger.debug('Tracked term added: %s', termName);
+        }
+    };
+    
+    const trackTermUpdated = (termName: string) => {
+        if (!session) return;
+        if (!session.changes.termsUpdated.includes(termName)) {
+            session.changes.termsUpdated.push(termName);
+            logger.debug('Tracked term updated: %s', termName);
+        }
+    };
+    
+    const trackProjectAdded = (projectName: string) => {
+        if (!session) return;
+        if (!session.changes.projectsAdded.includes(projectName)) {
+            session.changes.projectsAdded.push(projectName);
+            logger.debug('Tracked project added: %s', projectName);
+        }
+    };
+    
+    const trackProjectUpdated = (projectName: string) => {
+        if (!session) return;
+        if (!session.changes.projectsUpdated.includes(projectName)) {
+            session.changes.projectsUpdated.push(projectName);
+            logger.debug('Tracked project updated: %s', projectName);
+        }
+    };
+    
+    const trackPersonAdded = (personName: string) => {
+        if (!session) return;
+        if (!session.changes.peopleAdded.includes(personName)) {
+            session.changes.peopleAdded.push(personName);
+            logger.debug('Tracked person added: %s', personName);
+        }
+    };
+    
+    const trackAlias = (alias: string, linkedTo: string) => {
+        if (!session) return;
+        session.changes.aliasesAdded.push({ alias, linkedTo });
+        logger.debug('Tracked alias: %s -> %s', alias, linkedTo);
+    };
+    
+    // Session control methods
+    const requestStop = () => {
+        if (!session) return;
+        session.shouldStop = true;
+        logger.info('Session stop requested by user');
+    };
+    
+    const shouldStopSession = (): boolean => {
+        return session?.shouldStop ?? false;
+    };
+    
+    // Summary generation
+    const printSummary = () => {
+        if (!session) {
+            write('\nNo active session to summarize.');
+            return;
+        }
+        
+        const duration = session.completedAt 
+            ? (session.completedAt.getTime() - session.startedAt.getTime()) / 1000
+            : (new Date().getTime() - session.startedAt.getTime()) / 1000;
+        
+        write('\n');
+        write('═'.repeat(60));
+        write('  INTERACTIVE SESSION SUMMARY');
+        write('═'.repeat(60));
+        write('');
+        
+        // Session duration
+        const minutes = Math.floor(duration / 60);
+        const seconds = Math.floor(duration % 60);
+        write(`Duration: ${minutes}m ${seconds}s`);
+        write(`Total prompts answered: ${session.responses.length}`);
+        write('');
+        
+        // Files processed
+        if (session.filesProcessed.length > 0) {
+            write('─'.repeat(60));
+            write('  FILES PROCESSED');
+            write('─'.repeat(60));
+            
+            session.filesProcessed.forEach((file, idx) => {
+                write(`\n${idx + 1}. ${file.inputPath}`);
+                write(`   Prompts answered: ${file.promptsAnswered}`);
+                if (file.skipped) {
+                    write(`   Status: SKIPPED (user requested)`);
+                } else {
+                    write(`   Status: Completed`);
+                }
+                if (file.outputPath) {
+                    write(`   Transcript: ${file.outputPath}`);
+                }
+                if (file.movedTo) {
+                    write(`   Audio moved to: ${file.movedTo}`);
+                }
+            });
+            write('');
+        }
+        
+        // Changes made
+        const hasChanges = 
+            session.changes.termsAdded.length > 0 ||
+            session.changes.termsUpdated.length > 0 ||
+            session.changes.projectsAdded.length > 0 ||
+            session.changes.projectsUpdated.length > 0 ||
+            session.changes.peopleAdded.length > 0 ||
+            session.changes.aliasesAdded.length > 0;
+        
+        if (hasChanges) {
+            write('─'.repeat(60));
+            write('  CHANGES MADE');
+            write('─'.repeat(60));
+            
+            if (session.changes.termsAdded.length > 0) {
+                write(`\n✓ Terms added (${session.changes.termsAdded.length}):`);
+                session.changes.termsAdded.forEach(term => write(`  - ${term}`));
+            }
+            
+            if (session.changes.termsUpdated.length > 0) {
+                write(`\n✓ Terms updated (${session.changes.termsUpdated.length}):`);
+                session.changes.termsUpdated.forEach(term => write(`  - ${term}`));
+            }
+            
+            if (session.changes.projectsAdded.length > 0) {
+                write(`\n✓ Projects added (${session.changes.projectsAdded.length}):`);
+                session.changes.projectsAdded.forEach(proj => write(`  - ${proj}`));
+            }
+            
+            if (session.changes.projectsUpdated.length > 0) {
+                write(`\n✓ Projects updated (${session.changes.projectsUpdated.length}):`);
+                session.changes.projectsUpdated.forEach(proj => write(`  - ${proj}`));
+            }
+            
+            if (session.changes.peopleAdded.length > 0) {
+                write(`\n✓ People added (${session.changes.peopleAdded.length}):`);
+                session.changes.peopleAdded.forEach(person => write(`  - ${person}`));
+            }
+            
+            if (session.changes.aliasesAdded.length > 0) {
+                write(`\n✓ Aliases created (${session.changes.aliasesAdded.length}):`);
+                session.changes.aliasesAdded.forEach(({ alias, linkedTo }) => {
+                    write(`  - "${alias}" → "${linkedTo}"`);
+                });
+            }
+            
+            write('');
+        } else {
+            write('No changes made during this session.');
+            write('');
+        }
+        
+        write('═'.repeat(60));
+        write('');
+    };
   
     return {
         startSession,
@@ -669,5 +1164,16 @@ export const create = (config: InteractiveConfig): HandlerInstance => {
         handleClarification,
         isEnabled,
         getSession,
+        startFile,
+        endFile,
+        trackTermAdded,
+        trackTermUpdated,
+        trackProjectAdded,
+        trackProjectUpdated,
+        trackPersonAdded,
+        trackAlias,
+        requestStop,
+        shouldStopSession,
+        printSummary,
     };
 };

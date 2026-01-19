@@ -6,6 +6,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Command } from 'commander';
 import * as fs from 'fs/promises';
 import * as path from 'node:path';
+import { glob } from 'glob';
 import {
     getRawTranscriptPath,
     readRawTranscript,
@@ -15,12 +16,20 @@ import {
     compareCommand,
     infoCommand,
     listCommand,
+    listTranscripts,
+    extractTitle,
+    extractDateTimeFromFilename,
     registerTranscriptCommands,
 } from '../../src/cli/transcript';
 import { RawTranscriptData } from '../../src/output/types';
 
 // Mock fs/promises
 vi.mock('fs/promises');
+
+// Mock glob
+vi.mock('glob', () => ({
+    glob: vi.fn(),
+}));
 
 // Sample raw transcript data for testing
 const SAMPLE_RAW_TRANSCRIPT: RawTranscriptData = {
@@ -395,85 +404,396 @@ describe('transcript CLI module', () => {
     });
 
     describe('listCommand', () => {
-        it('should list transcripts with raw status', async () => {
-            vi.mocked(fs.readdir).mockResolvedValue([
-                'transcript1.md',
-                'transcript2.md',
-                'other.txt',
-            ] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
+        it('should list transcripts with date and title', async () => {
+            vi.mocked(glob).mockResolvedValue([
+                '/notes/2026-01-15_transcript1.md',
+                '/notes/2026-01-16-1430_transcript2.md',
+            ] as string[]);
             
             vi.mocked(fs.readFile).mockImplementation(async (filepath) => {
                 const p = filepath.toString();
-                if (p.includes('transcript1')) {
+                if (p.includes('transcript1') && !p.includes('.transcript')) {
+                    return '# Meeting Notes\n\nContent here';
+                }
+                if (p.includes('transcript2') && !p.includes('.transcript')) {
+                    return '# Project Update\n\nMore content';
+                }
+                if (p.includes('.transcript')) {
                     return JSON.stringify(SAMPLE_RAW_TRANSCRIPT);
                 }
                 const error = new Error('Not found') as Error & { code: string };
                 error.code = 'ENOENT';
                 throw error;
             });
+            
+            vi.mocked(fs.stat).mockResolvedValue({
+                birthtime: new Date('2026-01-15T12:00:00Z'),
+            } as unknown as Awaited<ReturnType<typeof fs.stat>>);
 
             await listCommand('/notes');
 
             const logCalls = vi.mocked(console.log).mock.calls.flat().join(' ');
-            expect(logCalls).toContain('transcript1.md');
-            expect(logCalls).toContain('transcript2.md');
-            expect(logCalls).not.toContain('other.txt'); // Not .md file
-            expect(logCalls).toContain('✅'); // Has raw
-            expect(logCalls).toContain('❌'); // Missing raw
+            expect(logCalls).toContain('2026-01-15');
+            expect(logCalls).toContain('Meeting Notes');
+            expect(logCalls).toContain('Project Update');
         });
 
-        it('should show count summary', async () => {
-            vi.mocked(fs.readdir).mockResolvedValue([
-                'a.md',
-                'b.md',
-                'c.md',
-            ] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
+        it('should handle pagination with limit', async () => {
+            vi.mocked(glob).mockResolvedValue([
+                '/notes/file1.md',
+                '/notes/file2.md',
+            ] as string[]);
             
             vi.mocked(fs.readFile).mockImplementation(async (filepath) => {
                 const p = filepath.toString();
-                if (p.includes('/a.') || p.includes('/b.')) {
+                if (p.includes('.transcript')) {
                     return JSON.stringify(SAMPLE_RAW_TRANSCRIPT);
                 }
-                const error = new Error('Not found') as Error & { code: string };
-                error.code = 'ENOENT';
-                throw error;
+                return '# Title\n\nContent';
             });
+            
+            vi.mocked(fs.stat).mockResolvedValue({
+                birthtime: new Date('2026-01-15T12:00:00Z'),
+            } as unknown as Awaited<ReturnType<typeof fs.stat>>);
 
-            await listCommand('/notes');
+            await listCommand('/notes', { limit: 1, offset: 0 });
 
             const logCalls = vi.mocked(console.log).mock.calls.flat().join(' ');
-            expect(logCalls).toContain('2'); // Found count
-            expect(logCalls).toContain('1'); // Missing count
+            expect(logCalls).toContain('1-1 of 2');
         });
 
         it('should handle empty directory', async () => {
-            vi.mocked(fs.readdir).mockResolvedValue([] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
+            vi.mocked(glob).mockResolvedValue([] as string[]);
 
             await listCommand('/empty');
 
             const logCalls = vi.mocked(console.log).mock.calls.flat().join(' ');
-            expect(logCalls).toContain('0');
+            expect(logCalls).toContain('No transcripts found');
         });
 
-        it('should handle relative directory paths', async () => {
-            vi.mocked(fs.readdir).mockResolvedValue([] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
-
-            await listCommand('relative/dir');
-
-            expect(fs.readdir).toHaveBeenCalled();
-        });
-
-        it('should show model and date for found transcripts', async () => {
-            vi.mocked(fs.readdir).mockResolvedValue([
-                'meeting.md',
-            ] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
+        it('should handle search filter', async () => {
+            vi.mocked(glob).mockResolvedValue(['/notes/file1.md'] as string[]);
             
-            vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(SAMPLE_RAW_TRANSCRIPT));
+            vi.mocked(fs.readFile).mockImplementation(async (filepath) => {
+                const p = filepath.toString();
+                if (p.includes('.transcript')) {
+                    return JSON.stringify(SAMPLE_RAW_TRANSCRIPT);
+                }
+                return '# Title\n\nKubernetes content';
+            });
+            
+            vi.mocked(fs.stat).mockResolvedValue({
+                birthtime: new Date('2026-01-15T12:00:00Z'),
+            } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+
+            await listCommand('/notes', { search: 'kubernetes' });
+
+            const logCalls = vi.mocked(console.log).mock.calls.flat().join(' ');
+            expect(logCalls).toContain('🔍 Search:');
+            expect(logCalls).toContain('kubernetes');
+        });
+
+        it('should show date range filter info', async () => {
+            vi.mocked(glob).mockResolvedValue([] as string[]);
+
+            await listCommand('/notes', { startDate: '2026-01-01', endDate: '2026-01-31' });
+
+            const logCalls = vi.mocked(console.log).mock.calls.flat().join(' ');
+            expect(logCalls).toContain('📅 Date range:');
+        });
+        
+        it('should handle sort by filename', async () => {
+            vi.mocked(glob).mockResolvedValue([
+                '/notes/b-file.md',
+                '/notes/a-file.md',
+            ] as string[]);
+            
+            vi.mocked(fs.readFile).mockImplementation(async (filepath) => {
+                if (filepath.toString().includes('.transcript')) {
+                    return JSON.stringify(SAMPLE_RAW_TRANSCRIPT);
+                }
+                return '# Title\n\nContent';
+            });
+            
+            vi.mocked(fs.stat).mockResolvedValue({
+                birthtime: new Date('2026-01-15T12:00:00Z'),
+            } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+
+            await listCommand('/notes', { sortBy: 'filename' });
+
+            const logCalls = vi.mocked(console.log).mock.calls.flat().join(' ');
+            // Should list a-file before b-file
+            const aIndex = logCalls.indexOf('a-file');
+            const bIndex = logCalls.indexOf('b-file');
+            expect(aIndex).toBeLessThan(bIndex);
+        });
+        
+        it('should show pagination next offset hint', async () => {
+            vi.mocked(glob).mockResolvedValue([
+                '/notes/file1.md',
+                '/notes/file2.md',
+                '/notes/file3.md',
+            ] as string[]);
+            
+            vi.mocked(fs.readFile).mockImplementation(async (filepath) => {
+                if (filepath.toString().includes('.transcript')) {
+                    return JSON.stringify(SAMPLE_RAW_TRANSCRIPT);
+                }
+                return '# Title\n\nContent';
+            });
+            
+            vi.mocked(fs.stat).mockResolvedValue({
+                birthtime: new Date('2026-01-15T12:00:00Z'),
+            } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+
+            await listCommand('/notes', { limit: 2, offset: 0 });
+
+            const logCalls = vi.mocked(console.log).mock.calls.flat().join(' ');
+            expect(logCalls).toContain('More results available');
+            expect(logCalls).toContain('--offset 2');
+        });
+        
+        it('should parse entity metadata from transcripts', async () => {
+            vi.mocked(glob).mockResolvedValue(['/notes/file.md'] as string[]);
+            
+            const contentWithEntities = `# Title
+
+Content here
+
+---
+
+## Entity References
+
+### People
+
+- \`john-smith\`: John Smith
+
+### Terms
+
+- \`kubernetes\`: Kubernetes
+`;
+            
+            vi.mocked(fs.readFile).mockImplementation(async (filepath) => {
+                if (filepath.toString().includes('.transcript')) {
+                    return JSON.stringify(SAMPLE_RAW_TRANSCRIPT);
+                }
+                return contentWithEntities;
+            });
+            
+            vi.mocked(fs.stat).mockResolvedValue({
+                birthtime: new Date('2026-01-15T12:00:00Z'),
+            } as unknown as Awaited<ReturnType<typeof fs.stat>>);
 
             await listCommand('/notes');
 
+            // Verify entity parsing works (output would show the transcript)
             const logCalls = vi.mocked(console.log).mock.calls.flat().join(' ');
-            expect(logCalls).toContain('whisper-1');
+            expect(logCalls).toContain('Title');
+        });
+    });
+
+    describe('extractTitle', () => {
+        it('should extract title from markdown heading', () => {
+            const content = '# Meeting Notes\n\nContent here';
+            const result = extractTitle(content);
+            expect(result).toBe('Meeting Notes');
+        });
+        
+        it('should handle content without heading', () => {
+            const content = 'Just some content without a heading';
+            const result = extractTitle(content);
+            expect(result).toBe('Just some content without a heading');
+        });
+        
+        it('should truncate long first lines', () => {
+            const longLine = 'a'.repeat(150);
+            const result = extractTitle(longLine);
+            expect(result.length).toBe(100);
+        });
+        
+        it('should trim whitespace', () => {
+            const content = '#   Meeting Notes   \n\nContent';
+            const result = extractTitle(content);
+            expect(result).toBe('Meeting Notes');
+        });
+    });
+    
+    describe('extractDateTimeFromFilename', () => {
+        it('should extract date and time from filename with time', () => {
+            const result = extractDateTimeFromFilename('2026-01-18-1430_Meeting.md');
+            expect(result).toEqual({ date: '2026-01-18', time: '14:30' });
+        });
+        
+        it('should extract date only from filename without time', () => {
+            const result = extractDateTimeFromFilename('2026-01-18_Meeting.md');
+            expect(result).toEqual({ date: '2026-01-18' });
+        });
+        
+        it('should return null for filename without date', () => {
+            const result = extractDateTimeFromFilename('meeting-notes.md');
+            expect(result).toBeNull();
+        });
+        
+        it('should handle filename with full path', () => {
+            const result = extractDateTimeFromFilename('/notes/2026/01/2026-01-18-1430_Meeting.md');
+            expect(result).toEqual({ date: '2026-01-18', time: '14:30' });
+        });
+    });
+    
+    describe('listTranscripts', () => {
+        it('should return paginated results', async () => {
+            vi.mocked(glob).mockResolvedValue([
+                '/notes/2026-01-18_file1.md',
+                '/notes/2026-01-17_file2.md',
+                '/notes/2026-01-16_file3.md',
+            ] as string[]);
+            
+            vi.mocked(fs.readFile).mockImplementation(async (filepath) => {
+                if (filepath.toString().includes('.transcript')) {
+                    return JSON.stringify(SAMPLE_RAW_TRANSCRIPT);
+                }
+                return '# Title\n\nContent';
+            });
+            
+            vi.mocked(fs.stat).mockResolvedValue({
+                birthtime: new Date('2026-01-15T12:00:00Z'),
+            } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+
+            const result = await listTranscripts({
+                directory: '/notes',
+                limit: 2,
+                offset: 0,
+            });
+
+            expect(result.transcripts).toHaveLength(2);
+            expect(result.total).toBe(3);
+            expect(result.hasMore).toBe(true);
+            expect(result.limit).toBe(2);
+            expect(result.offset).toBe(0);
+        });
+        
+        it('should filter by date range', async () => {
+            vi.mocked(glob).mockResolvedValue([
+                '/notes/2026-01-18_file1.md',
+                '/notes/2026-01-10_file2.md',
+                '/notes/2026-01-05_file3.md',
+            ] as string[]);
+            
+            vi.mocked(fs.readFile).mockImplementation(async (filepath) => {
+                if (filepath.toString().includes('.transcript')) {
+                    return JSON.stringify(SAMPLE_RAW_TRANSCRIPT);
+                }
+                return '# Title\n\nContent';
+            });
+            
+            vi.mocked(fs.stat).mockResolvedValue({
+                birthtime: new Date('2026-01-15T12:00:00Z'),
+            } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+
+            const result = await listTranscripts({
+                directory: '/notes',
+                startDate: '2026-01-10',
+                endDate: '2026-01-20',
+            });
+
+            expect(result.transcripts).toHaveLength(2);
+            expect(result.transcripts.every(t => t.date >= '2026-01-10' && t.date <= '2026-01-20')).toBe(true);
+        });
+        
+        it('should search in filename and content', async () => {
+            vi.mocked(glob).mockResolvedValue([
+                '/notes/kubernetes-meeting.md',
+                '/notes/docker-notes.md',
+                '/notes/other.md',
+            ] as string[]);
+            
+            vi.mocked(fs.readFile).mockImplementation(async (filepath) => {
+                const p = filepath.toString();
+                if (p.includes('.transcript')) {
+                    return JSON.stringify(SAMPLE_RAW_TRANSCRIPT);
+                }
+                if (p.includes('docker')) {
+                    return '# Docker Notes\n\nTalking about Kubernetes';
+                }
+                if (p.includes('kubernetes')) {
+                    return '# Kubernetes Meeting\n\nDiscussion';
+                }
+                return '# Other\n\nUnrelated content';
+            });
+            
+            vi.mocked(fs.stat).mockResolvedValue({
+                birthtime: new Date('2026-01-15T12:00:00Z'),
+            } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+
+            const result = await listTranscripts({
+                directory: '/notes',
+                search: 'kubernetes',
+            });
+
+            expect(result.transcripts).toHaveLength(2);
+            expect(result.transcripts.some(t => t.filename.includes('kubernetes'))).toBe(true);
+            expect(result.transcripts.some(t => t.filename.includes('docker'))).toBe(true);
+        });
+        
+        it('should sort by date descending by default', async () => {
+            vi.mocked(glob).mockResolvedValue([
+                '/notes/2026-01-16_file.md',
+                '/notes/2026-01-18_file.md',
+                '/notes/2026-01-17_file.md',
+            ] as string[]);
+            
+            vi.mocked(fs.readFile).mockImplementation(async (filepath) => {
+                if (filepath.toString().includes('.transcript')) {
+                    return JSON.stringify(SAMPLE_RAW_TRANSCRIPT);
+                }
+                return '# Title\n\nContent';
+            });
+            
+            vi.mocked(fs.stat).mockResolvedValue({
+                birthtime: new Date('2026-01-15T12:00:00Z'),
+            } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+
+            const result = await listTranscripts({
+                directory: '/notes',
+                sortBy: 'date',
+            });
+
+            expect(result.transcripts[0].date).toBe('2026-01-18');
+            expect(result.transcripts[1].date).toBe('2026-01-17');
+            expect(result.transcripts[2].date).toBe('2026-01-16');
+        });
+        
+        it('should parse entity metadata when present', async () => {
+            vi.mocked(glob).mockResolvedValue(['/notes/file.md'] as string[]);
+            
+            const contentWithEntities = `# Title
+
+---
+
+## Entity References
+
+### People
+
+- \`priya-sharma\`: Priya Sharma
+`;
+            
+            vi.mocked(fs.readFile).mockImplementation(async (filepath) => {
+                if (filepath.toString().includes('.transcript')) {
+                    return JSON.stringify(SAMPLE_RAW_TRANSCRIPT);
+                }
+                return contentWithEntities;
+            });
+            
+            vi.mocked(fs.stat).mockResolvedValue({
+                birthtime: new Date('2026-01-15T12:00:00Z'),
+            } as unknown as Awaited<ReturnType<typeof fs.stat>>);
+
+            const result = await listTranscripts({
+                directory: '/notes',
+            });
+
+            expect(result.transcripts[0].entities?.people).toHaveLength(1);
+            expect(result.transcripts[0].entities?.people?.[0].id).toBe('priya-sharma');
         });
     });
 

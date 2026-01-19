@@ -1,15 +1,277 @@
-# Transcript Actions
+# Transcript Management
 
-Protokoll includes the `action` command for editing and combining existing transcripts. These capabilities help you organize, merge, and manage your transcript library after the initial transcription.
+Protokoll provides comprehensive tools for managing your transcript library: listing, searching, editing, and combining transcripts.
 
-## Overview
+## List Transcripts
 
-The `action` command provides two modes:
+Browse, search, and filter your transcript library with pagination.
+
+### Basic Usage
+
+```bash
+protokoll transcript list <directory>
+```
+
+### Examples
+
+```bash
+# List recent transcripts (default: 50 most recent, sorted by date)
+protokoll transcript list ~/notes
+
+# Search for transcripts containing specific text
+protokoll transcript list ~/notes --search "kubernetes"
+
+# Filter by date range
+protokoll transcript list ~/notes --start-date 2026-01-01 --end-date 2026-01-31
+
+# Sort by filename or title
+protokoll transcript list ~/notes --sort-by title
+
+# Pagination
+protokoll transcript list ~/notes --limit 25 --offset 50
+
+# Combine multiple filters
+protokoll transcript list ~/notes \
+  --search "meeting" \
+  --start-date 2026-01-01 \
+  --sort-by date \
+  --limit 20
+```
+
+### Output Example
+
+```
+📂 Transcripts in: ~/notes
+🔍 Search: "kubernetes"
+📊 Showing 1-3 of 12 total
+
+✅ 2026-01-18 14:30 - Setting up Kubernetes Cluster
+   2026-01-18-1430_Kubernetes_Setup.md
+
+✅ 2026-01-17 - Kubernetes Deployment Notes
+   2026-01-17_K8s_Deploy.md
+
+   2026-01-15 09:00 - DevOps Discussion with Kubernetes
+   2026-01-15-0900_DevOps_Talk.md
+
+💡 More results available. Use --offset 20 to see the next page.
+```
+
+### Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--limit <number>` | Max results to return | 50 |
+| `--offset <number>` | Results to skip (pagination) | 0 |
+| `--sort-by <field>` | Sort by: date, filename, title | date |
+| `--start-date <YYYY-MM-DD>` | Filter from this date | none |
+| `--end-date <YYYY-MM-DD>` | Filter to this date | none |
+| `--search <text>` | Search filename and content | none |
+
+### Display Format
+
+Each transcript shows:
+- **Status indicator**: ✅ = has raw Whisper output, blank = no raw data
+- **Date**: Extracted from filename (YYYY-MM-DD)
+- **Time**: If present in filename (HH:MM)
+- **Title**: Extracted from `# heading` in the document
+- **Filename**: The actual file name
+
+### Features
+
+- **Recursive search**: Finds transcripts in all subdirectories
+- **Fast text search**: Searches both filename and content
+- **Flexible sorting**: Sort by date (newest first), filename, or title
+- **Date filtering**: Focus on specific time periods
+- **Pagination**: Handle large libraries efficiently
+
+### Entity Metadata in Results
+
+The list command returns entity metadata for each transcript (when available):
+
+```json
+{
+  "transcripts": [
+    {
+      "path": "/notes/2026-01-18_Meeting.md",
+      "date": "2026-01-18",
+      "title": "Meeting with Priya",
+      "entities": {
+        "people": [
+          { "id": "priya-sharma", "name": "Priya Sharma" }
+        ],
+        "projects": [
+          { "id": "project-alpha", "name": "Project Alpha" }
+        ],
+        "terms": [
+          { "id": "kubernetes", "name": "Kubernetes" }
+        ]
+      }
+    }
+  ]
+}
+```
+
+This enables:
+- Querying transcripts by entity ("show all transcripts mentioning Priya")
+- Building knowledge graphs
+- Cross-referencing content
+- Automated indexing
+
+### MCP Tool
+
+Also available as `protokoll_list_transcripts` for AI assistants to browse your transcript library programmatically.
+
+### Querying by Entity
+
+Find transcripts that reference specific entities:
+
+```bash
+# Search for transcripts mentioning a person
+protokoll transcript list ~/notes --search "Priya Sharma"
+
+# Find all transcripts about a project
+protokoll transcript list ~/notes --search "Project Alpha"
+
+# Combine with date filters
+protokoll transcript list ~/notes \
+  --search "kubernetes" \
+  --start-date 2026-01-01 \
+  --end-date 2026-01-31
+```
+
+**Programmatic Access:** Use `parseEntityMetadata()` from `util/metadata.ts` to extract entity references from transcript content.
+
+## Entity Metadata in Transcripts
+
+### Overview
+
+Every transcript automatically includes structured entity metadata at the bottom. This enables powerful querying and knowledge management capabilities.
+
+### Format
+
+```markdown
+---
+
+## Entity References
+
+<!-- Machine-readable entity metadata for indexing and querying -->
+
+### People
+
+- `priya-sharma`: Priya Sharma
+- `john-smith`: John Smith
+
+### Projects
+
+- `project-alpha`: Project Alpha
+
+### Terms
+
+- `kubernetes`: Kubernetes
+- `docker`: Docker
+```
+
+### What Gets Tracked
+
+Entities are automatically recorded when:
+- **lookup_person** finds a person
+- **lookup_project** matches a project
+- **verify_spelling** corrects a term
+- Any tool references an entity from your context
+
+### Benefits
+
+1. **Find all transcripts mentioning a person:**
+   ```bash
+   protokoll transcript list ~/notes --search "priya-sharma"
+   ```
+
+2. **Find all discussions about a technology:**
+   ```bash
+   protokoll transcript list ~/notes --search "kubernetes"
+   ```
+
+3. **Build knowledge graphs:** Connect people, projects, and topics
+
+4. **Create indexes:** Programmatically build searchable databases
+
+5. **Cross-reference:** Find related content based on shared entities
+
+### Example Transcript with Metadata
+
+```markdown
+# Meeting Notes
+
+## Metadata
+
+**Date**: January 18, 2026
+**Project**: Project Alpha
+
+---
+
+Discussion content here...
+
+---
+
+## Entity References
+
+### People
+
+- `priya-sharma`: Priya Sharma
+
+### Projects
+
+- `project-alpha`: Project Alpha
+
+### Terms
+
+- `kubernetes`: Kubernetes
+```
+
+### Programmatic Usage
+
+```typescript
+import { parseEntityMetadata } from '@/util/metadata';
+import { readFile } from 'fs/promises';
+
+const content = await readFile('transcript.md', 'utf-8');
+const entities = parseEntityMetadata(content);
+
+// Query by entity
+if (entities?.people) {
+  const hasPriya = entities.people.some(p => p.id === 'priya-sharma');
+  console.log('Priya mentioned:', hasPriya);
+}
+```
+
+### Integration with List Command
+
+The `protokoll transcript list` command automatically includes entity metadata in results, enabling queries like:
+
+```typescript
+const results = await listTranscripts({
+  directory: '~/notes',
+  search: 'kubernetes'
+});
+
+// Filter to only transcripts that mention Priya
+const priyaKubernetes = results.transcripts.filter(t =>
+  t.entities?.people?.some(p => p.id === 'priya-sharma') &&
+  t.entities?.terms?.some(term => term.id === 'kubernetes')
+);
+```
+
+## Edit & Combine
+
+The `action` command provides editing and combining capabilities:
 
 | Mode | Usage | Description |
 |------|-------|-------------|
 | **Edit** | `protokoll action [options] <file>` | Edit a single transcript (title, project) |
 | **Combine** | `protokoll action --combine "<files>"` | Merge multiple transcripts into one |
+
+### Edit a Single Transcript
 
 ## Edit Mode
 
