@@ -23,9 +23,7 @@ import {
     ListToolsRequestSchema,
     ListResourcesRequestSchema,
     ReadResourceRequestSchema,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     ListPromptsRequestSchema,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     GetPromptRequestSchema,
     type Tool,
 // eslint-disable-next-line import/extensions
@@ -52,6 +50,7 @@ import * as Storage from '@/util/storage';
 import * as Reasoning from '@/reasoning';
 import { getLogger } from '@/logging';
 import * as Resources from './resources';
+import * as Prompts from './prompts';
 import * as ProjectAssist from '@/cli/project-assist';
 import * as TermAssist from '@/cli/term-assist';
 import * as TermContext from '@/cli/term-context';
@@ -2327,6 +2326,23 @@ async function main() {
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             throw new Error(`Failed to read resource ${uri}: ${message}`);
+        }
+    });
+
+    // List available prompts
+    server.setRequestHandler(ListPromptsRequestSchema, async () => {
+        return Prompts.handleListPrompts();
+    });
+
+    // Get a prompt with arguments
+    server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+        const { name, arguments: args } = request.params;
+        
+        try {
+            return Prompts.handleGetPrompt(name, args || {});
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            throw new Error(`Failed to get prompt ${name}: ${message}`);
         }
     });
 

@@ -9,6 +9,10 @@ import type {
     McpPrompt,
     McpPromptMessage,
 } from './types';
+import * as Context from '@/context';
+import { resolve, dirname } from 'node:path';
+import { stat } from 'node:fs/promises';
+import { buildConfigUri, buildEntitiesListUri } from './uri';
 
 // ============================================================================
 // Prompt Definitions
@@ -193,52 +197,162 @@ export async function handleGetPrompt(
 async function generateTranscribePrompt(
     args: Record<string, string>
 ): Promise<{ messages: McpPromptMessage[] }> {
-    // TODO: Implement
-    return {
-        messages: [
-            {
-                role: 'user',
-                content: {
-                    type: 'text',
-                    text: `I want to transcribe: ${args.audioFile}`,
-                },
+    const audioFile = args.audioFile;
+    const skipDiscovery = args.skipDiscovery === 'true';
+    
+    if (!audioFile) {
+        throw new Error('audioFile is required');
+    }
+
+    const messages: McpPromptMessage[] = [];
+
+    // Initial user message
+    messages.push({
+        role: 'user',
+        content: {
+            type: 'text',
+            text: `I want to transcribe the audio file: ${audioFile}`,
+        },
+    });
+
+    if (skipDiscovery) {
+        messages.push({
+            role: 'assistant',
+            content: {
+                type: 'text',
+                text: `I'll transcribe ${audioFile} using the current context configuration.\n\n` +
+                    `To proceed, call the \`protokoll_process_audio\` tool with:\n` +
+                    `- audioFile: "${audioFile}"\n\n` +
+                    `Would you like me to start the transcription?`,
             },
-        ],
-    };
+        });
+    } else {
+        // Perform basic context discovery
+        const audioPath = resolve(audioFile);
+        let discoveryInfo = '';
+
+        try {
+            await stat(audioPath);
+            
+            const context = await Context.create({
+                startingDir: dirname(audioPath),
+            });
+
+            if (context.hasContext()) {
+                const dirs = context.getDiscoveredDirs();
+                const projects = context.getAllProjects().filter(p => p.active !== false);
+                
+                discoveryInfo = `## Context Discovery\n\n` +
+                    `**Configuration:** ${dirs[0]?.path}\n` +
+                    `**Projects:** ${projects.length} active\n` +
+                    `**Context URI:** ${buildConfigUri(dirs[0]?.path)}\n` +
+                    `**Projects URI:** ${buildEntitiesListUri('project')}\n\n` +
+                    `Ready to transcribe with context-aware enhancement.`;
+            } else {
+                discoveryInfo = `## No Context Found\n\nProcessing without context (basic transcription only).`;
+            }
+        } catch {
+            discoveryInfo = `## File Check Failed\n\nUnable to access: ${audioFile}`;
+        }
+
+        messages.push({
+            role: 'assistant',
+            content: {
+                type: 'text',
+                text: `${discoveryInfo}\n\n` +
+                    `To start transcription, call \`protokoll_process_audio\` with:\n` +
+                    `- audioFile: "${audioFile}"`,
+            },
+        });
+    }
+
+    return { messages };
 }
 
 async function generateSetupProjectPrompt(
     args: Record<string, string>
 ): Promise<{ messages: McpPromptMessage[] }> {
-    // TODO: Implement
-    return {
-        messages: [
-            {
-                role: 'user',
-                content: {
-                    type: 'text',
-                    text: `I want to create a project called: ${args.projectName}`,
-                },
-            },
-        ],
-    };
+    const projectName = args.projectName;
+    
+    if (!projectName) {
+        throw new Error('projectName is required');
+    }
+
+    const messages: McpPromptMessage[] = [];
+
+    messages.push({
+        role: 'user',
+        content: {
+            type: 'text',
+            text: `I want to create a new Protokoll project called: ${projectName}`,
+        },
+    });
+
+    let assistantText = `I'll help you set up the "${projectName}" project.\n\n`;
+    assistantText += `**Steps:**\n`;
+    assistantText += `1. Call \`protokoll_create_project\` with:\n`;
+    assistantText += `   - projectName: "${projectName}"\n`;
+    
+    if (args.sourceUrl) {
+        assistantText += `   - sourceUrl: "${args.sourceUrl}" (for metadata analysis)\n`;
+    }
+    if (args.destination) {
+        assistantText += `   - destination: "${args.destination}"\n`;
+    }
+    
+    assistantText += `\n2. The tool will create the project YAML file\n`;
+    assistantText += `3. Configure routing, trigger phrases, and other metadata as needed\n`;
+
+    messages.push({
+        role: 'assistant',
+        content: {
+            type: 'text',
+            text: assistantText,
+        },
+    });
+
+    return { messages };
 }
 
 async function generateReviewTranscriptPrompt(
     args: Record<string, string>
 ): Promise<{ messages: McpPromptMessage[] }> {
-    // TODO: Implement
-    return {
-        messages: [
-            {
-                role: 'user',
-                content: {
-                    type: 'text',
-                    text: `I want to review the transcript at: ${args.transcriptPath}`,
-                },
-            },
-        ],
-    };
+    const transcriptPath = args.transcriptPath;
+    
+    if (!transcriptPath) {
+        throw new Error('transcriptPath is required');
+    }
+
+    const messages: McpPromptMessage[] = [];
+
+    messages.push({
+        role: 'user',
+        content: {
+            type: 'text',
+            text: `I want to review and improve the transcript at: ${transcriptPath}`,
+        },
+    });
+
+    let assistantText = `I'll help you review "${transcriptPath}".\n\n`;
+    assistantText += `**Focus areas:**\n`;
+    
+    const focusArea = args.focusArea || 'all';
+    assistantText += `- ${focusArea === 'all' ? 'All corrections' : focusArea}\n\n`;
+    
+    assistantText += `**To proceed:**\n`;
+    assistantText += `1. Call \`protokoll_feedback_analyze\` to analyze the transcript\n`;
+    assistantText += `2. Review suggested corrections\n`;
+    assistantText += `3. Apply corrections using \`protokoll_feedback_apply\`\n`;
+
+    messages.push({
+        role: 'assistant',
+        content: {
+            type: 'text',
+            text: assistantText,
+        },
+    });
+
+    return { messages };
 }
 
 async function generateEnrichEntityPrompt(
