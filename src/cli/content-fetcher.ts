@@ -58,10 +58,17 @@ export const create = (): ContentFetcherInstance => {
         // which removes tags, scripts, and styles safely.
         let text = htmlToText(html, {
             wordwrap: false,
+            preserveNewlines: false,
             // Keep links and other markup as simple text when possible.
             selectors: [
                 { selector: 'script', format: 'skip' },
-                { selector: 'style', format: 'skip' }
+                { selector: 'style', format: 'skip' },
+                { selector: 'h1', options: { uppercase: false } },
+                { selector: 'h2', options: { uppercase: false } },
+                { selector: 'h3', options: { uppercase: false } },
+                { selector: 'h4', options: { uppercase: false } },
+                { selector: 'h5', options: { uppercase: false } },
+                { selector: 'h6', options: { uppercase: false } }
             ]
         });
 
