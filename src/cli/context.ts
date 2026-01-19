@@ -142,7 +142,14 @@ const getEntityBriefDetails = (entity: Entity): string => {
         return details.join(' ');
     } else if (entity.type === 'term') {
         const term = entity as Term;
-        return term.expansion ? truncate(term.expansion, 50) : '';
+        const details = [];
+        if (term.expansion) {
+            details.push(truncate(term.expansion, 30));
+        }
+        if (term.projects && term.projects.length > 0) {
+            details.push(`[${term.projects.join(', ')}]`);
+        }
+        return details.join(' · ');
     } else if (entity.type === 'company') {
         const company = entity as Company;
         return company.industry || '';
@@ -879,6 +886,95 @@ const addTermEnhanced = async (
 };
 
 /**
+ * Merge two terms - combine their metadata and delete the source
+ */
+const mergeTerms = async (
+    context: Context.ContextInstance,
+    sourceId: string,
+    targetId: string,
+    options: { force?: boolean }
+): Promise<void> => {
+    // Get both terms
+    const sourceTerm = context.getTerm(sourceId);
+    const targetTerm = context.getTerm(targetId);
+    
+    if (!sourceTerm) {
+        print(`Error: Source term "${sourceId}" not found.`);
+        process.exit(1);
+    }
+    
+    if (!targetTerm) {
+        print(`Error: Target term "${targetId}" not found.`);
+        process.exit(1);
+    }
+    
+    // Show what will be merged
+    print(`\nMerging terms:`);
+    print(`  Source: ${sourceTerm.name} (${sourceTerm.id})`);
+    print(`  Target: ${targetTerm.name} (${targetTerm.id})`);
+    print('');
+    
+    // Confirm unless --force
+    if (!options.force) {
+        const rl = createReadline();
+        try {
+            const confirm = await askQuestion(rl, 'Merge these terms? (y/N): ');
+            if (confirm.toLowerCase() !== 'y') {
+                print('Cancelled.');
+                return;
+            }
+        } finally {
+            rl.close();
+        }
+    }
+    
+    // Merge metadata
+    const mergedTerm: Term = {
+        ...targetTerm,
+        // Combine sounds_like
+        sounds_like: [
+            ...(targetTerm.sounds_like || []),
+            ...(sourceTerm.sounds_like || []),
+        ].filter((v, i, arr) => arr.indexOf(v) === i), // Deduplicate
+        // Combine topics
+        topics: [
+            ...(targetTerm.topics || []),
+            ...(sourceTerm.topics || []),
+        ].filter((v, i, arr) => arr.indexOf(v) === i), // Deduplicate
+        // Combine projects
+        projects: [
+            ...(targetTerm.projects || []),
+            ...(sourceTerm.projects || []),
+        ].filter((v, i, arr) => arr.indexOf(v) === i), // Deduplicate
+        // Keep target's primary fields but use source if target is missing
+        description: targetTerm.description || sourceTerm.description,
+        domain: targetTerm.domain || sourceTerm.domain,
+        expansion: targetTerm.expansion || sourceTerm.expansion,
+        updatedAt: new Date(),
+    };
+    
+    // Remove empty arrays
+    if (mergedTerm.sounds_like && mergedTerm.sounds_like.length === 0) {
+        delete mergedTerm.sounds_like;
+    }
+    if (mergedTerm.topics && mergedTerm.topics.length === 0) {
+        delete mergedTerm.topics;
+    }
+    if (mergedTerm.projects && mergedTerm.projects.length === 0) {
+        delete mergedTerm.projects;
+    }
+    
+    // Save merged term
+    await context.saveEntity(mergedTerm);
+    
+    // Delete source term
+    await context.deleteEntity(sourceTerm);
+    
+    print(`\n✓ Merged "${sourceTerm.name}" into "${targetTerm.name}"`);
+    print(`✓ Deleted source term "${sourceTerm.id}"`);
+};
+
+/**
  * Interactive prompts for adding a company
  */
 const addCompany = async (context: Context.ContextInstance): Promise<void> => {
@@ -1175,6 +1271,19 @@ const createTermCommand = (): Command => {
         .action(async (id, options) => {
             const context = await Context.create();
             await deleteEntity(context, 'term', id, options);
+        });
+    
+    cmd
+        .command('merge <source-id> <target-id>')
+        .description('Merge two terms (combines metadata, deletes source)')
+        .option('-f, --force', 'Skip confirmation')
+        .action(async (sourceId, targetId, options) => {
+            const context = await Context.create();
+            if (!context.hasContext()) {
+                print('Error: No .protokoll directory found. Run "protokoll --init-config" first.');
+                process.exit(1);
+            }
+            await mergeTerms(context, sourceId, targetId, options);
         });
     
     return cmd;
