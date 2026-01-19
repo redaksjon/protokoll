@@ -3274,9 +3274,6 @@ async function main() {
     });
 }
 
-// Only run main when this is the entry point, not when imported for testing
-// Also run if executed directly (not imported)
-if (import.meta.url === `file://${process.argv[1]}` || !process.argv[1] || process.argv[1].includes('server.js')) {
 // ES module equivalent of CommonJS `require.main === module`
 const isMainModule = import.meta.url.startsWith('file:') && 
     process.argv[1] === fileURLToPath(import.meta.url);
