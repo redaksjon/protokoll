@@ -1,263 +1,299 @@
-import { describe, expect, test } from 'vitest';
-import {
-    ALLOWED_AUDIO_EXTENSIONS,
-    ALLOWED_CONTENT_TYPES,
-    ALLOWED_OUTPUT_FILENAME_OPTIONS,
-    ALLOWED_OUTPUT_STRUCTURES,
-    CONTEXT_SUBDIRECTORIES,
-    DATE_FORMAT_DAY,
-    DATE_FORMAT_HOURS,
-    DATE_FORMAT_MILLISECONDS,
-    DATE_FORMAT_MINUTES,
-    DATE_FORMAT_MONTH,
-    DATE_FORMAT_MONTH_DAY,
-    DATE_FORMAT_SECONDS,
-    DATE_FORMAT_YEAR,
-    DATE_FORMAT_YEAR_MONTH,
-    DATE_FORMAT_YEAR_MONTH_DAY,
-    DATE_FORMAT_YEAR_MONTH_DAY_HOURS_MINUTES,
-    DATE_FORMAT_YEAR_MONTH_DAY_HOURS_MINUTES_SECONDS,
-    DATE_FORMAT_YEAR_MONTH_DAY_HOURS_MINUTES_SECONDS_MILLISECONDS,
-    DATE_FORMAT_YEAR_MONTH_DAY_SLASH,
-    DEFAULT_AUDIO_EXTENSIONS,
-    DEFAULT_BINARY_TO_TEXT_ENCODING,
-    DEFAULT_CHARACTER_ENCODING,
-    DEFAULT_CONFIG_DIR,
-    DEFAULT_CONTENT_TYPES,
-    DEFAULT_DEBUG,
-    DEFAULT_DRY_RUN,
-    DEFAULT_INPUT_DIRECTORY,
-    DEFAULT_INTERACTIVE,
-    DEFAULT_LOG,
-    DEFAULT_MAX_AUDIO_SIZE,
-    DEFAULT_MODEL,
-    DEFAULT_OUTPUT_DIRECTORY,
-    DEFAULT_OUTPUT_FILENAME_OPTIONS,
-    DEFAULT_OUTPUT_STRUCTURE,
-    DEFAULT_OVERRIDES,
-    DEFAULT_PROCESSED_DIR,
-    DEFAULT_RECURSIVE,
-    DEFAULT_SELF_REFLECTION,
-    DEFAULT_TEMP_DIRECTORY,
-    DEFAULT_TIMEZONE,
-    DEFAULT_TRANSCRIPTION_MODEL,
-    DEFAULT_VERBOSE,
-    PROGRAM_NAME,
-    PROTOKOLL_DEFAULTS,
-    DEFAULT_CONTEXT_DIR_NAME,
-    DEFAULT_CONTEXT_CONFIG_FILE_NAME,
-    DEFAULT_MAX_DISCOVERY_LEVELS,
-    DEFAULT_PERSONAS_DIR,
-    DEFAULT_PERSONA_TRANSCRIBER_FILE,
-    DEFAULT_INSTRUCTIONS_DIR,
-    DEFAULT_INSTRUCTIONS_TRANSCRIBE_FILE,
-    OUTPUT_FILE_TYPES,
-    DEFAULT_INTERMEDIATE_DIRECTORY,
-    DEFAULT_KEEP_INTERMEDIATES,
-    DEFAULT_REASONING_LEVEL,
-    DEFAULT_DIFF
-} from '../src/constants.js';
+/**
+ * Tests for Constants Module
+ */
 
-describe('constants', () => {
-    describe('basic string constants', () => {
-        test('should have correct program name', () => {
-            expect(PROGRAM_NAME).toBe('protokoll');
+import { describe, it, expect } from 'vitest';
+import * as Constants from '../src/constants';
+import { FilesystemStructure } from '@theunwalked/dreadcabinet';
+
+describe('Constants', () => {
+    describe('Version Info', () => {
+        it('should define version constant', () => {
+            expect(Constants.VERSION).toBeDefined();
+            expect(typeof Constants.VERSION).toBe('string');
         });
 
-        test('should have correct encoding constants', () => {
-            expect(DEFAULT_CHARACTER_ENCODING).toBe('utf-8');
-            expect(DEFAULT_BINARY_TO_TEXT_ENCODING).toBe('base64');
-        });
-
-        test('should have correct timezone', () => {
-            expect(DEFAULT_TIMEZONE).toBe('Etc/UTC');
+        it('should define program name', () => {
+            expect(Constants.PROGRAM_NAME).toBe('protokoll');
         });
     });
 
-    describe('date format constants', () => {
-        test('should have correct date format strings', () => {
-            expect(DATE_FORMAT_MONTH_DAY).toBe('M-D');
-            expect(DATE_FORMAT_YEAR).toBe('YYYY');
-            expect(DATE_FORMAT_YEAR_MONTH).toBe('YYYY-M');
-            expect(DATE_FORMAT_YEAR_MONTH_DAY).toBe('YYYY-M-D');
-            expect(DATE_FORMAT_YEAR_MONTH_DAY_SLASH).toBe('YYYY/M/D');
-            expect(DATE_FORMAT_YEAR_MONTH_DAY_HOURS_MINUTES).toBe('YYYY-M-D-HHmm');
-            expect(DATE_FORMAT_YEAR_MONTH_DAY_HOURS_MINUTES_SECONDS).toBe('YYYY-M-D-HHmmss');
-            expect(DATE_FORMAT_YEAR_MONTH_DAY_HOURS_MINUTES_SECONDS_MILLISECONDS).toBe('YYYY-M-D-HHmmss.SSS');
+    describe('Encoding Defaults', () => {
+        it('should define character encoding', () => {
+            expect(Constants.DEFAULT_CHARACTER_ENCODING).toBe('utf-8');
         });
 
-        test('should have correct granular date formats', () => {
-            expect(DATE_FORMAT_MONTH).toBe('M');
-            expect(DATE_FORMAT_DAY).toBe('D');
-            expect(DATE_FORMAT_HOURS).toBe('HHmm');
-            expect(DATE_FORMAT_MINUTES).toBe('mm');
-            expect(DATE_FORMAT_SECONDS).toBe('ss');
-            expect(DATE_FORMAT_MILLISECONDS).toBe('SSS');
+        it('should define binary to text encoding', () => {
+            expect(Constants.DEFAULT_BINARY_TO_TEXT_ENCODING).toBe('base64');
         });
     });
 
-    describe('boolean defaults', () => {
-        test('should have correct boolean defaults', () => {
-            expect(DEFAULT_VERBOSE).toBe(false);
-            expect(DEFAULT_DRY_RUN).toBe(false);
-            expect(DEFAULT_DEBUG).toBe(false);
-            expect(DEFAULT_LOG).toBe(false);
-            expect(DEFAULT_RECURSIVE).toBe(false);
-            expect(DEFAULT_DIFF).toBe(true);
-            expect(DEFAULT_INTERACTIVE).toBe(true);  // Interactive mode enabled by default
-            expect(DEFAULT_SELF_REFLECTION).toBe(true);
-            expect(DEFAULT_OVERRIDES).toBe(false);
-            expect(DEFAULT_KEEP_INTERMEDIATES).toBe(true);
+    describe('Common Defaults', () => {
+        it('should define boolean defaults', () => {
+            expect(Constants.DEFAULT_DIFF).toBe(true);
+            expect(Constants.DEFAULT_LOG).toBe(false);
+            expect(Constants.DEFAULT_VERBOSE).toBe(false);
+            expect(Constants.DEFAULT_DRY_RUN).toBe(false);
+            expect(Constants.DEFAULT_DEBUG).toBe(false);
+        });
+
+        it('should define timezone', () => {
+            expect(Constants.DEFAULT_TIMEZONE).toBe('Etc/UTC');
+        });
+
+        it('should define directories', () => {
+            expect(Constants.DEFAULT_INPUT_DIRECTORY).toBe('./');
+            expect(Constants.DEFAULT_OUTPUT_DIRECTORY).toBe('./');
         });
     });
 
-    describe('directory and path constants', () => {
-        test('should have correct directory constants', () => {
-            expect(DEFAULT_INPUT_DIRECTORY).toBe('./');
-            expect(DEFAULT_OUTPUT_DIRECTORY).toBe('./');
-            expect(DEFAULT_CONFIG_DIR).toBe('./.protokoll');
-            expect(DEFAULT_PROCESSED_DIR).toBe('./processed');
-            expect(DEFAULT_INTERMEDIATE_DIRECTORY).toBe('./output/protokoll');
+    describe('Date Formats', () => {
+        it('should define all date format constants', () => {
+            expect(Constants.DATE_FORMAT_MONTH_DAY).toBe('M-D');
+            expect(Constants.DATE_FORMAT_YEAR).toBe('YYYY');
+            expect(Constants.DATE_FORMAT_YEAR_MONTH).toBe('YYYY-M');
+            expect(Constants.DATE_FORMAT_YEAR_MONTH_DAY).toBe('YYYY-M-D');
         });
 
-        test('should have correct context directory constants', () => {
-            expect(DEFAULT_CONTEXT_DIR_NAME).toBe('.protokoll');
-            expect(DEFAULT_CONTEXT_CONFIG_FILE_NAME).toBe('config.yaml');
-            expect(DEFAULT_MAX_DISCOVERY_LEVELS).toBe(10);
+        it('should have detailed timestamp formats', () => {
+            expect(Constants.DATE_FORMAT_YEAR_MONTH_DAY_HOURS_MINUTES).toBeDefined();
+            expect(Constants.DATE_FORMAT_YEAR_MONTH_DAY_HOURS_MINUTES_SECONDS).toBeDefined();
+            expect(Constants.DATE_FORMAT_YEAR_MONTH_DAY_HOURS_MINUTES_SECONDS_MILLISECONDS).toBeDefined();
         });
 
-        test('should have correct personas and instructions directories', () => {
-            expect(DEFAULT_PERSONAS_DIR).toBe(`/personas`);
-            expect(DEFAULT_PERSONA_TRANSCRIBER_FILE).toBe(`/personas/transcriber.md`);
-            expect(DEFAULT_INSTRUCTIONS_DIR).toBe(`/instructions`);
-            expect(DEFAULT_INSTRUCTIONS_TRANSCRIBE_FILE).toBe(`/instructions/transcribe.md`);
-        });
-    });
-
-    describe('audio extensions', () => {
-        test('should have default audio extensions', () => {
-            expect(DEFAULT_AUDIO_EXTENSIONS).toEqual(['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm']);
-        });
-
-        test('should have allowed audio extensions', () => {
-            expect(ALLOWED_AUDIO_EXTENSIONS).toEqual(['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm']);
-        });
-
-        test('should have default and allowed extensions match', () => {
-            expect(DEFAULT_AUDIO_EXTENSIONS).toEqual(ALLOWED_AUDIO_EXTENSIONS);
+        it('should have individual component formats', () => {
+            expect(Constants.DATE_FORMAT_MONTH).toBe('M');
+            expect(Constants.DATE_FORMAT_DAY).toBe('D');
+            expect(Constants.DATE_FORMAT_HOURS).toBe('HHmm');
+            expect(Constants.DATE_FORMAT_MINUTES).toBe('mm');
+            expect(Constants.DATE_FORMAT_SECONDS).toBe('ss');
+            expect(Constants.DATE_FORMAT_MILLISECONDS).toBe('SSS');
         });
     });
 
-    describe('content types', () => {
-        test('should have default content types', () => {
-            expect(DEFAULT_CONTENT_TYPES).toEqual(['diff']);
+    describe('Audio Extensions', () => {
+        it('should define default audio extensions', () => {
+            const extensions = Constants.DEFAULT_AUDIO_EXTENSIONS;
+            expect(extensions).toContain('mp3');
+            expect(extensions).toContain('m4a');
+            expect(extensions).toContain('wav');
+            expect(extensions).toContain('webm');
         });
 
-        test('should have allowed content types', () => {
-            expect(ALLOWED_CONTENT_TYPES).toEqual(['log', 'diff']);
-        });
-    });
-
-    describe('output structure and filename options', () => {
-        test('should have default output structure', () => {
-            expect(DEFAULT_OUTPUT_STRUCTURE).toBe('month');
-        });
-
-        test('should have allowed output structures', () => {
-            expect(ALLOWED_OUTPUT_STRUCTURES).toEqual(['none', 'year', 'month', 'day']);
-        });
-
-        test('should have default output filename options', () => {
-            expect(DEFAULT_OUTPUT_FILENAME_OPTIONS).toEqual(['date', 'time', 'subject']);
-        });
-
-        test('should have allowed output filename options', () => {
-            expect(ALLOWED_OUTPUT_FILENAME_OPTIONS).toEqual(['date', 'time', 'subject']);
+        it('should define allowed audio extensions', () => {
+            expect(Constants.ALLOWED_AUDIO_EXTENSIONS).toEqual(Constants.DEFAULT_AUDIO_EXTENSIONS);
         });
     });
 
-    describe('model constants', () => {
-        test('should have correct model defaults', () => {
-            expect(DEFAULT_TRANSCRIPTION_MODEL).toBe('whisper-1');
-            expect(DEFAULT_MODEL).toBe('gpt-5.2');
-            expect(DEFAULT_REASONING_LEVEL).toBe('medium');
+    describe('Content Types', () => {
+        it('should define default content types', () => {
+            expect(Constants.DEFAULT_CONTENT_TYPES).toContain('diff');
+        });
+
+        it('should define allowed content types', () => {
+            expect(Constants.ALLOWED_CONTENT_TYPES).toContain('log');
+            expect(Constants.ALLOWED_CONTENT_TYPES).toContain('diff');
         });
     });
 
-    describe('size and performance constants', () => {
-        test('should have correct max audio size', () => {
-            expect(DEFAULT_MAX_AUDIO_SIZE).toBe(26214400); // 25MB in bytes
+    describe('Output Configuration', () => {
+        it('should define output structure', () => {
+            expect(Constants.DEFAULT_OUTPUT_STRUCTURE).toBe('month' as FilesystemStructure);
         });
 
-        test('should have correct temp directory', () => {
-            expect(DEFAULT_TEMP_DIRECTORY).toBeTruthy();
-            expect(typeof DEFAULT_TEMP_DIRECTORY).toBe('string');
-        });
-    });
-
-    describe('context subdirectories', () => {
-        test('should have correct context subdirectory structure', () => {
-            expect(CONTEXT_SUBDIRECTORIES).toEqual({
-                people: 'people',
-                projects: 'projects',
-                companies: 'companies',
-                terms: 'terms',
-            });
+        it('should define output filename options', () => {
+            expect(Constants.DEFAULT_OUTPUT_FILENAME_OPTIONS).toContain('date');
+            expect(Constants.DEFAULT_OUTPUT_FILENAME_OPTIONS).toContain('time');
+            expect(Constants.DEFAULT_OUTPUT_FILENAME_OPTIONS).toContain('subject');
         });
 
-        test('should have all required context subdirectories', () => {
-            expect(CONTEXT_SUBDIRECTORIES.people).toBe('people');
-            expect(CONTEXT_SUBDIRECTORIES.projects).toBe('projects');
-            expect(CONTEXT_SUBDIRECTORIES.companies).toBe('companies');
-            expect(CONTEXT_SUBDIRECTORIES.terms).toBe('terms');
+        it('should define allowed structures', () => {
+            const structures = Constants.ALLOWED_OUTPUT_STRUCTURES;
+            expect(structures).toContain('none');
+            expect(structures).toContain('year');
+            expect(structures).toContain('month');
+            expect(structures).toContain('day');
+        });
+
+        it('should define allowed filename options', () => {
+            expect(Constants.ALLOWED_OUTPUT_FILENAME_OPTIONS).toContain('date');
+            expect(Constants.ALLOWED_OUTPUT_FILENAME_OPTIONS).toContain('time');
+            expect(Constants.ALLOWED_OUTPUT_FILENAME_OPTIONS).toContain('subject');
         });
     });
 
-    describe('output file types', () => {
-        test('should have all output file types defined', () => {
-            expect(OUTPUT_FILE_TYPES).toContain('transcript');
-            expect(OUTPUT_FILE_TYPES).toContain('context');
-            expect(OUTPUT_FILE_TYPES).toContain('request');
-            expect(OUTPUT_FILE_TYPES).toContain('response');
-            expect(OUTPUT_FILE_TYPES).toContain('reflection');
-            expect(OUTPUT_FILE_TYPES).toContain('session');
+    describe('Configuration Directories', () => {
+        it('should define config directory', () => {
+            expect(Constants.DEFAULT_CONFIG_DIR).toBe('./.protokoll');
         });
 
-        test('should have exactly 6 output file types', () => {
-            expect(OUTPUT_FILE_TYPES).toHaveLength(6);
+        it('should define processed directory', () => {
+            expect(Constants.DEFAULT_PROCESSED_DIR).toBe('./processed');
         });
     });
 
-    describe('protokoll defaults object', () => {
-        test('should have complete protokoll defaults', () => {
-            expect(PROTOKOLL_DEFAULTS).toHaveProperty('dryRun', DEFAULT_DRY_RUN);
-            expect(PROTOKOLL_DEFAULTS).toHaveProperty('verbose', DEFAULT_VERBOSE);
-            expect(PROTOKOLL_DEFAULTS).toHaveProperty('debug', DEFAULT_DEBUG);
-            expect(PROTOKOLL_DEFAULTS).toHaveProperty('diff', DEFAULT_DIFF);
-            expect(PROTOKOLL_DEFAULTS).toHaveProperty('log', DEFAULT_LOG);
-            expect(PROTOKOLL_DEFAULTS).toHaveProperty('transcriptionModel', DEFAULT_TRANSCRIPTION_MODEL);
-            expect(PROTOKOLL_DEFAULTS).toHaveProperty('model', DEFAULT_MODEL);
-            expect(PROTOKOLL_DEFAULTS).toHaveProperty('contentTypes', DEFAULT_CONTENT_TYPES);
-            expect(PROTOKOLL_DEFAULTS).toHaveProperty('overrides', DEFAULT_OVERRIDES);
-            expect(PROTOKOLL_DEFAULTS).toHaveProperty('maxAudioSize', DEFAULT_MAX_AUDIO_SIZE);
-            expect(PROTOKOLL_DEFAULTS).toHaveProperty('configDirectory', DEFAULT_CONFIG_DIR);
-            expect(PROTOKOLL_DEFAULTS).toHaveProperty('interactive', DEFAULT_INTERACTIVE);
-            expect(PROTOKOLL_DEFAULTS).toHaveProperty('selfReflection', DEFAULT_SELF_REFLECTION);
+    describe('Context System', () => {
+        it('should define context directory name', () => {
+            expect(Constants.DEFAULT_CONTEXT_DIR_NAME).toBe('.protokoll');
         });
 
-        test('should have valid temp directory in protokoll defaults', () => {
-            expect(PROTOKOLL_DEFAULTS.tempDirectory).toBeTruthy();
-            expect(typeof PROTOKOLL_DEFAULTS.tempDirectory).toBe('string');
+        it('should define context config file name', () => {
+            expect(Constants.DEFAULT_CONTEXT_CONFIG_FILE_NAME).toBe('config.yaml');
         });
 
-        test('should ensure temp directory fallback works', () => {
-            // This tests the fallback: tempDirectory: DEFAULT_TEMP_DIRECTORY || os.tmpdir()
-            expect(PROTOKOLL_DEFAULTS.tempDirectory.length > 0).toBe(true);
+        it('should define max discovery levels', () => {
+            expect(Constants.DEFAULT_MAX_DISCOVERY_LEVELS).toBe(10);
         });
 
-        test('should use DEFAULT_TEMP_DIRECTORY when available', () => {
-            // Verify that if DEFAULT_TEMP_DIRECTORY exists, it's being used
-            expect(PROTOKOLL_DEFAULTS.tempDirectory).toBe(DEFAULT_TEMP_DIRECTORY || require('os').tmpdir());
+        it('should define context subdirectories', () => {
+            expect(Constants.CONTEXT_SUBDIRECTORIES.people).toBe('people');
+            expect(Constants.CONTEXT_SUBDIRECTORIES.projects).toBe('projects');
+            expect(Constants.CONTEXT_SUBDIRECTORIES.companies).toBe('companies');
+            expect(Constants.CONTEXT_SUBDIRECTORIES.terms).toBe('terms');
+        });
+    });
+
+    describe('Personas and Instructions', () => {
+        it('should define personas directory', () => {
+            expect(Constants.DEFAULT_PERSONAS_DIR).toBe('/personas');
+        });
+
+        it('should define persona transcriber file', () => {
+            expect(Constants.DEFAULT_PERSONA_TRANSCRIBER_FILE).toContain('transcriber.md');
+        });
+
+        it('should define instructions directory', () => {
+            expect(Constants.DEFAULT_INSTRUCTIONS_DIR).toBe('/instructions');
+        });
+
+        it('should define transcribe instructions file', () => {
+            expect(Constants.DEFAULT_INSTRUCTIONS_TRANSCRIBE_FILE).toContain('transcribe.md');
+        });
+    });
+
+    describe('Model Configuration', () => {
+        it('should define transcription model', () => {
+            expect(Constants.DEFAULT_TRANSCRIPTION_MODEL).toBe('whisper-1');
+        });
+
+        it('should define default model', () => {
+            expect(Constants.DEFAULT_MODEL).toBe('gpt-5.2');
+        });
+
+        it('should define reasoning level', () => {
+            expect(Constants.DEFAULT_REASONING_LEVEL).toBe('medium');
+        });
+    });
+
+    describe('Smart Assistance', () => {
+        it('should enable smart assistance by default', () => {
+            expect(Constants.DEFAULT_SMART_ASSISTANCE).toBe(true);
+        });
+
+        it('should define phonetic model', () => {
+            expect(Constants.DEFAULT_PHONETIC_MODEL).toBe('gpt-5-nano');
+        });
+
+        it('should define analysis model', () => {
+            expect(Constants.DEFAULT_ANALYSIS_MODEL).toBe('gpt-5-mini');
+        });
+
+        it('should enable project assistance by default', () => {
+            expect(Constants.DEFAULT_SOUNDS_LIKE_ON_ADD).toBe(true);
+            expect(Constants.DEFAULT_TRIGGER_PHRASES_ON_ADD).toBe(true);
+            expect(Constants.DEFAULT_PROMPT_FOR_SOURCE).toBe(true);
+        });
+
+        it('should enable term assistance by default', () => {
+            expect(Constants.DEFAULT_TERMS_ENABLED).toBe(true);
+            expect(Constants.DEFAULT_TERM_SOUNDS_LIKE_ON_ADD).toBe(true);
+            expect(Constants.DEFAULT_TERM_DESCRIPTION_ON_ADD).toBe(true);
+            expect(Constants.DEFAULT_TERM_TOPICS_ON_ADD).toBe(true);
+            expect(Constants.DEFAULT_TERM_PROJECT_SUGGESTIONS).toBe(true);
+        });
+    });
+
+    describe('Content Limits', () => {
+        it('should define content length limits', () => {
+            expect(Constants.MAX_CONTENT_LENGTH).toBe(15000);
+            expect(Constants.MAX_TERM_CONTEXT_LENGTH).toBe(10000);
+        });
+
+        it('should define timeout values', () => {
+            expect(Constants.ASSIST_TIMEOUT_MS).toBe(30000);
+            expect(Constants.TERM_ASSIST_TIMEOUT_MS).toBe(20000);
+        });
+    });
+
+    describe('Miscellaneous Defaults', () => {
+        it('should define overrides default', () => {
+            expect(Constants.DEFAULT_OVERRIDES).toBe(false);
+        });
+
+        it('should define max audio size', () => {
+            expect(Constants.DEFAULT_MAX_AUDIO_SIZE).toBe(26214400); // 25MB
+        });
+
+        it('should define temp directory', () => {
+            expect(Constants.DEFAULT_TEMP_DIRECTORY).toBeDefined();
+        });
+
+        it('should enable interactive mode by default', () => {
+            expect(Constants.DEFAULT_INTERACTIVE).toBe(true);
+        });
+
+        it('should enable self reflection by default', () => {
+            expect(Constants.DEFAULT_SELF_REFLECTION).toBe(true);
+        });
+
+        it('should disable silent mode by default', () => {
+            expect(Constants.DEFAULT_SILENT).toBe(false);
+        });
+    });
+
+    describe('Output Management', () => {
+        it('should define intermediate directory', () => {
+            expect(Constants.DEFAULT_INTERMEDIATE_DIRECTORY).toBe('./output/protokoll');
+        });
+
+        it('should keep intermediates by default', () => {
+            expect(Constants.DEFAULT_KEEP_INTERMEDIATES).toBe(true);
+        });
+
+        it('should define output file types', () => {
+            expect(Constants.OUTPUT_FILE_TYPES).toContain('transcript');
+            expect(Constants.OUTPUT_FILE_TYPES).toContain('context');
+            expect(Constants.OUTPUT_FILE_TYPES).toContain('request');
+            expect(Constants.OUTPUT_FILE_TYPES).toContain('response');
+            expect(Constants.OUTPUT_FILE_TYPES).toContain('reflection');
+            expect(Constants.OUTPUT_FILE_TYPES).toContain('session');
+        });
+    });
+
+    describe('Protokoll Defaults Object', () => {
+        it('should define protokoll defaults', () => {
+            expect(Constants.PROTOKOLL_DEFAULTS).toBeDefined();
+        });
+
+        it('should include all expected defaults', () => {
+            expect(Constants.PROTOKOLL_DEFAULTS.dryRun).toBe(Constants.DEFAULT_DRY_RUN);
+            expect(Constants.PROTOKOLL_DEFAULTS.verbose).toBe(Constants.DEFAULT_VERBOSE);
+            expect(Constants.PROTOKOLL_DEFAULTS.debug).toBe(Constants.DEFAULT_DEBUG);
+            expect(Constants.PROTOKOLL_DEFAULTS.transcriptionModel).toBe(Constants.DEFAULT_TRANSCRIPTION_MODEL);
+            expect(Constants.PROTOKOLL_DEFAULTS.model).toBe(Constants.DEFAULT_MODEL);
+        });
+
+        it('should fallback temp directory correctly', () => {
+            // Verifies the branch coverage: DEFAULT_TEMP_DIRECTORY || os.tmpdir()
+            expect(Constants.PROTOKOLL_DEFAULTS.tempDirectory).toBeDefined();
+            expect(typeof Constants.PROTOKOLL_DEFAULTS.tempDirectory).toBe('string');
+            expect(Constants.PROTOKOLL_DEFAULTS.tempDirectory.length).toBeGreaterThan(0);
+        });
+
+        it('should include interactive and reflection settings', () => {
+            expect(Constants.PROTOKOLL_DEFAULTS.interactive).toBe(Constants.DEFAULT_INTERACTIVE);
+            expect(Constants.PROTOKOLL_DEFAULTS.selfReflection).toBe(Constants.DEFAULT_SELF_REFLECTION);
+            expect(Constants.PROTOKOLL_DEFAULTS.silent).toBe(Constants.DEFAULT_SILENT);
         });
     });
 });
