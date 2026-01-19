@@ -313,8 +313,25 @@ export const listTranscripts = async (options: ListTranscriptsOptions): Promise<
         if (startDate && dateTime && dateTime.date < startDate) continue;
         if (endDate && dateTime && dateTime.date > endDate) continue;
         
+        // Verify it's actually a file (not a directory)
+        let stats;
+        try {
+            stats = await fs.stat(filePath);
+            if (!stats.isFile()) {
+                continue; // Skip directories and other non-files
+            }
+        } catch {
+            continue; // Skip if we can't stat it
+        }
+        
         // Read content for title extraction and search
-        const content = await fs.readFile(filePath, 'utf-8');
+        let content: string;
+        try {
+            content = await fs.readFile(filePath, 'utf-8');
+        } catch (error) {
+            // Skip files we can't read (permissions, encoding issues, etc.)
+            continue;
+        }
         
         // Apply search filtering
         if (search) {
@@ -326,7 +343,6 @@ export const listTranscripts = async (options: ListTranscriptsOptions): Promise<
         }
         
         const title = extractTitle(content);
-        const stats = await fs.stat(filePath);
         const rawData = await readRawTranscript(filePath);
         
         // Parse entity metadata from transcript
