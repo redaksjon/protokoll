@@ -673,8 +673,8 @@ const tools: Tool[] = [
         name: 'protokoll_add_term',
         description:
             'Add a new technical term or abbreviation to the context. ' +
-            'Terms help Protokoll correctly transcribe domain-specific vocabulary. ' +
-            'Include sounds_like variants for phonetic matching.',
+            'Terms help Protokoll correctly transcribe domain-specific vocabulary and enable topic-based routing. ' +
+            'Include sounds_like variants for phonetic matching, description for clarity, and topics for classification.',
         inputSchema: {
             type: 'object',
             properties: {
@@ -692,17 +692,26 @@ const tools: Tool[] = [
                 },
                 domain: {
                     type: 'string',
-                    description: 'Domain or field (e.g., engineering, finance)',
+                    description: 'Domain or field (e.g., devops, engineering, security, finance)',
+                },
+                description: {
+                    type: 'string',
+                    description: 'Clear explanation of what the term means',
                 },
                 sounds_like: {
                     type: 'array',
                     items: { type: 'string' },
                     description: 'Phonetic variants (how Whisper might mishear the term)',
                 },
+                topics: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Related topic keywords for classification (e.g., containers, orchestration, devops)',
+                },
                 projects: {
                     type: 'array',
                     items: { type: 'string' },
-                    description: 'Associated project IDs',
+                    description: 'Associated project IDs where this term is relevant',
                 },
                 contextDirectory: {
                     type: 'string',
@@ -1447,7 +1456,9 @@ async function handleAddTerm(args: {
     id?: string;
     expansion?: string;
     domain?: string;
+    description?: string;
     sounds_like?: string[];
+    topics?: string[];
     projects?: string[];
     contextDirectory?: string;
 }) {
@@ -1471,7 +1482,9 @@ async function handleAddTerm(args: {
         type: 'term',
         ...(args.expansion && { expansion: args.expansion }),
         ...(args.domain && { domain: args.domain }),
+        ...(args.description && { description: args.description }),
         ...(args.sounds_like && { sounds_like: args.sounds_like }),
+        ...(args.topics && { topics: args.topics }),
         ...(args.projects && { projects: args.projects }),
     };
 
