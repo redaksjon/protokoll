@@ -25,6 +25,7 @@ Protokoll transforms audio recordings into intelligent, context-enhanced transcr
 - [**Transcript Actions**](./action.md): Edit, combine, and manage transcripts
 - [**Feedback**](./feedback.md): Intelligent feedback for corrections
 
+
 ### AI Integration
 - [**MCP Integration**](./mcp-integration.md): Use Protokoll through AI assistants
 

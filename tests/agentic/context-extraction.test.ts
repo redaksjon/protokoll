@@ -10,6 +10,7 @@ import { ToolContext } from '../../src/agentic/types';
 // Mock context instance
 const mockContextInstance = {
     search: vi.fn(() => []),
+    searchWithContext: vi.fn(() => []),
     findBySoundsLike: vi.fn(() => null),
     getAllProjects: vi.fn(() => []),
     saveEntity: vi.fn(),

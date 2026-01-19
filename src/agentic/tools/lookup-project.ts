@@ -138,9 +138,18 @@ export const create = (ctx: ToolContext): TranscriptionTool => ({
                 },
             };
         }
+        
+        // Try to determine context from routing instance if available
+        let contextProjectId: string | undefined;
+        if (ctx.routingInstance) {
+            const allProjects = context.getAllProjects();
+            // Use the first active project as a context hint (could be improved)
+            const activeProject = allProjects.find(p => p.active !== false);
+            contextProjectId = activeProject?.id;
+        }
     
-        // Look up project by name (also searches sounds_like)
-        const searchResults = context.search(args.name);
+        // Use context-aware search (prefers related projects)
+        const searchResults = context.searchWithContext(args.name, contextProjectId);
         const projectMatches = searchResults.filter(e => e.type === 'project');
         const termMatches = searchResults.filter(e => e.type === 'term');
     
@@ -151,6 +160,7 @@ export const create = (ctx: ToolContext): TranscriptionTool => ({
                 data: {
                     found: true,
                     project,
+                    matchedVia: 'context_aware_search',
                 },
             };
         }

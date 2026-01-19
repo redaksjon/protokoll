@@ -334,6 +334,50 @@ smartAssistance:
 4. Optionally provide URL/file for topics and description
 5. All suggestions are editable before saving
 
+**Smart Relationship Suggestions**
+
+When adding a project interactively, Protokoll analyzes existing projects and suggests relationships:
+
+```
+[Add New Project]
+
+Project name: Kronologi
+
+[Generating phonetic variants...]
+...
+
+[Suggested parent project: Redaksjon]
+  Reason: topic "redaksjon-subproject" indicates subproject
+  Confidence: high
+Set "Redaksjon" as parent? (Y/n): y
+  ✓ Parent set to "Redaksjon"
+
+[Suggested sibling projects:]
+  1. Protokoll (shares parent "redaksjon")
+  2. Observasjon (shares parent "redaksjon")
+Add siblings? (Enter numbers comma-separated, or Enter to skip): 1,2
+  ✓ Added 2 siblings
+
+[Suggested related terms:]
+  1. Git (matches project topic)
+  2. History (mentioned in description)
+Add related terms? (Enter numbers comma-separated, or Enter to skip): 1
+  ✓ Added 1 related terms
+
+Project "Kronologi" saved successfully.
+```
+
+**How suggestions work:**
+
+- **Parent**: Detected from naming patterns (e.g., "Redaksjon Tools" suggests "Redaksjon"), `{parent}-subproject` topics, or destination subdirectories
+- **Siblings**: Projects sharing the same parent or with significant topic overlap
+- **Related Terms**: Terms that appear in project name, description, or share topics
+
+**Confidence levels:**
+- `high` - Very likely correct (e.g., explicit subproject topic)
+- `medium` - Probably correct (e.g., naming pattern match)
+- `low` - Possibly correct (shown but with lower confidence)
+
 **Requirements**
 
 - `OPENAI_API_KEY` environment variable set
@@ -357,25 +401,94 @@ Skip confirmation:
 protokoll project delete client-alpha --force
 ```
 
-### Edit a Project (MCP Only)
+### Edit a Project
 
-The `protokoll_edit_project` MCP tool allows manual edits to existing projects without requiring LLM regeneration:
+Edit project fields incrementally without regenerating from source.
+
+#### CLI Usage
+
+```bash
+# Add classification elements
+protokoll project edit redaksjon \
+  --add-topic publishing \
+  --add-phrase "redaksjon note" \
+  --add-person priya-sharma \
+  --add-company acme-corp
+
+# Manage relationships
+protokoll project edit kronologi \
+  --parent redaksjon \
+  --add-sibling protokoll \
+  --add-sibling observasjon \
+  --add-term git
+
+# Update routing
+protokoll project edit client-alpha \
+  --destination ~/work/clients/alpha \
+  --structure day
+
+# Remove elements
+protokoll project edit work \
+  --remove-topic old-topic \
+  --remove-phrase "outdated phrase"
+
+# Combine operations
+protokoll project edit utilarium \
+  --add-child utilarium-monitoring \
+  --add-term dreadcabinet \
+  --add-topic infrastructure
+```
+
+**Classification Options:**
+- `--add-topic <topic>` - Add classification topic (repeat for multiple)
+- `--remove-topic <topic>` - Remove classification topic
+- `--add-phrase <phrase>` - Add trigger phrase (repeat for multiple)
+- `--remove-phrase <phrase>` - Remove trigger phrase
+- `--add-person <id>` - Associate person ID (repeat for multiple)
+- `--remove-person <id>` - Remove associated person
+- `--add-company <id>` - Associate company ID (repeat for multiple)
+- `--remove-company <id>` - Remove associated company
+
+**Relationship Options:**
+- `--parent <id>` - Set parent project
+- `--add-child <id>` - Add child project (repeat for multiple)
+- `--remove-child <id>` - Remove child project
+- `--add-sibling <id>` - Add sibling project (repeat for multiple)
+- `--remove-sibling <id>` - Remove sibling project
+- `--add-term <id>` - Add related term (repeat for multiple)
+- `--remove-term <id>` - Remove related term
+
+**Other Options:**
+- `--name <name>` - Update project name
+- `--description <text>` - Update description
+- `--destination <path>` - Update routing destination
+- `--structure <type>` - Update directory structure
+- `--context-type <type>` - Update context type (work/personal/mixed)
+- `--active <bool>` - Set active status (true/false)
+
+#### MCP Usage
+
+The `protokoll_edit_project` MCP tool provides the same functionality:
 
 ```typescript
-// Add sounds_like variants (for when Whisper mishears project name)
+// Add classification elements
 await use_mcp_tool('protokoll_edit_project', {
-  id: 'protokoll',
-  add_sounds_like: ['pro to call', 'proto call']
+  id: 'redaksjon',
+  add_topics: ['publishing', 'norwegian-tools'],
+  add_explicit_phrases: ['redaksjon note'],
+  add_associated_people: ['priya-sharma'],
+  add_associated_companies: ['acme-corp']
 });
 
-// Update routing configuration
+// Manage relationships
 await use_mcp_tool('protokoll_edit_project', {
-  id: 'client-alpha',
-  destination: '~/notes/clients/alpha',
-  structure: 'month'
+  id: 'kronologi',
+  parent: 'redaksjon',
+  add_siblings: ['protokoll', 'observasjon'],
+  add_related_terms: ['git', 'history']
 });
 
-// Add trigger phrases and topics
+// Update routing
 await use_mcp_tool('protokoll_edit_project', {
   id: 'quarterly-planning',
   add_explicit_phrases: ['Q2 planning', 'quarterly review'],
@@ -389,13 +502,234 @@ await use_mcp_tool('protokoll_edit_project', {
 });
 ```
 
-**Available fields:**
-- `name`, `description`, `destination`, `structure`, `contextType`, `active` - Simple updates
-- `sounds_like`, `topics`, `explicit_phrases` - Replace entire array
-- `add_sounds_like`, `add_topics`, `add_explicit_phrases` - Add to existing array
-- `remove_sounds_like`, `remove_topics`, `remove_explicit_phrases` - Remove from array
+**Available MCP fields:**
 
-**Note:** For regenerating metadata from documentation, use `protokoll_update_project` instead.
+*Basic:*
+- `name`, `description`, `destination`, `structure`, `contextType`, `active`
+
+*Classification (routing signals):*
+- **Trigger phrases**: `explicit_phrases`, `add_explicit_phrases`, `remove_explicit_phrases`
+- **Topics**: `topics`, `add_topics`, `remove_topics`
+- **People**: `associated_people`, `add_associated_people`, `remove_associated_people`
+- **Companies**: `associated_companies`, `add_associated_companies`, `remove_associated_companies`
+- **Phonetics**: `sounds_like`, `add_sounds_like`, `remove_sounds_like`
+
+*Relationships (advanced):*
+- `parent` - Set parent project ID
+- `add_children`, `remove_children` - Manage child projects
+- `add_siblings`, `remove_siblings` - Manage sibling projects
+- `add_related_terms`, `remove_related_terms` - Manage term associations
+
+### Understanding Classification
+
+Classification determines HOW notes are routed to projects. When you run `project show`, you'll see the classification section:
+
+```
+┌─────────────────────┬────────────────────────────────────────────┐
+│ Context Type        │ work                                       │
+├─────────────────────┼────────────────────────────────────────────┤
+│ Trigger Phrases     │   • quarterly planning                     │
+│                     │   • Q1 planning                            │
+│                     │   • Q2 planning                            │
+├─────────────────────┼────────────────────────────────────────────┤
+│ Topics              │   • roadmap                                │
+│                     │   • budget                                 │
+│                     │   • planning                               │
+├─────────────────────┼────────────────────────────────────────────┤
+│ Associated People   │   • priya-sharma                           │
+│                     │   • john-smith                             │
+├─────────────────────┼────────────────────────────────────────────┤
+│ Associated Companies│   • acme-corp                              │
+└─────────────────────┴────────────────────────────────────────────┘
+```
+
+#### Classification Fields Explained
+
+| Field | Weight | Purpose | Example |
+|-------|--------|---------|---------|
+| **Trigger Phrases** | High (90%) | High-confidence content matching | "quarterly planning", "Q1 review" |
+| **Associated People** | Medium (60%) | Routes when specific people mentioned | `priya-sharma`, `john-smith` |
+| **Associated Companies** | Medium (60%) | Routes when companies mentioned | `acme-corp`, `client-alpha-inc` |
+| **Topics** | Low (30%) | Theme-based matching | `roadmap`, `budget`, `strategy` |
+| **Context Type** | Modifier | Nature of content | `work`, `personal`, `mixed` |
+
+#### When to Use Each Field
+
+**Trigger Phrases (explicit_phrases):**
+```bash
+# Use for: High-confidence phrases that definitively indicate this project
+protokoll project edit quarterly-planning \
+  --add-phrase "quarterly planning" \
+  --add-phrase "Q1 planning" \
+  --add-phrase "roadmap review"
+```
+
+**Topics:**
+```bash
+# Use for: Theme keywords that suggest (but don't guarantee) this project
+protokoll project edit quarterly-planning \
+  --add-topic roadmap \
+  --add-topic budget \
+  --add-topic strategy
+```
+
+**Associated People:**
+```bash
+# Use for: When mentions of specific people indicate this project
+# (e.g., "Priya" always means work project, not personal)
+protokoll project edit work \
+  --add-person priya-sharma \
+  --add-person john-smith
+```
+
+**Associated Companies:**
+```bash
+# Use for: When company mentions route to specific projects
+# (e.g., "Acme Corp" always means client-alpha project)
+protokoll project edit client-alpha \
+  --add-company acme-corp
+```
+
+#### How Routing Scores Are Calculated
+
+When Protokoll analyzes a transcript:
+
+1. **Scans for trigger phrases** - If found, project gets 90% confidence immediately
+2. **Detects people** - Each associated person found adds 60% weight
+3. **Detects companies** - Each associated company found adds 60% weight
+4. **Matches topics** - Each topic keyword found adds 30% weight
+5. **Combines signals** - Highest-scoring project wins (if above threshold)
+
+**Example transcript:** "Meeting with Priya about roadmap and budget planning"
+
+**Project: Quarterly Planning**
+- Trigger phrase: "planning" → 90%
+- Topic: "roadmap" → +30%
+- Topic: "budget" → +30%
+- Associated person: "priya-sharma" → +60%
+- **Total: 210% confidence** → Routes here
+
+**Project: Personal Notes**
+- No matches
+- **Total: 0%** → Doesn't route here
+
+#### Managing Classification via CLI
+
+```bash
+# View current classification
+protokoll project show quarterly-planning
+
+# Add high-confidence triggers
+protokoll project edit quarterly-planning \
+  --add-phrase "Q2 planning" \
+  --add-phrase "quarterly review"
+
+# Add people who indicate this project
+protokoll project edit client-alpha \
+  --add-person sarah-chen \
+  --add-person mike-johnson
+
+# Add companies that route here
+protokoll project edit client-work \
+  --add-company acme-corp \
+  --add-company beta-industries
+
+# Add theme keywords
+protokoll project edit infrastructure \
+  --add-topic kubernetes \
+  --add-topic docker \
+  --add-topic devops
+
+# Remove outdated elements
+protokoll project edit old-project \
+  --remove-phrase "outdated phrase" \
+  --remove-topic "old-topic"
+```
+
+#### Managing Classification via MCP
+
+```typescript
+// Add classification elements
+await use_mcp_tool('protokoll_edit_project', {
+  id: 'quarterly-planning',
+  add_explicit_phrases: ['Q2 planning', 'quarterly review'],
+  add_associated_people: ['sarah-chen', 'mike-johnson'],
+  add_associated_companies: ['acme-corp'],
+  add_topics: ['roadmap', 'budget', 'planning']
+});
+
+// Remove elements
+await use_mcp_tool('protokoll_edit_project', {
+  id: 'old-project',
+  remove_explicit_phrases: ['outdated phrase'],
+  remove_topics: ['old-topic']
+});
+```
+
+#### Best Practices
+
+**Trigger Phrases:**
+- Use specific, uncommon phrases ("Q1 planning" not just "planning")
+- Include variations ("quarterly planning", "quarter planning")
+- Test that they don't match other projects
+
+**Topics:**
+- Use broad theme keywords
+- Keep list short (5-10 topics max)
+- Avoid overlap with other projects if possible
+
+**Associated People:**
+- Only associate people who STRONGLY indicate this project
+- Don't over-associate (person mentioned everywhere = no routing signal)
+
+**Associated Companies:**
+- Use when company name definitively routes to project
+- Perfect for client projects
+
+#### Common Patterns
+
+**Client Project:**
+```yaml
+classification:
+  context_type: work
+  explicit_phrases:
+    - "acme project"
+    - "working on acme"
+  associated_companies:
+    - acme-corp
+  associated_people:
+    - priya-sharma  # Acme point of contact
+  topics:
+    - client-engagement
+    - consulting
+```
+
+**Personal Notes:**
+```yaml
+classification:
+  context_type: personal
+  explicit_phrases:
+    - "personal note"
+    - "journal entry"
+  topics:
+    - journaling
+    - ideas
+```
+
+**Internal Project:**
+```yaml
+classification:
+  context_type: work
+  explicit_phrases:
+    - "infrastructure work"
+    - "devops task"
+  associated_people:
+    - dev-team-lead
+  topics:
+    - kubernetes
+    - docker
+    - infrastructure
+```
 
 ## Person Commands
 
@@ -625,6 +959,73 @@ This will:
 - Update the term file with new metadata
 
 **Use case**: The Kubernetes project has evolved significantly. Update the term definition to reflect current documentation.
+
+### Edit a Term
+
+Edit term fields incrementally.
+
+#### CLI Usage
+
+```bash
+# Add sounds_like variants (works for everything - single words, multi-word, etc.)
+protokoll term edit kubernetes \
+  --add-sound kube \
+  --add-sound k8s \
+  --add-sound "coober netties"
+
+# For multi-word terms like "DreadCabinet", add split versions to sounds_like
+protokoll term edit dreadcabinet \
+  --add-sound "dread cabinet" \
+  --add-sound "thread cabinet"
+
+# Associate with projects
+protokoll term edit whisper \
+  --add-project protokoll \
+  --add-project observasjon
+
+# Update metadata
+protokoll term edit kubernetes \
+  --description "Container orchestration platform" \
+  --domain devops \
+  --add-topic containers \
+  --add-topic orchestration
+
+# Remove elements
+protokoll term edit kubernetes \
+  --remove-sound "old variant" \
+  --remove-topic "deprecated"
+
+# Combine operations
+protokoll term edit graphql \
+  --description "Query language for APIs" \
+  --domain web-development \
+  --add-topic api \
+  --add-topic backend \
+  --add-project backend-api
+```
+
+**Options:**
+- `--description <text>` - Update description
+- `--domain <domain>` - Update domain
+- `--expansion <text>` - Update expansion
+- `--add-sound <variant>` - Add sounds_like variant (repeatable)
+- `--remove-sound <variant>` - Remove sounds_like variant (repeatable)
+- `--add-topic <topic>` - Add topic (repeatable)
+- `--remove-topic <topic>` - Remove topic (repeatable)
+- `--add-project <id>` - Associate with project (repeatable)
+- `--remove-project <id>` - Remove project association (repeatable)
+
+#### MCP Usage
+
+```typescript
+// Same functionality via MCP
+await use_mcp_tool('protokoll_edit_term', {
+  id: 'kubernetes',
+  add_sounds_like: ['kube', 'k8s'],
+  add_topics: ['containers', 'orchestration'],
+  add_projects: ['infrastructure']
+});
+```
 
 ### Merge Duplicate Terms
 

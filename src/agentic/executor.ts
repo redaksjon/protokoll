@@ -37,6 +37,54 @@ interface ConversationMessage {
     tool_calls?: Array<{ id: string; name: string; arguments: Record<string, unknown> }>;
 }
 
+/**
+ * Clean response content by removing any leaked internal processing information
+ * that should never appear in the user-facing transcript.
+ */
+const cleanResponseContent = (content: string): string => {
+    // Remove common patterns of leaked internal processing
+    // Pattern 1: "Using tools to..." type commentary
+    let cleaned = content.replace(/^(?:Using tools?|Let me|I'll|I will|Now I'll|First,?\s*I(?:'ll| will)).*?[\r\n]+/gim, '');
+    
+    // Pattern 2: JSON tool call artifacts like {"tool":"...","input":{...}}
+    cleaned = cleaned.replace(/\{"tool":\s*"[^"]+",\s*"input":\s*\{[^}]*\}\}/g, '');
+    
+    // Pattern 3: Tool call references in the format tool_name({...})
+    cleaned = cleaned.replace(/\b\w+_\w+\(\{[^}]*\}\)/g, '');
+    
+    // Pattern 4: Lines that are purely reasoning/commentary before the actual content
+    // Look for lines like "I'll verify...", "Checking...", etc.
+    const lines = cleaned.split('\n');
+    let startIndex = 0;
+    
+    // Skip leading lines that look like internal commentary
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        
+        // Skip empty lines
+        if (line === '') continue;
+        
+        // Check if line looks like commentary (starts with action verbs, contains "tool", etc.)
+        const isCommentary = /^(checking|verifying|looking|searching|analyzing|processing|determining|using|calling|executing|I'm|I am|Let me)/i.test(line)
+            || line.includes('tool')
+            || line.includes('{"')
+            || line.includes('reasoning');
+        
+        if (!isCommentary) {
+            // This looks like actual content - start from here
+            startIndex = i;
+            break;
+        }
+    }
+    
+    // Rejoin from the first real content line
+    if (startIndex > 0) {
+        cleaned = lines.slice(startIndex).join('\n');
+    }
+    
+    return cleaned.trim();
+};
+
 export const create = (
     reasoning: Reasoning.ReasoningInstance,
     ctx: ToolContext
@@ -85,6 +133,15 @@ CRITICAL RULES:
 - When you have finished processing, output the COMPLETE corrected transcript as Markdown.
 - Do NOT say you don't have the transcript - it's in the conversation history.
 
+OUTPUT REQUIREMENTS - EXTREMELY IMPORTANT:
+- Your final response MUST contain ONLY the corrected transcript text.
+- DO NOT include any commentary like "Using tools to..." or "Let me verify...".
+- DO NOT include any explanations about what you're doing or have done.
+- DO NOT include any tool call information or JSON in your response.
+- DO NOT include any reasoning or processing notes.
+- Your output will be inserted directly into the user-facing document.
+- If you need to use tools, use them silently - don't narrate what you're doing.
+
 Available tools:
 - lookup_person: Find information about people (use for any name that might be misspelled)
 - lookup_project: Find project routing information  
@@ -108,6 +165,7 @@ Please:
 3. Use route_note to determine the destination
 4. Then output the COMPLETE corrected transcript as clean Markdown
 
+CRITICAL: Your response must contain ONLY the transcript text - no commentary, no explanations, no tool information.
 Remember: preserve ALL content, only fix transcription errors.`;
 
         conversationHistory.push({ role: 'user', content: initialPrompt });
@@ -799,7 +857,9 @@ Corrections made so far: ${state.resolvedEntities.size > 0 ? Array.from(state.re
 
 Continue analyzing. If you need more information, use the tools. 
 When you're done with tool calls, output the COMPLETE corrected transcript as Markdown.
-Do NOT summarize - include ALL original content with corrections applied.`;
+Do NOT summarize - include ALL original content with corrections applied.
+
+CRITICAL REMINDER: Your response must contain ONLY the transcript text. Do NOT include any commentary, explanations, or processing notes - those will leak into the user-facing document.`;
 
                 conversationHistory.push({ role: 'user', content: continuationPrompt });
       
@@ -828,9 +888,17 @@ Do NOT summarize - include ALL original content with corrections applied.`;
     
             // Extract final corrected text
             if (response.content && response.content.length > 50) {
-                state.correctedText = response.content;
+                // Clean the response to remove any leaked internal processing
+                const cleanedContent = cleanResponseContent(response.content);
+                
+                if (cleanedContent !== response.content) {
+                    logger.warn('Removed leaked internal processing from response (%d -> %d chars)',
+                        response.content.length, cleanedContent.length);
+                }
+                
+                state.correctedText = cleanedContent;
                 state.confidence = 0.9;
-                logger.debug('Final transcript generated: %d characters', response.content.length);
+                logger.debug('Final transcript generated: %d characters', cleanedContent.length);
             } else {
                 // Model didn't produce content - ask for it explicitly
                 logger.debug('Model did not produce transcript, requesting explicitly...');
@@ -843,7 +911,9 @@ ${transcriptText}
 CORRECTIONS TO APPLY:
 ${state.resolvedEntities.size > 0 ? Array.from(state.resolvedEntities.entries()).map(([k, v]) => `- "${k}" should be "${v}"`).join('\n') : 'None identified'}
 
-Output the full transcript as clean Markdown. Do NOT summarize.`;
+Output the full transcript as clean Markdown. Do NOT summarize.
+
+CRITICAL: Your response must contain ONLY the corrected transcript text - absolutely no commentary, tool information, or explanations.`;
 
                 const finalResponse = await reasoning.complete({
                     systemPrompt,
@@ -855,7 +925,15 @@ Output the full transcript as clean Markdown. Do NOT summarize.`;
                     totalTokens += finalResponse.usage.totalTokens;
                 }
                 
-                state.correctedText = finalResponse.content || transcriptText;
+                // Clean the final response as well
+                const cleanedFinalContent = cleanResponseContent(finalResponse.content || transcriptText);
+                
+                if (cleanedFinalContent !== finalResponse.content) {
+                    logger.warn('Removed leaked internal processing from final response (%d -> %d chars)',
+                        finalResponse.content?.length || 0, cleanedFinalContent.length);
+                }
+                
+                state.correctedText = cleanedFinalContent;
                 state.confidence = 0.8;
             }
     

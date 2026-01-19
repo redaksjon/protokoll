@@ -19,7 +19,8 @@ import {
     ContextDiscoveryOptions,
     DiscoveredContextDir,
     HierarchicalContextResult,
-    SmartAssistanceConfig 
+    SmartAssistanceConfig,
+    getProjectRelationshipDistance
 } from './types';
 import * as Storage from './storage';
 import * as Discovery from './discovery';
@@ -70,6 +71,10 @@ export interface ContextInstance {
   // Search
   search(query: string): Entity[];
   findBySoundsLike(phonetic: string): Entity | undefined;
+  
+  // Advanced search with context awareness (prefers entities related to context project)
+  searchWithContext(query: string, contextProjectId?: string): Entity[];
+  getRelatedProjects(projectId: string, maxDistance?: number): Project[];
   
   // Modification (for self-update mode)
   saveEntity(entity: Entity): Promise<void>;
@@ -176,6 +181,81 @@ export const create = async (options: CreateOptions = {}): Promise<ContextInstan
     
         search: (query) => storage.search(query),
         findBySoundsLike: (phonetic) => storage.findBySoundsLike(phonetic),
+        
+        /**
+         * Context-aware search that prefers entities related to context project.
+         * Still returns standard search results if no context provided.
+         */
+        searchWithContext: (query, contextProjectId) => {
+            // First, do a standard search
+            const results = storage.search(query);
+            
+            // If no context project specified, return standard results
+            if (!contextProjectId) {
+                return results;
+            }
+            
+            // Get the context project
+            const contextProject = storage.get<Project>('project', contextProjectId);
+            if (!contextProject) {
+                return results;
+            }
+            
+            // Score and sort results based on context relationships
+            const scoredResults = results.map(entity => {
+                let score = 0;
+                
+                // For projects, consider relationship distance
+                if (entity.type === 'project') {
+                    const distance = getProjectRelationshipDistance(contextProject, entity as Project);
+                    if (distance >= 0) {
+                        // Closer relationships get higher scores
+                        score += (3 - distance) * 50; // 150 for same, 100 for parent/child, 50 for sibling
+                    }
+                }
+                
+                // For terms, check if associated with context project
+                if (entity.type === 'term') {
+                    const term = entity as Term;
+                    if (term.projects?.includes(contextProjectId)) {
+                        score += 100;
+                    }
+                }
+                
+                return { entity, score };
+            });
+            
+            // Sort by score (highest first) and return entities
+            return scoredResults
+                .sort((a, b) => b.score - a.score)
+                .map(r => r.entity);
+        },
+        
+        /**
+         * Get all projects related to a given project within maxDistance
+         * Distance: 0 = same, 1 = parent/child, 2 = siblings/cousins
+         */
+        getRelatedProjects: (projectId, maxDistance = 2) => {
+            const project = storage.get<Project>('project', projectId);
+            if (!project) return [];
+            
+            const allProjects = storage.getAll<Project>('project');
+            const related: Array<{ project: Project; distance: number }> = [];
+            
+            for (const otherProject of allProjects) {
+                if (otherProject.id === projectId) continue;
+                
+                const distance = getProjectRelationshipDistance(project, otherProject);
+                if (distance >= 0 && distance <= maxDistance) {
+                    related.push({ project: otherProject, distance });
+                }
+            }
+            
+            // Sort by distance (closest first)
+            return related
+                .sort((a, b) => a.distance - b.distance)
+                .map(r => r.project);
+        },
     
         saveEntity: async (entity) => {
             // Save to the closest .protokoll directory

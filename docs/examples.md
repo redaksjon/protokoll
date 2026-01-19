@@ -383,7 +383,47 @@ Output:
   - Added term "Wibey" to context
 ```
 
-## Scenario 19: Get Help with Feedback
+## Scenario 19: Managing Project Classification
+
+Modify how transcripts are matched and routed to projects.
+
+```bash
+# View current classification
+protokoll project show work
+
+# Add high-confidence trigger phrases
+protokoll project edit work \
+  --add-phrase "work meeting" \
+  --add-phrase "office discussion" \
+  --add-phrase "team standup"
+
+# Add theme-based topics
+protokoll project edit work \
+  --add-topic sprint \
+  --add-topic planning \
+  --add-topic retrospective
+
+# Associate people (when they're mentioned, route here)
+protokoll project edit client-alpha \
+  --add-person priya-sharma \
+  --add-person john-smith
+
+# Associate companies (when mentioned, route here)
+protokoll project edit client-alpha \
+  --add-company acme-corp
+
+# Remove outdated elements
+protokoll project edit work \
+  --remove-phrase "old phrase" \
+  --remove-topic "deprecated-topic"
+```
+
+Result:
+- Classification rules updated
+- Future transcripts use new matching criteria
+- View with `protokoll project show work` to verify
+
+## Scenario 19b: Get Help with Feedback
 
 Not sure what feedback you can give.
 
@@ -395,3 +435,134 @@ protokoll feedback --help-me
 protokoll feedback ~/notes/meeting.md
 # Enter: "What kinds of feedback can I give?"
 ```
+
+---
+
+## Optional: Project Relationships
+
+Use only if you have a clear parent/child hierarchy.
+
+## Scenario 20: Parent-Child Project Relationships
+
+You have a main project with subprojects.
+
+```yaml
+# Parent: ~/.protokoll/projects/redaksjon.yaml
+id: redaksjon
+name: Redaksjon
+type: project
+relationships:
+  children:
+    - protokoll
+    - kronologi
+    - observasjon
+routing:
+  destination: ~/work/redaksjon/notes
+  structure: month
+  filename_options: [date, time, subject]
+
+# Child: ~/.protokoll/projects/kronologi.yaml  
+id: kronologi
+name: Kronologi
+type: project
+relationships:
+  parent: redaksjon
+  siblings:
+    - protokoll
+    - observasjon
+classification:
+  context_type: work
+  topics:
+    - git
+    - history
+  explicit_phrases:
+    - "working on kronologi"
+routing:
+  destination: ~/work/redaksjon/kronologi/notes
+  structure: month
+  filename_options: [date, time, subject]
+```
+
+**Manage relationships:**
+```bash
+# Set parent and siblings
+protokoll project edit kronologi \
+  --parent redaksjon \
+  --add-sibling protokoll \
+  --add-sibling observasjon
+
+# Add children to parent
+protokoll project edit redaksjon \
+  --add-child kronologi
+```
+
+Result:
+- When transcribing in Redaksjon context, child projects get relationship bonus
+- Helps disambiguation when projects have similar names
+- View with `protokoll project show redaksjon` to see hierarchy
+
+## Scenario 21: Smart Relationship Suggestions
+
+When creating a new project, Protokoll analyzes existing projects and suggests relationships.
+
+```bash
+# Create a project with topics that suggest relationships
+protokoll project add --name "Kronologi"
+```
+
+Interactive flow with smart suggestions:
+
+```
+[Add New Project]
+
+Project name: Kronologi
+
+[Generating phonetic variants...]
+  • Calling AI model...
+  kronologi,chronology,krono-logi,...(+8 more)
+
+Sounds like (Enter for suggested, or edit):
+> 
+
+[Generating trigger phrases...]
+  working on kronologi,kronologi project,...(+10 more)
+
+Trigger phrases (Enter for suggested, or edit):
+> 
+
+Topic keywords:
+  git,history,analysis
+> 
+
+[Suggested parent project: Redaksjon]
+  Reason: topic "redaksjon-subproject" indicates subproject
+  Confidence: high
+Set "Redaksjon" as parent? (Y/n): y
+  ✓ Parent set to "Redaksjon"
+
+[Suggested sibling projects:]
+  1. Protokoll (shares parent "redaksjon")
+  2. Observasjon (shares parent "redaksjon")
+Add siblings? (Enter numbers comma-separated, or Enter to skip): 1,2
+  ✓ Added 2 siblings
+
+[Suggested related terms:]
+  1. Git (matches project topic)
+  2. History (matches project topic)
+Add related terms? (Enter numbers comma-separated, or Enter to skip): 1
+  ✓ Added 1 related terms
+
+Project "Kronologi" saved successfully.
+```
+
+Result:
+- Relationships automatically suggested based on naming and topics
+- Parent detected from "{parent}-subproject" topic pattern
+- Siblings found by shared parent
+- Related terms matched from project topics
+- User can accept/reject each suggestion
+
+**How it detects relationships:**
+- **Parent**: Names containing parent name, `{parent}-subproject` topics, subdirectory destinations
+- **Siblings**: Shared parent, significant topic overlap, same destination directory
+- **Related Terms**: Terms in project name/description, matching topics

@@ -983,9 +983,9 @@ const tools: Tool[] = [
         name: 'protokoll_edit_project',
         description:
             'Edit an existing project with manual modifications. Unlike protokoll_update_project (which regenerates from a source), ' +
-            'this allows direct edits: adding specific sounds_like variants, changing routing, modifying classification, etc. ' +
-            'For array fields (sounds_like, topics, explicit_phrases), use add_* to append or remove_* to delete specific values, ' +
-            'or use the base field name to replace the entire array.',
+            'this allows direct edits: adding specific sounds_like variants, changing routing, modifying classification, managing relationships, etc. ' +
+            'For array fields (sounds_like, topics, explicit_phrases, associated_people, associated_companies, children, siblings, related_terms), ' +
+            'use add_* to append or remove_* to delete specific values, or use the base field name to replace the entire array.',
         inputSchema: {
             type: 'object',
             properties: {
@@ -1063,6 +1063,70 @@ const tools: Tool[] = [
                     type: 'array',
                     items: { type: 'string' },
                     description: 'Remove these explicit trigger phrases',
+                },
+                associated_people: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Replace all associated people (person IDs) with this array',
+                },
+                add_associated_people: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Add these person IDs to associated people',
+                },
+                remove_associated_people: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Remove these person IDs from associated people',
+                },
+                associated_companies: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Replace all associated companies (company IDs) with this array',
+                },
+                add_associated_companies: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Add these company IDs to associated companies',
+                },
+                remove_associated_companies: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Remove these company IDs from associated companies',
+                },
+                parent: {
+                    type: 'string',
+                    description: 'Set parent project ID (for project relationships)',
+                },
+                add_children: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Add these project IDs as children',
+                },
+                remove_children: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Remove these project IDs from children',
+                },
+                add_siblings: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Add these project IDs as siblings',
+                },
+                remove_siblings: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Remove these project IDs from siblings',
+                },
+                add_related_terms: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Add these term IDs as related terms (for project relationships)',
+                },
+                remove_related_terms: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Remove these term IDs from related terms',
                 },
                 contextDirectory: {
                     type: 'string',
@@ -2768,6 +2832,19 @@ async function handleEditProject(args: {
     explicit_phrases?: string[];
     add_explicit_phrases?: string[];
     remove_explicit_phrases?: string[];
+    associated_people?: string[];
+    add_associated_people?: string[];
+    remove_associated_people?: string[];
+    associated_companies?: string[];
+    add_associated_companies?: string[];
+    remove_associated_companies?: string[];
+    parent?: string;
+    add_children?: string[];
+    remove_children?: string[];
+    add_siblings?: string[];
+    remove_siblings?: string[];
+    add_related_terms?: string[];
+    remove_related_terms?: string[];
     contextDirectory?: string;
 }) {
     const context = await Context.create({
@@ -2836,6 +2913,44 @@ async function handleEditProject(args: {
         args.remove_explicit_phrases
     );
 
+    const updatedAssociatedPeople = mergeArray(
+        existingProject.classification?.associated_people,
+        args.associated_people,
+        args.add_associated_people,
+        args.remove_associated_people
+    );
+
+    const updatedAssociatedCompanies = mergeArray(
+        existingProject.classification?.associated_companies,
+        args.associated_companies,
+        args.add_associated_companies,
+        args.remove_associated_companies
+    );
+
+    // Handle relationships
+    const existingRelationships = existingProject.relationships || {};
+    
+    const updatedChildren = mergeArray(
+        existingRelationships.children,
+        undefined,
+        args.add_children,
+        args.remove_children
+    );
+    
+    const updatedSiblings = mergeArray(
+        existingRelationships.siblings,
+        undefined,
+        args.add_siblings,
+        args.remove_siblings
+    );
+    
+    const updatedRelatedTerms = mergeArray(
+        existingRelationships.relatedTerms,
+        undefined,
+        args.add_related_terms,
+        args.remove_related_terms
+    );
+
     // Build updated project
     const updatedProject: Project = {
         ...existingProject,
@@ -2874,6 +2989,36 @@ async function handleEditProject(args: {
         delete updatedProject.classification.explicit_phrases;
     }
 
+    if (updatedAssociatedPeople !== undefined) {
+        updatedProject.classification.associated_people = updatedAssociatedPeople;
+    } else if (existingProject.classification?.associated_people && (args.associated_people !== undefined || args.remove_associated_people)) {
+        delete updatedProject.classification.associated_people;
+    }
+
+    if (updatedAssociatedCompanies !== undefined) {
+        updatedProject.classification.associated_companies = updatedAssociatedCompanies;
+    } else if (existingProject.classification?.associated_companies && (args.associated_companies !== undefined || args.remove_associated_companies)) {
+        delete updatedProject.classification.associated_companies;
+    }
+
+    // Handle relationships
+    if (args.parent !== undefined || updatedChildren || updatedSiblings || updatedRelatedTerms) {
+        updatedProject.relationships = {
+            ...existingRelationships,
+            ...(args.parent !== undefined && { parent: args.parent }),
+        };
+        
+        if (updatedChildren !== undefined) {
+            updatedProject.relationships.children = updatedChildren;
+        }
+        if (updatedSiblings !== undefined) {
+            updatedProject.relationships.siblings = updatedSiblings;
+        }
+        if (updatedRelatedTerms !== undefined) {
+            updatedProject.relationships.relatedTerms = updatedRelatedTerms;
+        }
+    }
+
     await context.saveEntity(updatedProject);
 
     // Build summary of changes
@@ -2893,6 +3038,19 @@ async function handleEditProject(args: {
     if (args.explicit_phrases !== undefined) changes.push(`explicit_phrases replaced with ${args.explicit_phrases.length} items`);
     if (args.add_explicit_phrases?.length) changes.push(`added ${args.add_explicit_phrases.length} explicit phrases`);
     if (args.remove_explicit_phrases?.length) changes.push(`removed ${args.remove_explicit_phrases.length} explicit phrases`);
+    if (args.associated_people !== undefined) changes.push(`associated_people replaced with ${args.associated_people.length} items`);
+    if (args.add_associated_people?.length) changes.push(`added ${args.add_associated_people.length} associated people`);
+    if (args.remove_associated_people?.length) changes.push(`removed ${args.remove_associated_people.length} associated people`);
+    if (args.associated_companies !== undefined) changes.push(`associated_companies replaced with ${args.associated_companies.length} items`);
+    if (args.add_associated_companies?.length) changes.push(`added ${args.add_associated_companies.length} associated companies`);
+    if (args.remove_associated_companies?.length) changes.push(`removed ${args.remove_associated_companies.length} associated companies`);
+    if (args.parent !== undefined) changes.push(`parent: "${args.parent}"`);
+    if (args.add_children?.length) changes.push(`added ${args.add_children.length} children`);
+    if (args.remove_children?.length) changes.push(`removed ${args.remove_children.length} children`);
+    if (args.add_siblings?.length) changes.push(`added ${args.add_siblings.length} siblings`);
+    if (args.remove_siblings?.length) changes.push(`removed ${args.remove_siblings.length} siblings`);
+    if (args.add_related_terms?.length) changes.push(`added ${args.add_related_terms.length} related terms`);
+    if (args.remove_related_terms?.length) changes.push(`removed ${args.remove_related_terms.length} related terms`);
 
     return {
         success: true,

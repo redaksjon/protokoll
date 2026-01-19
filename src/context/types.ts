@@ -15,7 +15,7 @@ export type EntityType = 'person' | 'project' | 'company' | 'term' | 'ignored';
 
 export interface BaseEntity {
   id: string;           // Unique identifier (slug)
-  name: string;         // Display name
+  name: string;         // Display name (always the preferred/correct spelling)
   type: EntityType;
   createdAt?: Date;
   updatedAt?: Date;
@@ -30,6 +30,18 @@ export interface Person extends BaseEntity {
   role?: string;                 // e.g., "Manager", "Developer"
   sounds_like?: string[];        // Common mishearings: "a nil", "a nill"
   context?: string;              // How user knows them
+}
+
+/**
+ * Project Relationship Configuration
+ * Defines how projects relate to each other in the ecosystem
+ */
+export interface ProjectRelationships {
+  parent?: string;                      // Parent project ID (e.g., redaksjon for kronologi)
+  children?: string[];                  // Child project IDs
+  siblings?: string[];                  // Related peer projects
+  dependsOn?: string[];                 // Dependencies
+  relatedTerms?: string[];              // Terms strongly associated with this project
 }
 
 export interface ProjectClassification {
@@ -61,6 +73,9 @@ export interface Project extends BaseEntity {
   // Useful for non-English names (Norwegian, etc.) that may be transcribed differently
   sounds_like?: string[];
   
+  // Project relationship graph
+  relationships?: ProjectRelationships;
+  
   active?: boolean;
 }
 
@@ -78,7 +93,7 @@ export interface Term extends BaseEntity {
   sounds_like?: string[];
   projects?: string[];    // Associated project IDs - triggers routing to these projects
   
-  // NEW fields for smart assistance
+  // Smart assistance fields
   description?: string;   // Clear explanation of what the term means
   topics?: string[];      // Thematic keywords related to this term
 }
@@ -196,4 +211,50 @@ export const removeProjectFromTerm = (term: Term, projectId: string): Term => {
         updatedAt: new Date(),
     };
 };
+
+/**
+ * Helper functions for Project Relationships
+ */
+
+/**
+ * Check if projectA is a parent of projectB
+ */
+export const isParentProject = (projectA: Project, projectB: Project): boolean => {
+    return projectB.relationships?.parent === projectA.id;
+};
+
+/**
+ * Check if projectA is a child of projectB
+ */
+export const isChildProject = (projectA: Project, projectB: Project): boolean => {
+    return projectA.relationships?.parent === projectB.id;
+};
+
+/**
+ * Check if two projects are siblings
+ */
+export const areSiblingProjects = (projectA: Project, projectB: Project): boolean => {
+    const aSiblings = projectA.relationships?.siblings || [];
+    const bSiblings = projectB.relationships?.siblings || [];
+    return aSiblings.includes(projectB.id) || bSiblings.includes(projectA.id);
+};
+
+/**
+ * Get relationship distance between two projects (lower = closer)
+ * Returns: 0 = same, 1 = parent/child, 2 = siblings/cousins, -1 = unrelated
+ */
+export const getProjectRelationshipDistance = (projectA: Project, projectB: Project): number => {
+    if (projectA.id === projectB.id) return 0;
+    if (isParentProject(projectA, projectB) || isChildProject(projectA, projectB)) return 1;
+    if (areSiblingProjects(projectA, projectB)) return 2;
+    
+    // Check if they share a parent (cousins)
+    if (projectA.relationships?.parent && projectB.relationships?.parent &&
+        projectA.relationships.parent === projectB.relationships.parent) {
+        return 2;
+    }
+    
+    return -1; // unrelated
+};
+
 

@@ -12,6 +12,7 @@ import Table from 'cli-table3';
 import * as Context from '../context';
 import { Entity, Person, Project, Company, Term, IgnoredTerm, EntityType } from '../context/types';
 import * as ProjectAssist from './project-assist';
+import * as RelationshipAssist from './relationship-assist';
 
 // Options for adding a project
 interface AddProjectOptions {
@@ -303,13 +304,24 @@ const displayEntityDetails = (entity: Entity, filePath?: string): void => {
         const project = entity as Project;
         if (project.description) rows.push(['Description', project.description]);
         
+        // Classification
         if (project.classification) {
             rows.push(['Context Type', project.classification.context_type || '']);
+            
             if (project.classification.explicit_phrases && project.classification.explicit_phrases.length > 0) {
                 rows.push(['Trigger Phrases', formatValue(project.classification.explicit_phrases)]);
             }
+            
             if (project.classification.topics && project.classification.topics.length > 0) {
                 rows.push(['Topics', formatValue(project.classification.topics)]);
+            }
+            
+            if (project.classification.associated_people && project.classification.associated_people.length > 0) {
+                rows.push(['Associated People', formatValue(project.classification.associated_people)]);
+            }
+            
+            if (project.classification.associated_companies && project.classification.associated_companies.length > 0) {
+                rows.push(['Associated Companies', formatValue(project.classification.associated_companies)]);
             }
         }
         
@@ -327,6 +339,29 @@ const displayEntityDetails = (entity: Entity, filePath?: string): void => {
             rows.push(['Sounds Like', formatValue(project.sounds_like)]);
         }
         
+        // Relationships
+        if (project.relationships) {
+            const rel = project.relationships;
+            const relParts: string[] = [];
+            
+            if (rel.parent) {
+                relParts.push(`Parent: ${rel.parent}`);
+            }
+            if (rel.children && rel.children.length > 0) {
+                relParts.push(`Children: ${rel.children.join(', ')}`);
+            }
+            if (rel.siblings && rel.siblings.length > 0) {
+                relParts.push(`Siblings: ${rel.siblings.join(', ')}`);
+            }
+            if (rel.relatedTerms && rel.relatedTerms.length > 0) {
+                relParts.push(`Related Terms: ${rel.relatedTerms.join(', ')}`);
+            }
+            
+            if (relParts.length > 0) {
+                rows.push(['Relationships', relParts.join('\n  ')]);
+            }
+        }
+        
         rows.push(['Active', project.active !== false ? 'true' : 'false']);
         
         if (project.notes) rows.push(['Notes', project.notes]);
@@ -334,8 +369,12 @@ const displayEntityDetails = (entity: Entity, filePath?: string): void => {
         const term = entity as Term;
         if (term.expansion) rows.push(['Expansion', term.expansion]);
         if (term.domain) rows.push(['Domain', term.domain]);
+        if (term.description) rows.push(['Description', term.description]);
         if (term.sounds_like && term.sounds_like.length > 0) {
             rows.push(['Sounds Like', formatValue(term.sounds_like)]);
+        }
+        if (term.topics && term.topics.length > 0) {
+            rows.push(['Topics', formatValue(term.topics)]);
         }
         if (term.projects && term.projects.length > 0) {
             rows.push(['Projects', formatValue(term.projects)]);
@@ -763,7 +802,82 @@ const addProject = async (
             }
         }
         
-        // ===== PHASE 4: Create Project =====
+        // ===== PHASE 4: Relationship Suggestions =====
+        
+        let relationships: {
+            parent?: string;
+            siblings?: string[];
+            relatedTerms?: string[];
+        } | undefined;
+        
+        // Only suggest relationships if in interactive mode (not --yes)
+        if (!options.yes && (topics.length > 0 || description)) {
+            const relationshipSuggestions = RelationshipAssist.suggestRelationships(context, {
+                projectName: name,
+                projectId: id,
+                topics,
+                destination,
+                description,
+            });
+            
+            // Suggest parent if found
+            if (relationshipSuggestions.parent && relationshipSuggestions.parent.confidence !== 'low') {
+                print(`\n[Suggested parent project: ${relationshipSuggestions.parent.name}]`);
+                print(`  Reason: ${relationshipSuggestions.parent.reason}`);
+                print(`  Confidence: ${relationshipSuggestions.parent.confidence}`);
+                
+                const parentAnswer = await askQuestion(rl, `Set "${relationshipSuggestions.parent.name}" as parent? (Y/n): `);
+                if (parentAnswer.toLowerCase() !== 'n' && parentAnswer.toLowerCase() !== 'no') {
+                    relationships = relationships || {};
+                    relationships.parent = relationshipSuggestions.parent.id;
+                    print(`  ✓ Parent set to "${relationshipSuggestions.parent.name}"`);
+                }
+            }
+            
+            // Suggest siblings if found
+            if (relationshipSuggestions.siblings && relationshipSuggestions.siblings.length > 0) {
+                print(`\n[Suggested sibling projects:]`);
+                relationshipSuggestions.siblings.forEach((s, i) => {
+                    print(`  ${i + 1}. ${s.name} (${s.reason})`);
+                });
+                
+                const siblingsAnswer = await askQuestion(rl, 'Add siblings? (Enter numbers comma-separated, or Enter to skip): ');
+                if (siblingsAnswer.trim()) {
+                    const indices = siblingsAnswer.split(',')
+                        .map(n => parseInt(n.trim()) - 1)
+                        .filter(i => i >= 0 && i < relationshipSuggestions.siblings!.length);
+                    
+                    if (indices.length > 0) {
+                        relationships = relationships || {};
+                        relationships.siblings = indices.map(i => relationshipSuggestions.siblings![i].id);
+                        print(`  ✓ Added ${indices.length} siblings`);
+                    }
+                }
+            }
+            
+            // Suggest related terms if found
+            if (relationshipSuggestions.relatedTerms && relationshipSuggestions.relatedTerms.length > 0) {
+                print(`\n[Suggested related terms:]`);
+                relationshipSuggestions.relatedTerms.forEach((t, i) => {
+                    print(`  ${i + 1}. ${t.name} (${t.reason})`);
+                });
+                
+                const termsAnswer = await askQuestion(rl, 'Add related terms? (Enter numbers comma-separated, or Enter to skip): ');
+                if (termsAnswer.trim()) {
+                    const indices = termsAnswer.split(',')
+                        .map(n => parseInt(n.trim()) - 1)
+                        .filter(i => i >= 0 && i < relationshipSuggestions.relatedTerms!.length);
+                    
+                    if (indices.length > 0) {
+                        relationships = relationships || {};
+                        relationships.relatedTerms = indices.map(i => relationshipSuggestions.relatedTerms![i].id);
+                        print(`  ✓ Added ${indices.length} related terms`);
+                    }
+                }
+            }
+        }
+        
+        // ===== PHASE 5: Create Project =====
         
         const project: Project = {
             id,
@@ -781,6 +895,7 @@ const addProject = async (
             },
             ...(soundsLike.length && { sounds_like: soundsLike }),
             ...(description && { description }),
+            ...(relationships && { relationships }),
             active: true,
         };
         
@@ -886,6 +1001,177 @@ const addTermEnhanced = async (
 };
 
 /**
+ * Edit project with incremental changes (implementation)
+ */
+const editProject = async (
+    context: Context.ContextInstance,
+    id: string,
+    options: {
+        name?: string;
+        description?: string;
+        destination?: string;
+        structure?: string;
+        contextType?: string;
+        addTopic?: string[];
+        removeTopic?: string[];
+        addPhrase?: string[];
+        removePhrase?: string[];
+        addPerson?: string[];
+        removePerson?: string[];
+        addCompany?: string[];
+        removeCompany?: string[];
+        parent?: string;
+        addChild?: string[];
+        removeChild?: string[];
+        addSibling?: string[];
+        removeSibling?: string[];
+        addTerm?: string[];
+        removeTerm?: string[];
+        active?: string;
+    }
+): Promise<void> => {
+    const project = context.getProject(id);
+    if (!project) {
+        print(`Error: Project "${id}" not found`);
+        process.exit(1);
+    }
+
+    // Helper to merge arrays
+    const mergeArray = (
+        existing: string[] | undefined,
+        add: string[] | undefined,
+        remove: string[] | undefined
+    ): string[] | undefined => {
+        let result = existing ? [...existing] : [];
+        if (add && add.length > 0) {
+            result = [...result, ...add.filter(v => !result.includes(v))];
+        }
+        if (remove && remove.length > 0) {
+            result = result.filter(v => !remove.includes(v));
+        }
+        return result.length > 0 ? result : undefined;
+    };
+
+    // Track changes for summary
+    const changes: string[] = [];
+
+    // Update basic fields
+    const updated: Project = { ...project };
+    if (options.name) {
+        updated.name = options.name;
+        changes.push(`name: "${options.name}"`);
+    }
+    if (options.description) {
+        updated.description = options.description;
+        changes.push(`description updated`);
+    }
+    if (options.active) {
+        updated.active = options.active === 'true';
+        changes.push(`active: ${options.active}`);
+    }
+
+    // Update classification
+    const classification = { ...project.classification };
+    
+    if (options.contextType) {
+        classification.context_type = options.contextType as 'work' | 'personal' | 'mixed';
+        changes.push(`context_type: ${options.contextType}`);
+    }
+    
+    const updatedTopics = mergeArray(classification.topics, options.addTopic, options.removeTopic);
+    if (updatedTopics !== undefined && updatedTopics !== classification.topics) {
+        classification.topics = updatedTopics;
+        if (options.addTopic?.length) changes.push(`added ${options.addTopic.length} topics`);
+        if (options.removeTopic?.length) changes.push(`removed ${options.removeTopic.length} topics`);
+    }
+    
+    const updatedPhrases = mergeArray(classification.explicit_phrases, options.addPhrase, options.removePhrase);
+    if (updatedPhrases !== undefined && updatedPhrases !== classification.explicit_phrases) {
+        classification.explicit_phrases = updatedPhrases;
+        if (options.addPhrase?.length) changes.push(`added ${options.addPhrase.length} trigger phrases`);
+        if (options.removePhrase?.length) changes.push(`removed ${options.removePhrase.length} trigger phrases`);
+    }
+    
+    const updatedPeople = mergeArray(classification.associated_people, options.addPerson, options.removePerson);
+    if (updatedPeople !== undefined && updatedPeople !== classification.associated_people) {
+        classification.associated_people = updatedPeople;
+        if (options.addPerson?.length) changes.push(`added ${options.addPerson.length} associated people`);
+        if (options.removePerson?.length) changes.push(`removed ${options.removePerson.length} associated people`);
+    }
+    
+    const updatedCompanies = mergeArray(classification.associated_companies, options.addCompany, options.removeCompany);
+    if (updatedCompanies !== undefined && updatedCompanies !== classification.associated_companies) {
+        classification.associated_companies = updatedCompanies;
+        if (options.addCompany?.length) changes.push(`added ${options.addCompany.length} associated companies`);
+        if (options.removeCompany?.length) changes.push(`removed ${options.removeCompany.length} associated companies`);
+    }
+    
+    updated.classification = classification;
+
+    // Update routing
+    const routing = { ...project.routing };
+    if (options.destination) {
+        routing.destination = options.destination;
+        changes.push(`destination: ${options.destination}`);
+    }
+    if (options.structure) {
+        routing.structure = options.structure as 'none' | 'year' | 'month' | 'day';
+        changes.push(`structure: ${options.structure}`);
+    }
+    updated.routing = routing;
+
+    // Update relationships
+    if (options.parent || options.addChild || options.removeChild || 
+        options.addSibling || options.removeSibling || options.addTerm || options.removeTerm) {
+        
+        const existingRel = project.relationships || {};
+        const relationships: any = { ...existingRel };
+        
+        if (options.parent) {
+            relationships.parent = options.parent;
+            changes.push(`parent: ${options.parent}`);
+        }
+        
+        const updatedChildren = mergeArray(existingRel.children, options.addChild, options.removeChild);
+        if (updatedChildren) {
+            relationships.children = updatedChildren;
+            if (options.addChild?.length) changes.push(`added ${options.addChild.length} children`);
+            if (options.removeChild?.length) changes.push(`removed ${options.removeChild.length} children`);
+        }
+        
+        const updatedSiblings = mergeArray(existingRel.siblings, options.addSibling, options.removeSibling);
+        if (updatedSiblings) {
+            relationships.siblings = updatedSiblings;
+            if (options.addSibling?.length) changes.push(`added ${options.addSibling.length} siblings`);
+            if (options.removeSibling?.length) changes.push(`removed ${options.removeSibling.length} siblings`);
+        }
+        
+        const updatedRelatedTerms = mergeArray(existingRel.relatedTerms, options.addTerm, options.removeTerm);
+        if (updatedRelatedTerms) {
+            relationships.relatedTerms = updatedRelatedTerms;
+            if (options.addTerm?.length) changes.push(`added ${options.addTerm.length} related terms`);
+            if (options.removeTerm?.length) changes.push(`removed ${options.removeTerm.length} related terms`);
+        }
+        
+        updated.relationships = relationships;
+    }
+
+    updated.updatedAt = new Date();
+
+    await context.saveEntity(updated);
+    
+    if (changes.length > 0) {
+        print(`\n✓ Updated project "${project.name}":`);
+        changes.forEach(c => print(`  • ${c}`));
+        print('');
+    } else {
+        print(`\nNo changes made to project "${project.name}"\n`);
+    }
+    
+    displayEntityDetails(updated);
+};
+
+/**
  * Update project by regenerating metadata from source
  */
 /* c8 ignore start */
@@ -953,6 +1239,101 @@ const updateProject = async (
     print(`\n✓ Project "${existingProject.name}" updated successfully.`);
 };
 /* c8 ignore stop */
+
+/**
+ * Edit term with incremental updates
+ */
+const editTerm = async (
+    context: Context.ContextInstance,
+    id: string,
+    options: {
+        description?: string;
+        domain?: string;
+        expansion?: string;
+        addSound?: string[];
+        removeSound?: string[];
+        addTopic?: string[];
+        removeTopic?: string[];
+        addProject?: string[];
+        removeProject?: string[];
+    }
+): Promise<void> => {
+    const term = context.getTerm(id);
+    if (!term) {
+        print(`Error: Term "${id}" not found`);
+        process.exit(1);
+    }
+
+    // Helper to merge arrays
+    const mergeArray = (
+        existing: string[] | undefined,
+        add: string[] | undefined,
+        remove: string[] | undefined
+    ): string[] | undefined => {
+        let result = existing ? [...existing] : [];
+        if (add && add.length > 0) {
+            result = [...result, ...add.filter(v => !result.includes(v))];
+        }
+        if (remove && remove.length > 0) {
+            result = result.filter(v => !remove.includes(v));
+        }
+        return result.length > 0 ? result : undefined;
+    };
+
+    // Track changes
+    const changes: string[] = [];
+
+    // Update basic fields
+    const updated: Term = { ...term };
+    if (options.description) {
+        updated.description = options.description;
+        changes.push('description updated');
+    }
+    if (options.domain) {
+        updated.domain = options.domain;
+        changes.push(`domain: ${options.domain}`);
+    }
+    if (options.expansion) {
+        updated.expansion = options.expansion;
+        changes.push(`expansion: ${options.expansion}`);
+    }
+
+    // Update arrays
+    const updatedSounds = mergeArray(term.sounds_like, options.addSound, options.removeSound);
+    if (updatedSounds !== term.sounds_like) {
+        updated.sounds_like = updatedSounds;
+        if (options.addSound?.length) changes.push(`added ${options.addSound.length} sounds_like variants`);
+        if (options.removeSound?.length) changes.push(`removed ${options.removeSound.length} sounds_like variants`);
+    }
+
+    const updatedTopics = mergeArray(term.topics, options.addTopic, options.removeTopic);
+    if (updatedTopics !== term.topics) {
+        updated.topics = updatedTopics;
+        if (options.addTopic?.length) changes.push(`added ${options.addTopic.length} topics`);
+        if (options.removeTopic?.length) changes.push(`removed ${options.removeTopic.length} topics`);
+    }
+
+    const updatedProjects = mergeArray(term.projects, options.addProject, options.removeProject);
+    if (updatedProjects !== term.projects) {
+        updated.projects = updatedProjects;
+        if (options.addProject?.length) changes.push(`added ${options.addProject.length} project associations`);
+        if (options.removeProject?.length) changes.push(`removed ${options.removeProject.length} project associations`);
+    }
+
+    updated.updatedAt = new Date();
+
+    await context.saveEntity(updated);
+    
+    if (changes.length > 0) {
+        print(`\n✓ Updated term "${term.name}":`);
+        changes.forEach(c => print(`  • ${c}`));
+        print('');
+    } else {
+        print(`\nNo changes made to term "${term.name}"\n`);
+    }
+    
+    displayEntityDetails(updated);
+};
 
 /**
  * Update term by regenerating metadata from source
@@ -1379,6 +1760,39 @@ const createProjectCommand = (): Command => {
         });
     
     cmd
+        .command('edit <id>')
+        .description('Edit project fields (classification, routing, relationships)')
+        .option('--name <name>', 'Update project name')
+        .option('--description <text>', 'Update description')
+        .option('--destination <path>', 'Update routing destination')
+        .option('--structure <type>', 'Update directory structure: none, year, month, day')
+        .option('--context-type <type>', 'Update context type: work, personal, mixed')
+        .option('--add-topic <topic>', 'Add a classification topic (repeatable)', collect, [])
+        .option('--remove-topic <topic>', 'Remove a classification topic (repeatable)', collect, [])
+        .option('--add-phrase <phrase>', 'Add trigger phrase (repeatable)', collect, [])
+        .option('--remove-phrase <phrase>', 'Remove trigger phrase (repeatable)', collect, [])
+        .option('--add-person <id>', 'Associate person ID (repeatable)', collect, [])
+        .option('--remove-person <id>', 'Remove associated person (repeatable)', collect, [])
+        .option('--add-company <id>', 'Associate company ID (repeatable)', collect, [])
+        .option('--remove-company <id>', 'Remove associated company (repeatable)', collect, [])
+        .option('--parent <id>', 'Set parent project ID')
+        .option('--add-child <id>', 'Add child project (repeatable)', collect, [])
+        .option('--remove-child <id>', 'Remove child project (repeatable)', collect, [])
+        .option('--add-sibling <id>', 'Add sibling project (repeatable)', collect, [])
+        .option('--remove-sibling <id>', 'Remove sibling project (repeatable)', collect, [])
+        .option('--add-term <id>', 'Add related term (repeatable)', collect, [])
+        .option('--remove-term <id>', 'Remove related term (repeatable)', collect, [])
+        .option('--active <bool>', 'Set active status (true/false)')
+        .action(async (id, options) => {
+            const context = await Context.create();
+            if (!context.hasContext()) {
+                print('Error: No .protokoll directory found.');
+                process.exit(1);
+            }
+            await editProject(context, id, options);
+        });
+    
+    cmd
         .command('delete <id>')
         .description('Delete a project')
         .option('-f, --force', 'Skip confirmation')
@@ -1402,6 +1816,11 @@ const createProjectCommand = (): Command => {
     
     return cmd;
 };
+
+// Helper function for collecting repeated options
+function collect(value: string, previous: string[]): string[] {
+    return previous.concat([value]);
+}
 
 /**
  * Create specialized term command with smart assistance options
@@ -1446,6 +1865,27 @@ const createTermCommand = (): Command => {
                 process.exit(1);
             }
             await addTermEnhanced(context, { source, ...cmdOptions });
+        });
+    
+    cmd
+        .command('edit <id>')
+        .description('Edit term fields (sounds_like, projects, metadata)')
+        .option('--description <text>', 'Update description')
+        .option('--domain <domain>', 'Update domain')
+        .option('--expansion <text>', 'Update expansion')
+        .option('--add-sound <variant>', 'Add sounds_like variant (repeatable)', collect, [])
+        .option('--remove-sound <variant>', 'Remove sounds_like variant (repeatable)', collect, [])
+        .option('--add-topic <topic>', 'Add topic (repeatable)', collect, [])
+        .option('--remove-topic <topic>', 'Remove topic (repeatable)', collect, [])
+        .option('--add-project <id>', 'Associate with project (repeatable)', collect, [])
+        .option('--remove-project <id>', 'Remove project association (repeatable)', collect, [])
+        .action(async (id, options) => {
+            const context = await Context.create();
+            if (!context.hasContext()) {
+                print('Error: No .protokoll directory found.');
+                process.exit(1);
+            }
+            await editTerm(context, id, options);
         });
     
     cmd

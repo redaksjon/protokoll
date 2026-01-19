@@ -16,6 +16,7 @@ describe('Agentic Tools', () => {
             sourceFile: 'test.m4a',
             contextInstance: {
                 search: vi.fn(() => []),
+                searchWithContext: vi.fn(() => []),
                 findBySoundsLike: vi.fn(() => undefined),
                 getAllProjects: vi.fn(() => []),
                 isIgnored: vi.fn(() => false),
@@ -306,9 +307,11 @@ describe('Agentic Tools', () => {
   
     describe('lookup_project', () => {
         it('should return found when project exists', async () => {
-            mockContext.contextInstance.search = vi.fn(() => [
+            const projectResult = [
                 { id: 'alpha', name: 'Project Alpha', type: 'project' }
-            ]);
+            ];
+            mockContext.contextInstance.search = vi.fn(() => projectResult);
+            mockContext.contextInstance.searchWithContext = vi.fn(() => projectResult);
       
             const tool = LookupProject.create(mockContext);
             const result = await tool.execute({ name: 'Alpha' });
@@ -499,7 +502,7 @@ describe('Agentic Tools', () => {
 
         it('should prefer exact project match over sounds_like match', async () => {
             // If there's an exact match in search, it should be used before sounds_like
-            mockContext.contextInstance.search = vi.fn((query: string) => {
+            const searchFn = vi.fn((query: string) => {
                 if (query.toLowerCase() === 'exact-match') {
                     return [{
                         id: 'exact-match',
@@ -511,6 +514,8 @@ describe('Agentic Tools', () => {
                 }
                 return [];
             });
+            mockContext.contextInstance.search = searchFn;
+            mockContext.contextInstance.searchWithContext = searchFn;
             mockContext.contextInstance.findBySoundsLike = vi.fn(() => ({
                 id: 'sounds-like-match',
                 name: 'Sounds Like Match',
