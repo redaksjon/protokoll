@@ -357,6 +357,46 @@ Skip confirmation:
 protokoll project delete client-alpha --force
 ```
 
+### Edit a Project (MCP Only)
+
+The `protokoll_edit_project` MCP tool allows manual edits to existing projects without requiring LLM regeneration:
+
+```typescript
+// Add sounds_like variants (for when Whisper mishears project name)
+await use_mcp_tool('protokoll_edit_project', {
+  id: 'protokoll',
+  add_sounds_like: ['pro to call', 'proto call']
+});
+
+// Update routing configuration
+await use_mcp_tool('protokoll_edit_project', {
+  id: 'client-alpha',
+  destination: '~/notes/clients/alpha',
+  structure: 'month'
+});
+
+// Add trigger phrases and topics
+await use_mcp_tool('protokoll_edit_project', {
+  id: 'quarterly-planning',
+  add_explicit_phrases: ['Q2 planning', 'quarterly review'],
+  add_topics: ['budget', 'roadmap']
+});
+
+// Deactivate a project
+await use_mcp_tool('protokoll_edit_project', {
+  id: 'old-project',
+  active: false
+});
+```
+
+**Available fields:**
+- `name`, `description`, `destination`, `structure`, `contextType`, `active` - Simple updates
+- `sounds_like`, `topics`, `explicit_phrases` - Replace entire array
+- `add_sounds_like`, `add_topics`, `add_explicit_phrases` - Add to existing array
+- `remove_sounds_like`, `remove_topics`, `remove_explicit_phrases` - Remove from array
+
+**Note:** For regenerating metadata from documentation, use `protokoll_update_project` instead.
+
 ## Person Commands
 
 People are used for name recognition and correction in transcripts.
@@ -451,6 +491,38 @@ protokoll person delete john-smith
 ```bash
 protokoll person delete john-smith --force
 ```
+
+### Edit a Person (MCP Only)
+
+The `protokoll_edit_person` MCP tool allows manual edits to existing people:
+
+```typescript
+// Add sounds_like variants
+await use_mcp_tool('protokoll_edit_person', {
+  id: 'priya-sharma',
+  add_sounds_like: ['pre a sharma', 'preeya']
+});
+
+// Update multiple fields
+await use_mcp_tool('protokoll_edit_person', {
+  id: 'john-smith',
+  company: 'new-company',
+  role: 'Senior Engineer',
+  add_sounds_like: ['john smyth']
+});
+
+// Remove sounds_like variants
+await use_mcp_tool('protokoll_edit_person', {
+  id: 'jane-doe',
+  remove_sounds_like: ['outdated-variant']
+});
+```
+
+**Available fields:**
+- `name`, `firstName`, `lastName`, `company`, `role`, `context` - Simple text updates
+- `sounds_like` - Replace entire array
+- `add_sounds_like` - Add to existing array
+- `remove_sounds_like` - Remove from array
 
 ## Term Commands
 
@@ -575,6 +647,44 @@ This will:
 ```bash
 protokoll term delete graphql
 ```
+
+### Edit a Term (MCP Only)
+
+The `protokoll_edit_term` MCP tool allows manual edits to existing terms without requiring LLM calls. Unlike `update` which regenerates metadata from a source, `edit` lets you make specific changes:
+
+```typescript
+// Add a specific sounds_like variant
+await use_mcp_tool('protokoll_edit_term', {
+  id: 'cardigantime',
+  add_sounds_like: ['Cartesian Time', 'card again time']
+});
+
+// Update multiple fields
+await use_mcp_tool('protokoll_edit_term', {
+  id: 'kubernetes',
+  domain: 'devops',
+  description: 'Container orchestration platform',
+  add_topics: ['containers', 'orchestration']
+});
+
+// Replace sounds_like entirely
+await use_mcp_tool('protokoll_edit_term', {
+  id: 'graphql',
+  sounds_like: ['graph ql', 'graph q l']  // Replaces all existing
+});
+
+// Remove specific topics
+await use_mcp_tool('protokoll_edit_term', {
+  id: 'docker',
+  remove_topics: ['obsolete-topic']
+});
+```
+
+**Available fields:**
+- `expansion`, `domain`, `description` - Simple text updates
+- `sounds_like`, `topics`, `projects` - Replace entire array
+- `add_sounds_like`, `add_topics`, `add_projects` - Add to existing array
+- `remove_sounds_like`, `remove_topics`, `remove_projects` - Remove from array
 
 ## Company Commands
 

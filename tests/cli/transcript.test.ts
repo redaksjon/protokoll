@@ -428,6 +428,8 @@ describe('transcript CLI module', () => {
             
             vi.mocked(fs.stat).mockResolvedValue({
                 birthtime: new Date('2026-01-15T12:00:00Z'),
+                isFile: () => true,
+                isDirectory: () => false,
             } as unknown as Awaited<ReturnType<typeof fs.stat>>);
 
             await listCommand('/notes');
@@ -454,6 +456,8 @@ describe('transcript CLI module', () => {
             
             vi.mocked(fs.stat).mockResolvedValue({
                 birthtime: new Date('2026-01-15T12:00:00Z'),
+                isFile: () => true,
+                isDirectory: () => false,
             } as unknown as Awaited<ReturnType<typeof fs.stat>>);
 
             await listCommand('/notes', { limit: 1, offset: 0 });
@@ -484,6 +488,8 @@ describe('transcript CLI module', () => {
             
             vi.mocked(fs.stat).mockResolvedValue({
                 birthtime: new Date('2026-01-15T12:00:00Z'),
+                isFile: () => true,
+                isDirectory: () => false,
             } as unknown as Awaited<ReturnType<typeof fs.stat>>);
 
             await listCommand('/notes', { search: 'kubernetes' });
@@ -517,6 +523,8 @@ describe('transcript CLI module', () => {
             
             vi.mocked(fs.stat).mockResolvedValue({
                 birthtime: new Date('2026-01-15T12:00:00Z'),
+                isFile: () => true,
+                isDirectory: () => false,
             } as unknown as Awaited<ReturnType<typeof fs.stat>>);
 
             await listCommand('/notes', { sortBy: 'filename' });
@@ -544,6 +552,8 @@ describe('transcript CLI module', () => {
             
             vi.mocked(fs.stat).mockResolvedValue({
                 birthtime: new Date('2026-01-15T12:00:00Z'),
+                isFile: () => true,
+                isDirectory: () => false,
             } as unknown as Awaited<ReturnType<typeof fs.stat>>);
 
             await listCommand('/notes', { limit: 2, offset: 0 });
@@ -582,6 +592,8 @@ Content here
             
             vi.mocked(fs.stat).mockResolvedValue({
                 birthtime: new Date('2026-01-15T12:00:00Z'),
+                isFile: () => true,
+                isDirectory: () => false,
             } as unknown as Awaited<ReturnType<typeof fs.stat>>);
 
             await listCommand('/notes');
@@ -657,6 +669,8 @@ Content here
             
             vi.mocked(fs.stat).mockResolvedValue({
                 birthtime: new Date('2026-01-15T12:00:00Z'),
+                isFile: () => true,
+                isDirectory: () => false,
             } as unknown as Awaited<ReturnType<typeof fs.stat>>);
 
             const result = await listTranscripts({
@@ -688,6 +702,8 @@ Content here
             
             vi.mocked(fs.stat).mockResolvedValue({
                 birthtime: new Date('2026-01-15T12:00:00Z'),
+                isFile: () => true,
+                isDirectory: () => false,
             } as unknown as Awaited<ReturnType<typeof fs.stat>>);
 
             const result = await listTranscripts({
@@ -723,6 +739,8 @@ Content here
             
             vi.mocked(fs.stat).mockResolvedValue({
                 birthtime: new Date('2026-01-15T12:00:00Z'),
+                isFile: () => true,
+                isDirectory: () => false,
             } as unknown as Awaited<ReturnType<typeof fs.stat>>);
 
             const result = await listTranscripts({
@@ -751,6 +769,8 @@ Content here
             
             vi.mocked(fs.stat).mockResolvedValue({
                 birthtime: new Date('2026-01-15T12:00:00Z'),
+                isFile: () => true,
+                isDirectory: () => false,
             } as unknown as Awaited<ReturnType<typeof fs.stat>>);
 
             const result = await listTranscripts({
@@ -786,6 +806,8 @@ Content here
             
             vi.mocked(fs.stat).mockResolvedValue({
                 birthtime: new Date('2026-01-15T12:00:00Z'),
+                isFile: () => true,
+                isDirectory: () => false,
             } as unknown as Awaited<ReturnType<typeof fs.stat>>);
 
             const result = await listTranscripts({

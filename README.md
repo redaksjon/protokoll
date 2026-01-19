@@ -89,6 +89,7 @@ MCP is a protocol that allows AI assistants to access external data and function
 - **setup_project**: Interactive project creation with metadata assistance
 - **review_transcript**: Analyze and improve transcript accuracy
 - **enrich_entity**: Add or update context entities
+- **edit_entity**: Edit existing entities with manual modifications
 - **batch_transcription**: Process multiple audio files
 - **find_and_analyze**: Search and analyze transcript content
 
@@ -1915,11 +1916,19 @@ AI: Found Client Alpha configuration nearby. Processing...
 | `protokoll_list_companies` | List companies |
 | `protokoll_search_context` | Search across all entity types |
 | `protokoll_get_entity` | Get detailed info about an entity |
+| **Entity Creation** | |
 | `protokoll_add_person` | Add a new person to context |
 | `protokoll_add_project` | Add a new project |
 | `protokoll_add_term` | Add a technical term |
 | `protokoll_add_company` | Add a company |
 | `protokoll_delete_entity` | Delete an entity |
+| **Entity Editing** | |
+| `protokoll_edit_person` | Edit person fields (add sounds_like, change role, etc.) |
+| `protokoll_edit_term` | Edit term fields (add sounds_like, topics, domain, etc.) |
+| `protokoll_edit_project` | Edit project fields (add sounds_like, phrases, routing, etc.) |
+| `protokoll_update_term` | Regenerate term metadata from source URL/file |
+| `protokoll_update_project` | Regenerate project metadata from source URL/file |
+| `protokoll_merge_terms` | Merge duplicate terms into one |
 | **Transcript Actions** | |
 | `protokoll_read_transcript` | Read and parse a transcript file |
 | `protokoll_edit_transcript` | Edit title or change project |

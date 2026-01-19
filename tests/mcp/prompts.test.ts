@@ -84,6 +84,12 @@ describe('MCP Prompts', () => {
             const prompt = Prompts.prompts.find(p => p.name === 'find_and_analyze');
             expect(prompt).toBeDefined();
         });
+
+        it('should have edit_entity prompt', () => {
+            const prompt = Prompts.prompts.find(p => p.name === 'edit_entity');
+            expect(prompt).toBeDefined();
+            expect(prompt?.description).toContain('Edit');
+        });
     });
 
     describe('handleListPrompts', () => {
@@ -390,6 +396,102 @@ describe('MCP Prompts', () => {
                 await expect(
                     Prompts.handleGetPrompt('find_and_analyze', {})
                 ).rejects.toThrow('Missing required argument: directory');
+            });
+        });
+
+        describe('edit_entity', () => {
+            it('should generate edit entity prompt for person', async () => {
+                const result = await Prompts.handleGetPrompt('edit_entity', {
+                    entityType: 'person',
+                    entityId: 'john-smith',
+                });
+
+                expect(result.messages).toBeDefined();
+                expect(result.messages.length).toBe(2);
+            });
+
+            it('should include person-specific guidance', async () => {
+                const result = await Prompts.handleGetPrompt('edit_entity', {
+                    entityType: 'person',
+                    entityId: 'priya-sharma',
+                });
+
+                const assistantMessage = result.messages[1];
+                if (assistantMessage.content.type === 'text') {
+                    expect(assistantMessage.content.text).toContain('protokoll_edit_person');
+                    expect(assistantMessage.content.text).toContain('sounds_like');
+                    expect(assistantMessage.content.text).toContain('company');
+                }
+            });
+
+            it('should include term-specific guidance', async () => {
+                const result = await Prompts.handleGetPrompt('edit_entity', {
+                    entityType: 'term',
+                    entityId: 'kubernetes',
+                });
+
+                const assistantMessage = result.messages[1];
+                if (assistantMessage.content.type === 'text') {
+                    expect(assistantMessage.content.text).toContain('protokoll_edit_term');
+                    expect(assistantMessage.content.text).toContain('topics');
+                    expect(assistantMessage.content.text).toContain('domain');
+                }
+            });
+
+            it('should include project-specific guidance', async () => {
+                const result = await Prompts.handleGetPrompt('edit_entity', {
+                    entityType: 'project',
+                    entityId: 'my-project',
+                });
+
+                const assistantMessage = result.messages[1];
+                if (assistantMessage.content.type === 'text') {
+                    expect(assistantMessage.content.text).toContain('protokoll_edit_project');
+                    expect(assistantMessage.content.text).toContain('explicit_phrases');
+                    expect(assistantMessage.content.text).toContain('destination');
+                }
+            });
+
+            it('should include modification request in message', async () => {
+                const result = await Prompts.handleGetPrompt('edit_entity', {
+                    entityType: 'term',
+                    entityId: 'cardigantime',
+                    modification: 'add sounds_like variant "Cartesian Time"',
+                });
+
+                const userMessage = result.messages[0];
+                if (userMessage.content.type === 'text') {
+                    expect(userMessage.content.text).toContain('Cartesian Time');
+                }
+
+                const assistantMessage = result.messages[1];
+                if (assistantMessage.content.type === 'text') {
+                    expect(assistantMessage.content.text).toContain('Requested modification');
+                }
+            });
+
+            it('should handle unsupported entity types', async () => {
+                const result = await Prompts.handleGetPrompt('edit_entity', {
+                    entityType: 'company',
+                    entityId: 'acme-corp',
+                });
+
+                const assistantMessage = result.messages[1];
+                if (assistantMessage.content.type === 'text') {
+                    expect(assistantMessage.content.text).toContain('does not support direct editing');
+                }
+            });
+
+            it('should throw error when entityType missing', async () => {
+                await expect(
+                    Prompts.handleGetPrompt('edit_entity', { entityId: 'test' })
+                ).rejects.toThrow('Missing required argument: entityType');
+            });
+
+            it('should throw error when entityId missing', async () => {
+                await expect(
+                    Prompts.handleGetPrompt('edit_entity', { entityType: 'term' })
+                ).rejects.toThrow('Missing required argument: entityId');
             });
         });
 

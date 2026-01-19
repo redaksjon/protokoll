@@ -587,6 +587,67 @@ const tools: Tool[] = [
         },
     },
     {
+        name: 'protokoll_edit_person',
+        description:
+            'Edit an existing person with manual modifications. ' +
+            'Allows direct edits: adding specific sounds_like variants, changing company, role, etc. ' +
+            'For the sounds_like array, use add_sounds_like to append or remove_sounds_like to delete specific values, ' +
+            'or use sounds_like to replace the entire array.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                id: {
+                    type: 'string',
+                    description: 'Person ID to edit',
+                },
+                name: {
+                    type: 'string',
+                    description: 'Update the display name',
+                },
+                firstName: {
+                    type: 'string',
+                    description: 'Set the first name',
+                },
+                lastName: {
+                    type: 'string',
+                    description: 'Set the last name',
+                },
+                company: {
+                    type: 'string',
+                    description: 'Set the company ID this person is associated with',
+                },
+                role: {
+                    type: 'string',
+                    description: 'Set the role or job title',
+                },
+                context: {
+                    type: 'string',
+                    description: 'Set additional context about this person',
+                },
+                sounds_like: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Replace all sounds_like variants with this array',
+                },
+                add_sounds_like: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Add these sounds_like variants to existing ones',
+                },
+                remove_sounds_like: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Remove these sounds_like variants',
+                },
+                contextDirectory: {
+                    type: 'string',
+                    description: 'Path to the .protokoll context directory',
+                },
+            },
+            required: ['id'],
+        },
+    },
+    {
         name: 'protokoll_add_project',
         description:
             'Add a new project to the context with optional smart assistance for generating metadata. ' +
@@ -784,6 +845,85 @@ const tools: Tool[] = [
         },
     },
     {
+        name: 'protokoll_edit_term',
+        description:
+            'Edit an existing term with manual modifications. Unlike protokoll_update_term (which regenerates from a source), ' +
+            'this allows direct edits: adding specific sounds_like variants, changing description, modifying topics, etc. ' +
+            'For array fields (sounds_like, topics, projects), use add_* to append or remove_* to delete specific values, ' +
+            'or use the base field name to replace the entire array.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                id: {
+                    type: 'string',
+                    description: 'Term ID to edit',
+                },
+                expansion: {
+                    type: 'string',
+                    description: 'Set the expansion (full form if acronym)',
+                },
+                domain: {
+                    type: 'string',
+                    description: 'Set the domain (e.g., devops, engineering)',
+                },
+                description: {
+                    type: 'string',
+                    description: 'Set the description',
+                },
+                sounds_like: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Replace all sounds_like variants with this array',
+                },
+                add_sounds_like: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Add these sounds_like variants to existing ones',
+                },
+                remove_sounds_like: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Remove these sounds_like variants',
+                },
+                topics: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Replace all topics with this array',
+                },
+                add_topics: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Add these topics to existing ones',
+                },
+                remove_topics: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Remove these topics',
+                },
+                projects: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Replace all project associations with this array',
+                },
+                add_projects: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Add these project associations',
+                },
+                remove_projects: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Remove these project associations',
+                },
+                contextDirectory: {
+                    type: 'string',
+                    description: 'Path to the .protokoll context directory',
+                },
+            },
+            required: ['id'],
+        },
+    },
+    {
         name: 'protokoll_update_term',
         description:
             'Update an existing term by regenerating metadata from a source URL or file. ' +
@@ -837,6 +977,99 @@ const tools: Tool[] = [
                 },
             },
             required: ['id', 'source'],
+        },
+    },
+    {
+        name: 'protokoll_edit_project',
+        description:
+            'Edit an existing project with manual modifications. Unlike protokoll_update_project (which regenerates from a source), ' +
+            'this allows direct edits: adding specific sounds_like variants, changing routing, modifying classification, etc. ' +
+            'For array fields (sounds_like, topics, explicit_phrases), use add_* to append or remove_* to delete specific values, ' +
+            'or use the base field name to replace the entire array.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                id: {
+                    type: 'string',
+                    description: 'Project ID to edit',
+                },
+                name: {
+                    type: 'string',
+                    description: 'Update the project name',
+                },
+                description: {
+                    type: 'string',
+                    description: 'Set the project description',
+                },
+                destination: {
+                    type: 'string',
+                    description: 'Set the output directory for transcripts',
+                },
+                structure: {
+                    type: 'string',
+                    enum: ['none', 'year', 'month', 'day'],
+                    description: 'Set the directory structure',
+                },
+                contextType: {
+                    type: 'string',
+                    enum: ['work', 'personal', 'mixed'],
+                    description: 'Set the context type for classification',
+                },
+                active: {
+                    type: 'boolean',
+                    description: 'Set whether the project is active',
+                },
+                sounds_like: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Replace all sounds_like variants with this array',
+                },
+                add_sounds_like: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Add these sounds_like variants to existing ones',
+                },
+                remove_sounds_like: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Remove these sounds_like variants',
+                },
+                topics: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Replace all classification topics with this array',
+                },
+                add_topics: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Add these topics to existing ones',
+                },
+                remove_topics: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Remove these topics',
+                },
+                explicit_phrases: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Replace all explicit trigger phrases with this array',
+                },
+                add_explicit_phrases: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Add these explicit trigger phrases',
+                },
+                remove_explicit_phrases: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Remove these explicit trigger phrases',
+                },
+                contextDirectory: {
+                    type: 'string',
+                    description: 'Path to the .protokoll context directory',
+                },
+            },
+            required: ['id'],
         },
     },
     {
@@ -1099,7 +1332,9 @@ const formatEntity = (entity: Entity): Record<string, unknown> => {
         const term = entity as Term;
         if (term.expansion) result.expansion = term.expansion;
         if (term.domain) result.domain = term.domain;
+        if (term.description) result.description = term.description;
         if (term.sounds_like) result.sounds_like = term.sounds_like;
+        if (term.topics) result.topics = term.topics;
         if (term.projects) result.projects = term.projects;
     } else if (entity.type === 'company') {
         const company = entity as Company;
@@ -1503,6 +1738,112 @@ async function handleAddPerson(args: {
         success: true,
         message: `Person "${args.name}" added successfully`,
         entity: formatEntity(person),
+    };
+}
+
+async function handleEditPerson(args: {
+    id: string;
+    name?: string;
+    firstName?: string;
+    lastName?: string;
+    company?: string;
+    role?: string;
+    context?: string;
+    sounds_like?: string[];
+    add_sounds_like?: string[];
+    remove_sounds_like?: string[];
+    contextDirectory?: string;
+}) {
+    const context = await Context.create({
+        startingDir: args.contextDirectory || process.cwd(),
+    });
+
+    if (!context.hasContext()) {
+        throw new Error('No .protokoll directory found. Initialize context first.');
+    }
+
+    const existingPerson = context.getPerson(args.id);
+    if (!existingPerson) {
+        throw new Error(`Person "${args.id}" not found`);
+    }
+
+    // Helper to merge arrays: handles replace, add, and remove operations
+    const mergeArray = (
+        existing: string[] | undefined,
+        replace: string[] | undefined,
+        add: string[] | undefined,
+        remove: string[] | undefined
+    ): string[] | undefined => {
+        // If replace is provided, use it as the base
+        if (replace !== undefined) {
+            let result = [...replace];
+            if (add) {
+                result = [...result, ...add.filter(v => !result.includes(v))];
+            }
+            if (remove) {
+                result = result.filter(v => !remove.includes(v));
+            }
+            return result.length > 0 ? result : undefined;
+        }
+
+        // Otherwise work with existing
+        let result = existing ? [...existing] : [];
+        if (add) {
+            result = [...result, ...add.filter(v => !result.includes(v))];
+        }
+        if (remove) {
+            result = result.filter(v => !remove.includes(v));
+        }
+        
+        // Return undefined if empty (to remove the field from YAML)
+        return result.length > 0 ? result : (existing ? undefined : existing);
+    };
+
+    const updatedSoundsLike = mergeArray(
+        existingPerson.sounds_like,
+        args.sounds_like,
+        args.add_sounds_like,
+        args.remove_sounds_like
+    );
+
+    // Build updated person
+    const updatedPerson: Person = {
+        ...existingPerson,
+        ...(args.name !== undefined && { name: args.name }),
+        ...(args.firstName !== undefined && { firstName: args.firstName }),
+        ...(args.lastName !== undefined && { lastName: args.lastName }),
+        ...(args.company !== undefined && { company: args.company }),
+        ...(args.role !== undefined && { role: args.role }),
+        ...(args.context !== undefined && { context: args.context }),
+        updatedAt: new Date(),
+    };
+
+    // Handle sounds_like array
+    if (updatedSoundsLike !== undefined) {
+        updatedPerson.sounds_like = updatedSoundsLike;
+    } else if (existingPerson.sounds_like && (args.sounds_like !== undefined || args.remove_sounds_like)) {
+        delete updatedPerson.sounds_like;
+    }
+
+    await context.saveEntity(updatedPerson);
+
+    // Build summary of changes
+    const changes: string[] = [];
+    if (args.name !== undefined) changes.push(`name: "${args.name}"`);
+    if (args.firstName !== undefined) changes.push(`firstName: "${args.firstName}"`);
+    if (args.lastName !== undefined) changes.push(`lastName: "${args.lastName}"`);
+    if (args.company !== undefined) changes.push(`company: "${args.company}"`);
+    if (args.role !== undefined) changes.push(`role: "${args.role}"`);
+    if (args.context !== undefined) changes.push(`context updated`);
+    if (args.sounds_like !== undefined) changes.push(`sounds_like replaced with ${args.sounds_like.length} items`);
+    if (args.add_sounds_like?.length) changes.push(`added ${args.add_sounds_like.length} sounds_like variants`);
+    if (args.remove_sounds_like?.length) changes.push(`removed ${args.remove_sounds_like.length} sounds_like variants`);
+
+    return {
+        success: true,
+        message: `Updated person "${existingPerson.name}"`,
+        changes,
+        person: formatEntity(updatedPerson),
     };
 }
 
@@ -2216,6 +2557,141 @@ async function handleUpdateTerm(args: {
     };
 }
 
+async function handleEditTerm(args: {
+    id: string;
+    expansion?: string;
+    domain?: string;
+    description?: string;
+    sounds_like?: string[];
+    add_sounds_like?: string[];
+    remove_sounds_like?: string[];
+    topics?: string[];
+    add_topics?: string[];
+    remove_topics?: string[];
+    projects?: string[];
+    add_projects?: string[];
+    remove_projects?: string[];
+    contextDirectory?: string;
+}) {
+    const context = await Context.create({
+        startingDir: args.contextDirectory || process.cwd(),
+    });
+
+    if (!context.hasContext()) {
+        throw new Error('No .protokoll directory found. Initialize context first.');
+    }
+
+    const existingTerm = context.getTerm(args.id);
+    if (!existingTerm) {
+        throw new Error(`Term "${args.id}" not found`);
+    }
+
+    // Helper to merge arrays: handles replace, add, and remove operations
+    const mergeArray = (
+        existing: string[] | undefined,
+        replace: string[] | undefined,
+        add: string[] | undefined,
+        remove: string[] | undefined
+    ): string[] | undefined => {
+        // If replace is provided, use it as the base
+        if (replace !== undefined) {
+            let result = [...replace];
+            if (add) {
+                result = [...result, ...add.filter(v => !result.includes(v))];
+            }
+            if (remove) {
+                result = result.filter(v => !remove.includes(v));
+            }
+            return result.length > 0 ? result : undefined;
+        }
+
+        // Otherwise work with existing
+        let result = existing ? [...existing] : [];
+        if (add) {
+            result = [...result, ...add.filter(v => !result.includes(v))];
+        }
+        if (remove) {
+            result = result.filter(v => !remove.includes(v));
+        }
+        
+        // Return undefined if empty (to remove the field from YAML)
+        return result.length > 0 ? result : (existing ? undefined : existing);
+    };
+
+    const updatedSoundsLike = mergeArray(
+        existingTerm.sounds_like,
+        args.sounds_like,
+        args.add_sounds_like,
+        args.remove_sounds_like
+    );
+
+    const updatedTopics = mergeArray(
+        existingTerm.topics,
+        args.topics,
+        args.add_topics,
+        args.remove_topics
+    );
+
+    const updatedProjects = mergeArray(
+        existingTerm.projects,
+        args.projects,
+        args.add_projects,
+        args.remove_projects
+    );
+
+    // Build updated term
+    const updatedTerm: Term = {
+        ...existingTerm,
+        ...(args.expansion !== undefined && { expansion: args.expansion }),
+        ...(args.domain !== undefined && { domain: args.domain }),
+        ...(args.description !== undefined && { description: args.description }),
+        updatedAt: new Date(),
+    };
+
+    // Handle array fields - only set if they have values
+    if (updatedSoundsLike !== undefined) {
+        updatedTerm.sounds_like = updatedSoundsLike;
+    } else if (existingTerm.sounds_like && (args.sounds_like !== undefined || args.remove_sounds_like)) {
+        delete updatedTerm.sounds_like;
+    }
+
+    if (updatedTopics !== undefined) {
+        updatedTerm.topics = updatedTopics;
+    } else if (existingTerm.topics && (args.topics !== undefined || args.remove_topics)) {
+        delete updatedTerm.topics;
+    }
+
+    if (updatedProjects !== undefined) {
+        updatedTerm.projects = updatedProjects;
+    } else if (existingTerm.projects && (args.projects !== undefined || args.remove_projects)) {
+        delete updatedTerm.projects;
+    }
+
+    await context.saveEntity(updatedTerm);
+
+    // Build summary of changes
+    const changes: string[] = [];
+    if (args.expansion !== undefined) changes.push(`expansion: "${args.expansion}"`);
+    if (args.domain !== undefined) changes.push(`domain: "${args.domain}"`);
+    if (args.description !== undefined) changes.push(`description updated`);
+    if (args.sounds_like !== undefined) changes.push(`sounds_like replaced with ${args.sounds_like.length} items`);
+    if (args.add_sounds_like?.length) changes.push(`added ${args.add_sounds_like.length} sounds_like variants`);
+    if (args.remove_sounds_like?.length) changes.push(`removed ${args.remove_sounds_like.length} sounds_like variants`);
+    if (args.topics !== undefined) changes.push(`topics replaced with ${args.topics.length} items`);
+    if (args.add_topics?.length) changes.push(`added ${args.add_topics.length} topics`);
+    if (args.remove_topics?.length) changes.push(`removed ${args.remove_topics.length} topics`);
+    if (args.projects !== undefined) changes.push(`projects replaced with ${args.projects.length} items`);
+    if (args.add_projects?.length) changes.push(`added ${args.add_projects.length} project associations`);
+    if (args.remove_projects?.length) changes.push(`removed ${args.remove_projects.length} project associations`);
+
+    return {
+        success: true,
+        message: `Updated term "${existingTerm.name}"`,
+        changes,
+        term: formatEntity(updatedTerm),
+    };
+}
+
 async function handleUpdateProject(args: {
     id: string;
     source: string;
@@ -2272,6 +2748,157 @@ async function handleUpdateProject(args: {
             topics: suggestions.topics,
             description: suggestions.description,
         },
+    };
+}
+
+async function handleEditProject(args: {
+    id: string;
+    name?: string;
+    description?: string;
+    destination?: string;
+    structure?: 'none' | 'year' | 'month' | 'day';
+    contextType?: 'work' | 'personal' | 'mixed';
+    active?: boolean;
+    sounds_like?: string[];
+    add_sounds_like?: string[];
+    remove_sounds_like?: string[];
+    topics?: string[];
+    add_topics?: string[];
+    remove_topics?: string[];
+    explicit_phrases?: string[];
+    add_explicit_phrases?: string[];
+    remove_explicit_phrases?: string[];
+    contextDirectory?: string;
+}) {
+    const context = await Context.create({
+        startingDir: args.contextDirectory || process.cwd(),
+    });
+
+    if (!context.hasContext()) {
+        throw new Error('No .protokoll directory found. Initialize context first.');
+    }
+
+    const existingProject = context.getProject(args.id);
+    if (!existingProject) {
+        throw new Error(`Project "${args.id}" not found`);
+    }
+
+    // Helper to merge arrays: handles replace, add, and remove operations
+    const mergeArray = (
+        existing: string[] | undefined,
+        replace: string[] | undefined,
+        add: string[] | undefined,
+        remove: string[] | undefined
+    ): string[] | undefined => {
+        // If replace is provided, use it as the base
+        if (replace !== undefined) {
+            let result = [...replace];
+            if (add) {
+                result = [...result, ...add.filter(v => !result.includes(v))];
+            }
+            if (remove) {
+                result = result.filter(v => !remove.includes(v));
+            }
+            return result.length > 0 ? result : undefined;
+        }
+
+        // Otherwise work with existing
+        let result = existing ? [...existing] : [];
+        if (add) {
+            result = [...result, ...add.filter(v => !result.includes(v))];
+        }
+        if (remove) {
+            result = result.filter(v => !remove.includes(v));
+        }
+        
+        // Return undefined if empty (to remove the field from YAML)
+        return result.length > 0 ? result : (existing ? undefined : existing);
+    };
+
+    const updatedSoundsLike = mergeArray(
+        existingProject.sounds_like,
+        args.sounds_like,
+        args.add_sounds_like,
+        args.remove_sounds_like
+    );
+
+    const updatedTopics = mergeArray(
+        existingProject.classification?.topics,
+        args.topics,
+        args.add_topics,
+        args.remove_topics
+    );
+
+    const updatedExplicitPhrases = mergeArray(
+        existingProject.classification?.explicit_phrases,
+        args.explicit_phrases,
+        args.add_explicit_phrases,
+        args.remove_explicit_phrases
+    );
+
+    // Build updated project
+    const updatedProject: Project = {
+        ...existingProject,
+        ...(args.name !== undefined && { name: args.name }),
+        ...(args.description !== undefined && { description: args.description }),
+        ...(args.active !== undefined && { active: args.active }),
+        classification: {
+            ...existingProject.classification,
+            ...(args.contextType !== undefined && { context_type: args.contextType }),
+        },
+        routing: {
+            ...existingProject.routing,
+            ...(args.destination !== undefined && { destination: args.destination }),
+            ...(args.structure !== undefined && { structure: args.structure }),
+        },
+        updatedAt: new Date(),
+    };
+
+    // Handle sounds_like at project level
+    if (updatedSoundsLike !== undefined) {
+        updatedProject.sounds_like = updatedSoundsLike;
+    } else if (existingProject.sounds_like && (args.sounds_like !== undefined || args.remove_sounds_like)) {
+        delete updatedProject.sounds_like;
+    }
+
+    // Handle classification arrays
+    if (updatedTopics !== undefined) {
+        updatedProject.classification.topics = updatedTopics;
+    } else if (existingProject.classification?.topics && (args.topics !== undefined || args.remove_topics)) {
+        delete updatedProject.classification.topics;
+    }
+
+    if (updatedExplicitPhrases !== undefined) {
+        updatedProject.classification.explicit_phrases = updatedExplicitPhrases;
+    } else if (existingProject.classification?.explicit_phrases && (args.explicit_phrases !== undefined || args.remove_explicit_phrases)) {
+        delete updatedProject.classification.explicit_phrases;
+    }
+
+    await context.saveEntity(updatedProject);
+
+    // Build summary of changes
+    const changes: string[] = [];
+    if (args.name !== undefined) changes.push(`name: "${args.name}"`);
+    if (args.description !== undefined) changes.push(`description updated`);
+    if (args.destination !== undefined) changes.push(`destination: "${args.destination}"`);
+    if (args.structure !== undefined) changes.push(`structure: "${args.structure}"`);
+    if (args.contextType !== undefined) changes.push(`context_type: "${args.contextType}"`);
+    if (args.active !== undefined) changes.push(`active: ${args.active}`);
+    if (args.sounds_like !== undefined) changes.push(`sounds_like replaced with ${args.sounds_like.length} items`);
+    if (args.add_sounds_like?.length) changes.push(`added ${args.add_sounds_like.length} sounds_like variants`);
+    if (args.remove_sounds_like?.length) changes.push(`removed ${args.remove_sounds_like.length} sounds_like variants`);
+    if (args.topics !== undefined) changes.push(`topics replaced with ${args.topics.length} items`);
+    if (args.add_topics?.length) changes.push(`added ${args.add_topics.length} topics`);
+    if (args.remove_topics?.length) changes.push(`removed ${args.remove_topics.length} topics`);
+    if (args.explicit_phrases !== undefined) changes.push(`explicit_phrases replaced with ${args.explicit_phrases.length} items`);
+    if (args.add_explicit_phrases?.length) changes.push(`added ${args.add_explicit_phrases.length} explicit phrases`);
+    if (args.remove_explicit_phrases?.length) changes.push(`removed ${args.remove_explicit_phrases.length} explicit phrases`);
+
+    return {
+        success: true,
+        message: `Updated project "${existingProject.name}"`,
+        changes,
+        project: formatEntity(updatedProject),
     };
 }
 /* c8 ignore stop */
@@ -2399,6 +3026,9 @@ async function main() {
                 case 'protokoll_add_person':
                     result = await handleAddPerson(args as Parameters<typeof handleAddPerson>[0]);
                     break;
+                case 'protokoll_edit_person':
+                    result = await handleEditPerson(args as Parameters<typeof handleEditPerson>[0]);
+                    break;
                 case 'protokoll_add_project':
                     result = await handleAddProject(args as Parameters<typeof handleAddProject>[0]);
                     break;
@@ -2423,8 +3053,14 @@ async function main() {
                 case 'protokoll_update_term':
                     result = await handleUpdateTerm(args as Parameters<typeof handleUpdateTerm>[0]);
                     break;
+                case 'protokoll_edit_term':
+                    result = await handleEditTerm(args as Parameters<typeof handleEditTerm>[0]);
+                    break;
                 case 'protokoll_update_project':
                     result = await handleUpdateProject(args as Parameters<typeof handleUpdateProject>[0]);
+                    break;
+                case 'protokoll_edit_project':
+                    result = await handleEditProject(args as Parameters<typeof handleEditProject>[0]);
                     break;
 
                 // Transcript Actions
@@ -2476,7 +3112,8 @@ async function main() {
 }
 
 // Only run main when this is the entry point, not when imported for testing
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Also run if executed directly (not imported)
+if (import.meta.url === `file://${process.argv[1]}` || !process.argv[1] || process.argv[1].includes('server.js')) {
     main().catch((error) => {
         // eslint-disable-next-line no-console
         console.error(error);
@@ -2516,10 +3153,13 @@ export {
     handleSearchContext,
     handleGetEntity,
     handleAddPerson,
+    handleEditPerson,
     handleAddProject,
     handleAddTerm,
     handleAddCompany,
     handleDeleteEntity,
+    handleEditTerm,
+    handleEditProject,
     handleReadTranscript,
     handleEditTranscript,
     handleCombineTranscripts,

@@ -152,15 +152,22 @@ If no `.protokoll` directory exists in the hierarchy, the AI will:
 |------|-------------|
 | `protokoll_add_person` | Add a new person to context |
 | `protokoll_add_project` | Add a new project with smart assistance |
-| `protokoll_suggest_project_metadata` | Generate project suggestions without creating |
-| `protokoll_update_project` | Update project by regenerating from source URL/file |
 | `protokoll_add_term` | Add a technical term with smart assistance |
-| `protokoll_suggest_term_metadata` | Generate term suggestions without creating |
-| `protokoll_update_term` | Update term by regenerating from source URL/file |
-| `protokoll_merge_terms` | Merge duplicate terms into one |
 | `protokoll_add_company` | Add a company |
-| `protokoll_add_ignored_term` | Add a term to ignore |
 | `protokoll_delete_entity` | Remove an entity |
+
+### Entity Editing Tools
+
+| Tool | Description |
+|------|-------------|
+| `protokoll_edit_person` | Edit person: add sounds_like variants, change role/company, etc. |
+| `protokoll_edit_term` | Edit term: add sounds_like variants, topics, projects, domain, etc. |
+| `protokoll_edit_project` | Edit project: add sounds_like variants, phrases, routing config, etc. |
+| `protokoll_update_term` | Regenerate term metadata from source URL/file (uses LLM) |
+| `protokoll_update_project` | Regenerate project metadata from source URL/file (uses LLM) |
+| `protokoll_merge_terms` | Merge duplicate terms into one |
+| `protokoll_suggest_project_metadata` | Generate project suggestions without creating |
+| `protokoll_suggest_term_metadata` | Generate term suggestions without creating |
 
 ### Transcript Tools
 
@@ -266,6 +273,26 @@ I also noticed 'WCNP' isn't in your terms. Would you like me to add it so future
 **AI**: *Lists files, then calls `protokoll_combine_transcripts`*
 
 I found 3 meeting parts. Combined them into 'Full Meeting Notes' at `~/notes/client-alpha/2026-01/full-meeting-notes.md`. The original part files have been removed.
+
+### Editing Entities
+
+**User**: I need to add "Cartesian Time" as a sounds_like variant for the "cardigantime" term
+
+**AI**: *Uses the edit_entity prompt or calls `protokoll_edit_term` directly*
+
+I'll add that sounds_like variant for you.
+
+*Calls `protokoll_edit_term` with:*
+- id: "cardigantime"
+- add_sounds_like: ["Cartesian Time"]
+
+Done! I've added "Cartesian Time" as a phonetic variant for "cardigantime". Future transcripts will recognize this variant and correct it automatically.
+
+**User**: Can you also change Priya's company to "new-corp"?
+
+**AI**: *Calls `protokoll_edit_person`*
+
+Updated Priya's company from "acme-corp" to "new-corp".
 
 ## Best Practices
 

@@ -42,10 +42,13 @@ import {
     handleSearchContext,
     handleGetEntity,
     handleAddPerson,
+    handleEditPerson,
     handleAddProject,
     handleAddTerm,
     handleAddCompany,
     handleDeleteEntity,
+    handleEditTerm,
+    handleEditProject,
     handleReadTranscript,
     handleEditTranscript,
     handleCombineTranscripts,
@@ -703,6 +706,270 @@ routing:
     });
 
     // ========================================================================
+    // Entity Edit Handlers
+    // ========================================================================
+
+    describe('handleEditPerson', () => {
+        it('should add sounds_like variants to existing person', async () => {
+            // First add a person
+            await handleAddPerson({
+                id: 'edit-person-test',
+                name: 'John Doe',
+                sounds_like: ['john do'],
+                contextDirectory: protokollDir
+            });
+
+            // Edit to add more sounds_like
+            const result = await handleEditPerson({
+                id: 'edit-person-test',
+                add_sounds_like: ['jon doe', 'john dough'],
+                contextDirectory: protokollDir
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.changes).toContain('added 2 sounds_like variants');
+            expect(result.person.sounds_like).toContain('john do');
+            expect(result.person.sounds_like).toContain('jon doe');
+            expect(result.person.sounds_like).toContain('john dough');
+        });
+
+        it('should update multiple fields at once', async () => {
+            await handleAddPerson({
+                id: 'edit-person-multi',
+                name: 'Jane Smith',
+                contextDirectory: protokollDir
+            });
+
+            const result = await handleEditPerson({
+                id: 'edit-person-multi',
+                company: 'acme-corp',
+                role: 'Engineer',
+                add_sounds_like: ['jane smyth'],
+                contextDirectory: protokollDir
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.person.company).toBe('acme-corp');
+            expect(result.person.role).toBe('Engineer');
+            expect(result.person.sounds_like).toContain('jane smyth');
+        });
+
+        it('should remove sounds_like variants', async () => {
+            await handleAddPerson({
+                id: 'edit-person-remove',
+                name: 'Remove Test',
+                sounds_like: ['variant1', 'variant2', 'variant3'],
+                contextDirectory: protokollDir
+            });
+
+            const result = await handleEditPerson({
+                id: 'edit-person-remove',
+                remove_sounds_like: ['variant2'],
+                contextDirectory: protokollDir
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.person.sounds_like).toContain('variant1');
+            expect(result.person.sounds_like).not.toContain('variant2');
+            expect(result.person.sounds_like).toContain('variant3');
+        });
+
+        it('should throw error for non-existent person', async () => {
+            await expect(handleEditPerson({
+                id: 'nonexistent-person',
+                role: 'Test',
+                contextDirectory: protokollDir
+            })).rejects.toThrow('not found');
+        });
+    });
+
+    describe('handleEditTerm', () => {
+        it('should add sounds_like variants to existing term', async () => {
+            await handleAddTerm({
+                id: 'edit-term-test',
+                term: 'CardiganTime',
+                sounds_like: ['cardigan time'],
+                contextDirectory: protokollDir
+            });
+
+            const result = await handleEditTerm({
+                id: 'edit-term-test',
+                add_sounds_like: ['Cartesian Time', 'card again time'],
+                contextDirectory: protokollDir
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.changes).toContain('added 2 sounds_like variants');
+            expect(result.term.sounds_like).toContain('cardigan time');
+            expect(result.term.sounds_like).toContain('Cartesian Time');
+            expect(result.term.sounds_like).toContain('card again time');
+        });
+
+        it('should update domain and description', async () => {
+            await handleAddTerm({
+                id: 'edit-term-domain',
+                term: 'Kubernetes',
+                contextDirectory: protokollDir
+            });
+
+            const result = await handleEditTerm({
+                id: 'edit-term-domain',
+                domain: 'devops',
+                description: 'Container orchestration platform',
+                contextDirectory: protokollDir
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.term.domain).toBe('devops');
+            expect(result.term.description).toBe('Container orchestration platform');
+        });
+
+        it('should add topics and projects', async () => {
+            await handleAddTerm({
+                id: 'edit-term-topics',
+                term: 'Docker',
+                contextDirectory: protokollDir
+            });
+
+            const result = await handleEditTerm({
+                id: 'edit-term-topics',
+                add_topics: ['containers', 'devops'],
+                add_projects: ['infrastructure'],
+                contextDirectory: protokollDir
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.term.topics).toContain('containers');
+            expect(result.term.topics).toContain('devops');
+            expect(result.term.projects).toContain('infrastructure');
+        });
+
+        it('should replace entire sounds_like array', async () => {
+            await handleAddTerm({
+                id: 'edit-term-replace',
+                term: 'ReplaceTest',
+                sounds_like: ['old1', 'old2'],
+                contextDirectory: protokollDir
+            });
+
+            const result = await handleEditTerm({
+                id: 'edit-term-replace',
+                sounds_like: ['new1', 'new2', 'new3'],
+                contextDirectory: protokollDir
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.term.sounds_like).toEqual(['new1', 'new2', 'new3']);
+        });
+
+        it('should throw error for non-existent term', async () => {
+            await expect(handleEditTerm({
+                id: 'nonexistent-term',
+                domain: 'test',
+                contextDirectory: protokollDir
+            })).rejects.toThrow('not found');
+        });
+    });
+
+    describe('handleEditProject', () => {
+        it('should add sounds_like variants to existing project', async () => {
+            await handleAddProject({
+                id: 'edit-project-test',
+                name: 'Protokoll',
+                destination: '/tmp/protokoll',
+                sounds_like: ['protocol'],
+                explicit_phrases: [],
+                contextDirectory: protokollDir
+            });
+
+            const result = await handleEditProject({
+                id: 'edit-project-test',
+                add_sounds_like: ['pro to call', 'proto call'],
+                contextDirectory: protokollDir
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.changes).toContain('added 2 sounds_like variants');
+            expect(result.project.sounds_like).toContain('protocol');
+            expect(result.project.sounds_like).toContain('pro to call');
+            expect(result.project.sounds_like).toContain('proto call');
+        });
+
+        it('should update routing configuration', async () => {
+            await handleAddProject({
+                id: 'edit-project-routing',
+                name: 'Routing Test',
+                destination: '/tmp/old-path',
+                sounds_like: [],
+                explicit_phrases: [],
+                contextDirectory: protokollDir
+            });
+
+            const result = await handleEditProject({
+                id: 'edit-project-routing',
+                destination: '/tmp/new-path',
+                structure: 'day',
+                contextDirectory: protokollDir
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.project.routing.destination).toBe('/tmp/new-path');
+            expect(result.project.routing.structure).toBe('day');
+        });
+
+        it('should add explicit_phrases and topics', async () => {
+            await handleAddProject({
+                id: 'edit-project-phrases',
+                name: 'Phrases Test',
+                destination: '/tmp/phrases',
+                sounds_like: [],
+                explicit_phrases: ['existing phrase'],
+                contextDirectory: protokollDir
+            });
+
+            const result = await handleEditProject({
+                id: 'edit-project-phrases',
+                add_explicit_phrases: ['new phrase', 'another phrase'],
+                add_topics: ['topic1', 'topic2'],
+                contextDirectory: protokollDir
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.project.classification.explicit_phrases).toContain('existing phrase');
+            expect(result.project.classification.explicit_phrases).toContain('new phrase');
+            expect(result.project.classification.topics).toContain('topic1');
+        });
+
+        it('should update active status', async () => {
+            await handleAddProject({
+                id: 'edit-project-active',
+                name: 'Active Test',
+                destination: '/tmp/active',
+                sounds_like: [],
+                explicit_phrases: [],
+                contextDirectory: protokollDir
+            });
+
+            const result = await handleEditProject({
+                id: 'edit-project-active',
+                active: false,
+                contextDirectory: protokollDir
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.project.active).toBe(false);
+        });
+
+        it('should throw error for non-existent project', async () => {
+            await expect(handleEditProject({
+                id: 'nonexistent-project',
+                name: 'Test',
+                contextDirectory: protokollDir
+            })).rejects.toThrow('not found');
+        });
+    });
+
+    // ========================================================================
     // Transcript Handlers
     // ========================================================================
 
@@ -973,6 +1240,11 @@ Content from part 2.
             expect(toolNames).toContain('protokoll_add_term');
             expect(toolNames).toContain('protokoll_add_company');
             expect(toolNames).toContain('protokoll_delete_entity');
+
+            // Entity edit tools
+            expect(toolNames).toContain('protokoll_edit_person');
+            expect(toolNames).toContain('protokoll_edit_term');
+            expect(toolNames).toContain('protokoll_edit_project');
 
             // Transcript tools
             expect(toolNames).toContain('protokoll_read_transcript');

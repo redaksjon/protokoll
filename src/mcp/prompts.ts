@@ -138,6 +138,29 @@ export const prompts: McpPrompt[] = [
             },
         ],
     },
+    {
+        name: 'edit_entity',
+        description: 'Edit an existing entity (person, term, or project) with manual modifications. ' +
+            'Unlike update tools that regenerate from sources, this allows direct edits like ' +
+            'adding specific sounds_like variants, changing fields, or modifying array properties.',
+        arguments: [
+            {
+                name: 'entityType',
+                description: 'Type of entity to edit: person, term, or project',
+                required: true,
+            },
+            {
+                name: 'entityId',
+                description: 'ID of the entity to edit',
+                required: true,
+            },
+            {
+                name: 'modification',
+                description: 'What to modify (e.g., "add sounds_like variant", "change domain", "add topics")',
+                required: false,
+            },
+        ],
+    },
 ];
 
 // ============================================================================
@@ -185,6 +208,8 @@ export async function handleGetPrompt(
             return generateBatchTranscriptionPrompt(args);
         case 'find_and_analyze':
             return generateFindAndAnalyzePrompt(args);
+        case 'edit_entity':
+            return generateEditEntityPrompt(args);
         default:
             throw new Error(`Prompt handler not implemented: ${name}`);
     }
@@ -404,4 +429,95 @@ async function generateFindAndAnalyzePrompt(
             },
         ],
     };
+}
+
+async function generateEditEntityPrompt(
+    args: Record<string, string>
+): Promise<{ messages: McpPromptMessage[] }> {
+    const entityType = args.entityType;
+    const entityId = args.entityId;
+    const modification = args.modification || '';
+
+    if (!entityType || !entityId) {
+        throw new Error('entityType and entityId are required');
+    }
+
+    const messages: McpPromptMessage[] = [];
+
+    messages.push({
+        role: 'user',
+        content: {
+            type: 'text',
+            text: modification
+                ? `I want to edit the ${entityType} "${entityId}": ${modification}`
+                : `I want to edit the ${entityType} "${entityId}"`,
+        },
+    });
+
+    let assistantText = `I'll help you edit the ${entityType} "${entityId}".\n\n`;
+
+    // Provide guidance based on entity type
+    if (entityType === 'person') {
+        assistantText += `**Available modifications for people:**\n`;
+        assistantText += `- \`name\`, \`firstName\`, \`lastName\` - Update name fields\n`;
+        assistantText += `- \`company\`, \`role\`, \`context\` - Update association info\n`;
+        assistantText += `- \`sounds_like\` - Replace all phonetic variants\n`;
+        assistantText += `- \`add_sounds_like\` - Add new phonetic variants\n`;
+        assistantText += `- \`remove_sounds_like\` - Remove specific variants\n\n`;
+        assistantText += `**To proceed:**\n`;
+        assistantText += `1. First, call \`protokoll_get_entity\` to see current values:\n`;
+        assistantText += `   - entityType: "person"\n`;
+        assistantText += `   - entityId: "${entityId}"\n\n`;
+        assistantText += `2. Then call \`protokoll_edit_person\` with the changes:\n`;
+        assistantText += `   - id: "${entityId}"\n`;
+        assistantText += `   - [your modifications]\n`;
+    } else if (entityType === 'term') {
+        assistantText += `**Available modifications for terms:**\n`;
+        assistantText += `- \`expansion\`, \`domain\`, \`description\` - Update basic fields\n`;
+        assistantText += `- \`sounds_like\` - Replace all phonetic variants\n`;
+        assistantText += `- \`add_sounds_like\` - Add new phonetic variants\n`;
+        assistantText += `- \`remove_sounds_like\` - Remove specific variants\n`;
+        assistantText += `- \`topics\` / \`add_topics\` / \`remove_topics\` - Modify topic keywords\n`;
+        assistantText += `- \`projects\` / \`add_projects\` / \`remove_projects\` - Modify project associations\n\n`;
+        assistantText += `**To proceed:**\n`;
+        assistantText += `1. First, call \`protokoll_get_entity\` to see current values:\n`;
+        assistantText += `   - entityType: "term"\n`;
+        assistantText += `   - entityId: "${entityId}"\n\n`;
+        assistantText += `2. Then call \`protokoll_edit_term\` with the changes:\n`;
+        assistantText += `   - id: "${entityId}"\n`;
+        assistantText += `   - [your modifications]\n`;
+    } else if (entityType === 'project') {
+        assistantText += `**Available modifications for projects:**\n`;
+        assistantText += `- \`name\`, \`description\` - Update basic info\n`;
+        assistantText += `- \`destination\`, \`structure\` - Update routing\n`;
+        assistantText += `- \`contextType\`, \`active\` - Update classification\n`;
+        assistantText += `- \`sounds_like\` / \`add_sounds_like\` / \`remove_sounds_like\` - Phonetic variants\n`;
+        assistantText += `- \`topics\` / \`add_topics\` / \`remove_topics\` - Topic keywords\n`;
+        assistantText += `- \`explicit_phrases\` / \`add_explicit_phrases\` / \`remove_explicit_phrases\` - Trigger phrases\n\n`;
+        assistantText += `**To proceed:**\n`;
+        assistantText += `1. First, call \`protokoll_get_entity\` to see current values:\n`;
+        assistantText += `   - entityType: "project"\n`;
+        assistantText += `   - entityId: "${entityId}"\n\n`;
+        assistantText += `2. Then call \`protokoll_edit_project\` with the changes:\n`;
+        assistantText += `   - id: "${entityId}"\n`;
+        assistantText += `   - [your modifications]\n`;
+    } else {
+        assistantText += `**Note:** Entity type "${entityType}" does not support direct editing.\n`;
+        assistantText += `Supported types: person, term, project\n`;
+    }
+
+    if (modification) {
+        assistantText += `\n**Requested modification:** "${modification}"\n`;
+        assistantText += `Would you like me to retrieve the current entity and apply this change?`;
+    }
+
+    messages.push({
+        role: 'assistant',
+        content: {
+            type: 'text',
+            text: assistantText,
+        },
+    });
+
+    return { messages };
 }
