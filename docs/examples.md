@@ -146,6 +146,27 @@ protokoll --input-directory ~/backlog \
 protokoll --input-directory ~/backlog --batch
 ```
 
+## Scenario 20: Non-Interactive Project Creation
+
+Add projects automatically without confirming AI suggestions.
+
+```bash
+# Trust AI suggestions completely
+protokoll project add --name "FjellGrunn" --yes
+
+# With a source URL
+protokoll project add https://github.com/myorg/myproject --name "My Project" --yes
+
+# With local README
+protokoll project add /path/to/README.md --name "Documentation" --yes
+```
+
+Result:
+- AI generates phonetic variants automatically
+- Trigger phrases generated without prompts
+- Topics and description extracted (if source provided)
+- Project saved immediately with all AI suggestions
+
 ## Scenario 8: Quality Review
 
 Review transcription quality after processing.

@@ -10,8 +10,8 @@ Traditional CLI usage requires you to:
 3. Remember command syntax
 4. Run commands manually
 
-With MCP, you can simply say:
-- "Hey, can you transcribe this recording?"
+With MCP, you can use natural language:
+- "Can you transcribe this recording?"
 - "Add Sanjay Gupta as a person - Whisper keeps mishearing it as 'San Jay Grouper'"
 - "This transcript should be in the Quantum Readiness project"
 
@@ -109,7 +109,7 @@ The AI will automatically use `client-alpha/.protokoll` configuration.
     └── recording.m4a         # ← Where does this go?
 ```
 
-The AI will ask: *"I found 2 projects in your configuration. Which project is this recording for?"*
+The AI will ask: *I found 2 projects in your configuration. Which project is this recording for?*
 
 **Scenario 3: No Configuration Found**
 
@@ -151,8 +151,13 @@ If no `.protokoll` directory exists in the hierarchy, the AI will:
 | Tool | Description |
 |------|-------------|
 | `protokoll_add_person` | Add a new person to context |
-| `protokoll_add_project` | Add a new project |
-| `protokoll_add_term` | Add a technical term |
+| `protokoll_add_project` | Add a new project with smart assistance |
+| `protokoll_suggest_project_metadata` | Generate project suggestions without creating |
+| `protokoll_update_project` | Update project by regenerating from source URL/file |
+| `protokoll_add_term` | Add a technical term with smart assistance |
+| `protokoll_suggest_term_metadata` | Generate term suggestions without creating |
+| `protokoll_update_term` | Update term by regenerating from source URL/file |
+| `protokoll_merge_terms` | Merge duplicate terms into one |
 | `protokoll_add_company` | Add a company |
 | `protokoll_add_ignored_term` | Add a term to ignore |
 | `protokoll_delete_entity` | Remove an entity |
@@ -161,64 +166,106 @@ If no `.protokoll` directory exists in the hierarchy, the AI will:
 
 | Tool | Description |
 |------|-------------|
+| `protokoll_list_transcripts` | List/search transcripts with pagination and filtering |
+| `protokoll_read_transcript` | Read a transcript and parse its metadata |
 | `protokoll_edit_transcript` | Change transcript title or project |
 | `protokoll_combine_transcripts` | Merge multiple transcripts |
 | `protokoll_provide_feedback` | Correct transcription errors |
+
+#### protokoll_list_transcripts
+
+Browse and search your transcript library with pagination, sorting, and filtering.
+
+**Parameters:**
+- `directory` (required): Directory to search (recursive)
+- `limit` (optional): Max results to return (default: 50)
+- `offset` (optional): Skip N results for pagination (default: 0)
+- `sortBy` (optional): Sort by "date" (default), "filename", or "title"
+- `startDate` (optional): Filter from date (YYYY-MM-DD)
+- `endDate` (optional): Filter to date (YYYY-MM-DD)
+- `search` (optional): Search text in filename and content
+
+**Returns:**
+- `transcripts[]`: Array of transcript items with:
+  - `path`: Full file path
+  - `filename`: File name
+  - `date`: Date from filename (YYYY-MM-DD)
+  - `time`: Time from filename if present (HH:MM)
+  - `title`: Extracted from `# heading`
+  - `hasRawTranscript`: Whether raw Whisper output exists
+- `pagination`: Total count, limit, offset, hasMore, nextOffset
+- `filters`: Applied filters
+
+**Example:**
+```typescript
+// List recent transcripts
+const result = await use_mcp_tool('protokoll_list_transcripts', {
+  directory: '/Users/me/notes',
+  limit: 10
+});
+
+// Search for specific content
+const meetings = await use_mcp_tool('protokoll_list_transcripts', {
+  directory: '/Users/me/notes',
+  search: 'kubernetes deployment',
+  startDate: '2026-01-01'
+});
+```
 
 ## Example Conversations
 
 ### Basic Transcription
 
-**You**: "Can you transcribe the meeting recording at ~/Downloads/standup.m4a?"
+**User**: Can you transcribe the meeting recording at ~/Downloads/standup.m4a?
 
 **AI**: *Calls `protokoll_discover_config` to find configuration*
 *Calls `protokoll_suggest_project` to determine project*
 
-"I found your Protokoll configuration at `~/.protokoll`. You have 3 projects configured. Based on the file location, I'm not sure which project this belongs to. Is this for:
+I found your Protokoll configuration at `~/.protokoll`. You have 3 projects configured. Based on the file location, I'm not sure which project this belongs to. Is this for:
 1. Client Alpha
 2. Internal Notes  
-3. Personal"
+3. Personal
 
-**You**: "It's for Client Alpha"
+**User**: It's for Client Alpha
 
 **AI**: *Calls `protokoll_process_audio` with projectId: "client-alpha"*
 
-"Done! I've transcribed the standup recording. The transcript is saved at `~/notes/client-alpha/2026-01/standup-a3f2b1c8.md`. 
+Done! I've transcribed the standup recording. The transcript is saved at `~/notes/client-alpha/2026-01/standup-a3f2b1c8.md`. 
 
 Key highlights:
 - Discussed sprint progress with Sarah and Marcus
 - Mentioned the API integration deadline
 - Applied 4 name corrections using your context
 
-Would you like me to make any changes to the transcript?"
+Would you like me to make any changes to the transcript?
 
 ### Adding Context
 
-**You**: "Whisper keeps mishearing 'Priya Sharma' as 'pre a Sharma'. Can you add her to my context?"
+**User**: Whisper keeps mishearing 'Priya Sharma' as 'pre a Sharma'. Can you add her to my context?
 
 **AI**: *Calls `protokoll_add_person`*
 
-"I've added Priya Sharma to your context with the phonetic variant 'pre a'. Future transcripts will automatically correct this. Would you like to add any other information about Priya (role, company, etc.)?"
+I've added Priya Sharma to your context with the phonetic variant 'pre a'. Future transcripts will automatically correct this. Would you like to add any other information about Priya (role, company, etc.)?
 
 ### Providing Feedback
 
-**You**: "In the transcript at ~/notes/meeting.md, 'WCMP' should be 'WCNP' and this should be in the Infrastructure project"
+**User**: In the transcript at ~/notes/meeting.md, 'WCMP' should be 'WCNP' and this should be in the Infrastructure project
 
 **AI**: *Calls `protokoll_provide_feedback`*
 
-"I've made the corrections:
+I've made the corrections:
 1. Changed 'WCMP' to 'WCNP' (2 occurrences)
 2. Moved the transcript to the Infrastructure project at `~/notes/infrastructure/meeting.md`
 
-I also noticed 'WCNP' isn't in your terms. Would you like me to add it so future transcripts get it right?"
+I also noticed 'WCNP' isn't in your terms. Would you like me to add it so future transcripts get it right?
 
 ### Combining Transcripts
 
-**You**: "Can you combine all the meeting parts in ~/notes/client-alpha/2026-01/ into a single transcript?"
+**User**: Can you combine all the meeting parts in ~/notes/client-alpha/2026-01/ into a single transcript?
 
 **AI**: *Lists files, then calls `protokoll_combine_transcripts`*
 
-"I found 3 meeting parts. Combined them into 'Full Meeting Notes' at `~/notes/client-alpha/2026-01/full-meeting-notes.md`. The original part files have been removed."
+I found 3 meeting parts. Combined them into 'Full Meeting Notes' at `~/notes/client-alpha/2026-01/full-meeting-notes.md`. The original part files have been removed.
 
 ## Best Practices
 
@@ -289,7 +336,7 @@ This is expected behavior. The AI needs clarification when:
 - File location doesn't clearly belong to one project
 - Multiple projects could apply
 
-Just tell it which project to use.
+Simply specify which project to use.
 
 ### "API key not set"
 

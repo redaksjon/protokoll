@@ -18,10 +18,25 @@ import {
     IgnoredTerm,
     ContextDiscoveryOptions,
     DiscoveredContextDir,
-    HierarchicalContextResult 
+    HierarchicalContextResult,
+    SmartAssistanceConfig 
 } from './types';
 import * as Storage from './storage';
 import * as Discovery from './discovery';
+import {
+    DEFAULT_PHONETIC_MODEL,
+    DEFAULT_ANALYSIS_MODEL,
+    DEFAULT_SMART_ASSISTANCE,
+    DEFAULT_SOUNDS_LIKE_ON_ADD,
+    DEFAULT_TRIGGER_PHRASES_ON_ADD,
+    DEFAULT_PROMPT_FOR_SOURCE,
+    DEFAULT_TERMS_ENABLED,
+    DEFAULT_TERM_SOUNDS_LIKE_ON_ADD,
+    DEFAULT_TERM_DESCRIPTION_ON_ADD,
+    DEFAULT_TERM_TOPICS_ON_ADD,
+    DEFAULT_TERM_PROJECT_SUGGESTIONS,
+    ASSIST_TIMEOUT_MS
+} from '../constants';
 
 export interface ContextInstance {
   // Initialization
@@ -32,6 +47,9 @@ export interface ContextInstance {
   getDiscoveredDirs(): DiscoveredContextDir[];
   getConfig(): Record<string, unknown>;
   getContextDirs(): string[];
+  
+  // Smart Assistance config
+  getSmartAssistanceConfig(): SmartAssistanceConfig;
   
   // Entity access
   getPerson(id: string): Person | undefined;
@@ -67,6 +85,33 @@ export interface CreateOptions {
   configDirName?: string;
   configFileName?: string;
 }
+
+/**
+ * Get smart assistance configuration with defaults
+ */
+const getSmartAssistanceConfig = (config: Record<string, unknown>): SmartAssistanceConfig => {
+    const smartConfig = config.smartAssistance as Partial<SmartAssistanceConfig> | undefined;
+  
+    return {
+        enabled: smartConfig?.enabled ?? DEFAULT_SMART_ASSISTANCE,
+        phoneticModel: smartConfig?.phoneticModel ?? DEFAULT_PHONETIC_MODEL,
+        analysisModel: smartConfig?.analysisModel ?? DEFAULT_ANALYSIS_MODEL,
+        
+        // Project settings
+        soundsLikeOnAdd: smartConfig?.soundsLikeOnAdd ?? DEFAULT_SOUNDS_LIKE_ON_ADD,
+        triggerPhrasesOnAdd: smartConfig?.triggerPhrasesOnAdd ?? DEFAULT_TRIGGER_PHRASES_ON_ADD,
+        promptForSource: smartConfig?.promptForSource ?? DEFAULT_PROMPT_FOR_SOURCE,
+        
+        // Term settings
+        termsEnabled: smartConfig?.termsEnabled ?? DEFAULT_TERMS_ENABLED,
+        termSoundsLikeOnAdd: smartConfig?.termSoundsLikeOnAdd ?? DEFAULT_TERM_SOUNDS_LIKE_ON_ADD,
+        termDescriptionOnAdd: smartConfig?.termDescriptionOnAdd ?? DEFAULT_TERM_DESCRIPTION_ON_ADD,
+        termTopicsOnAdd: smartConfig?.termTopicsOnAdd ?? DEFAULT_TERM_TOPICS_ON_ADD,
+        termProjectSuggestions: smartConfig?.termProjectSuggestions ?? DEFAULT_TERM_PROJECT_SUGGESTIONS,
+        
+        timeout: smartConfig?.timeout ?? ASSIST_TIMEOUT_MS,
+    };
+};
 
 /**
  * Create a new context instance
@@ -105,6 +150,8 @@ export const create = async (options: CreateOptions = {}): Promise<ContextInstan
         getDiscoveredDirs: () => discoveryResult.discoveredDirs,
         getConfig: () => discoveryResult.config,
         getContextDirs: () => discoveryResult.contextDirs,
+        
+        getSmartAssistanceConfig: () => getSmartAssistanceConfig(discoveryResult.config),
     
         getPerson: (id) => storage.get<Person>('person', id),
         getProject: (id) => storage.get<Project>('project', id),

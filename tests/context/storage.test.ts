@@ -517,6 +517,214 @@ sounds_like:
     });
   });
 
+  describe('project sounds_like', () => {
+    it('should load project with sounds_like field', async () => {
+      const projectsDir = path.join(tempDir, 'context', 'projects');
+      await fs.mkdir(projectsDir, { recursive: true });
+      await fs.writeFile(
+        path.join(projectsDir, 'protokoll.yaml'),
+        `id: protokoll
+name: Protokoll
+classification:
+  context_type: work
+  explicit_phrases:
+    - "work on protokoll"
+routing:
+  destination: ~/work/notes
+  structure: month
+  filename_options:
+    - date
+sounds_like:
+  - "protocol"
+  - "pro to call"
+  - "proto call"`
+      );
+      
+      await storage.load([path.join(tempDir, 'context')]);
+      
+      const project = storage.get<Project>('project', 'protokoll');
+      expect(project).toBeDefined();
+      expect(project?.name).toBe('Protokoll');
+      expect(project?.sounds_like).toBeDefined();
+      expect(project?.sounds_like).toContain('protocol');
+      expect(project?.sounds_like).toContain('pro to call');
+      expect(project?.sounds_like).toContain('proto call');
+    });
+
+    it('should find project by sounds_like variant', async () => {
+      const projectsDir = path.join(tempDir, 'context', 'projects');
+      await fs.mkdir(projectsDir, { recursive: true });
+      await fs.writeFile(
+        path.join(projectsDir, 'kronologi.yaml'),
+        `id: kronologi
+name: Kronologi
+classification:
+  context_type: work
+routing:
+  destination: ~/work/kronologi
+  structure: month
+  filename_options:
+    - date
+sounds_like:
+  - "chronology"
+  - "crono logy"
+  - "crow no logy"`
+      );
+      
+      await storage.load([path.join(tempDir, 'context')]);
+      
+      // Should find by exact sounds_like match
+      const result = storage.findBySoundsLike('chronology');
+      expect(result).toBeDefined();
+      expect(result?.name).toBe('Kronologi');
+      expect(result?.type).toBe('project');
+    });
+
+    it('should find project by sounds_like case insensitive', async () => {
+      const projectsDir = path.join(tempDir, 'context', 'projects');
+      await fs.mkdir(projectsDir, { recursive: true });
+      await fs.writeFile(
+        path.join(projectsDir, 'observasjon.yaml'),
+        `id: observasjon
+name: Observasjon
+classification:
+  context_type: work
+routing:
+  destination: ~/work/obs
+  structure: month
+  filename_options:
+    - date
+sounds_like:
+  - "observation"
+  - "observe asian"`
+      );
+      
+      await storage.load([path.join(tempDir, 'context')]);
+      
+      // Should be case insensitive
+      const result1 = storage.findBySoundsLike('OBSERVATION');
+      expect(result1?.name).toBe('Observasjon');
+      
+      const result2 = storage.findBySoundsLike('Observe Asian');
+      expect(result2?.name).toBe('Observasjon');
+    });
+
+    it('should save project with sounds_like field', async () => {
+      const project: Project = {
+        id: 'redaksjon',
+        name: 'Redaksjon',
+        type: 'project',
+        classification: {
+          context_type: 'work',
+          explicit_phrases: ['redaksjon project'],
+        },
+        routing: {
+          destination: '~/work/redaksjon',
+          structure: 'month',
+          filename_options: ['date', 'subject'],
+        },
+        sounds_like: ['redaction', 'red action', 'red ox on'],
+        active: true,
+      };
+      
+      await storage.save(project, tempDir);
+      
+      const filePath = path.join(tempDir, 'context', 'projects', 'redaksjon.yaml');
+      const content = await fs.readFile(filePath, 'utf-8');
+      expect(content).toContain('sounds_like:');
+      expect(content).toContain('redaction');
+      expect(content).toContain('red action');
+      expect(content).toContain('red ox on');
+    });
+
+    it('should handle project without sounds_like in findBySoundsLike', async () => {
+      const projectsDir = path.join(tempDir, 'context', 'projects');
+      await fs.mkdir(projectsDir, { recursive: true });
+      await fs.writeFile(
+        path.join(projectsDir, 'no-sounds-like.yaml'),
+        `id: no-sounds-like
+name: No Sounds Like Project
+classification:
+  context_type: work
+routing:
+  destination: ~/work
+  structure: month
+  filename_options:
+    - date`
+      );
+      
+      await storage.load([path.join(tempDir, 'context')]);
+      
+      // Should not find when no sounds_like field
+      const result = storage.findBySoundsLike('no sounds like');
+      expect(result).toBeUndefined();
+    });
+
+    it('should handle whitespace in project sounds_like matching', async () => {
+      const projectsDir = path.join(tempDir, 'context', 'projects');
+      await fs.mkdir(projectsDir, { recursive: true });
+      await fs.writeFile(
+        path.join(projectsDir, 'whitespace-test.yaml'),
+        `id: whitespace-test
+name: Whitespace Test
+classification:
+  context_type: work
+routing:
+  destination: ~/work
+  structure: month
+  filename_options:
+    - date
+sounds_like:
+  - "white space"`
+      );
+      
+      await storage.load([path.join(tempDir, 'context')]);
+      
+      // Should handle extra whitespace
+      const result = storage.findBySoundsLike('  white space  ');
+      expect(result?.name).toBe('Whitespace Test');
+    });
+
+    it('should return first matching entity when multiple have same sounds_like', async () => {
+      const projectsDir = path.join(tempDir, 'context', 'projects');
+      const peopleDir = path.join(tempDir, 'context', 'people');
+      await fs.mkdir(projectsDir, { recursive: true });
+      await fs.mkdir(peopleDir, { recursive: true });
+      
+      // Project with sounds_like
+      await fs.writeFile(
+        path.join(projectsDir, 'alpha.yaml'),
+        `id: alpha
+name: Project Alpha
+classification:
+  context_type: work
+routing:
+  destination: ~/work
+  structure: month
+  filename_options:
+    - date
+sounds_like:
+  - "alfa"`
+      );
+      
+      // Person with same sounds_like
+      await fs.writeFile(
+        path.join(peopleDir, 'alfa-person.yaml'),
+        `id: alfa-person
+name: Alfa Person
+sounds_like:
+  - "alfa"`
+      );
+      
+      await storage.load([path.join(tempDir, 'context')]);
+      
+      // Should return one of them (implementation returns first found)
+      const result = storage.findBySoundsLike('alfa');
+      expect(result).toBeDefined();
+      expect(['Project Alpha', 'Alfa Person']).toContain(result?.name);
+    });
+  });
+
   describe('ignored entities', () => {
     it('should load ignored entities', async () => {
       const ignoredDir = path.join(tempDir, 'context', 'ignored');

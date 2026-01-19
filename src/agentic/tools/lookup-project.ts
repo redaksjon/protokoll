@@ -139,9 +139,10 @@ export const create = (ctx: ToolContext): TranscriptionTool => ({
             };
         }
     
-        // Look up project by name
-        const projects = context.search(args.name);
-        const projectMatches = projects.filter(e => e.type === 'project');
+        // Look up project by name (also searches sounds_like)
+        const searchResults = context.search(args.name);
+        const projectMatches = searchResults.filter(e => e.type === 'project');
+        const termMatches = searchResults.filter(e => e.type === 'term');
     
         if (projectMatches.length > 0) {
             const project = projectMatches[0];
@@ -152,6 +153,64 @@ export const create = (ctx: ToolContext): TranscriptionTool => ({
                     project,
                 },
             };
+        }
+        
+        // Check if we found a term that's associated with projects
+        if (termMatches.length > 0) {
+            const term = termMatches[0];
+            const termProjects = term.projects || [];
+            
+            if (termProjects.length > 0) {
+                // Get the first associated project
+                const allProjects = context.getAllProjects();
+                const associatedProject = allProjects.find(p => p.id === termProjects[0]);
+                
+                if (associatedProject) {
+                    return {
+                        success: true,
+                        data: {
+                            found: true,
+                            project: associatedProject,
+                            matchedVia: 'term',
+                            termName: term.name,
+                        },
+                    };
+                }
+            }
+        }
+        
+        // Try findBySoundsLike as a fallback for exact phonetic matches
+        const soundsLikeMatch = context.findBySoundsLike(args.name);
+        if (soundsLikeMatch) {
+            if (soundsLikeMatch.type === 'project') {
+                return {
+                    success: true,
+                    data: {
+                        found: true,
+                        project: soundsLikeMatch,
+                        matchedVia: 'sounds_like',
+                    },
+                };
+            } else if (soundsLikeMatch.type === 'term') {
+                const termProjects = soundsLikeMatch.projects || [];
+                
+                if (termProjects.length > 0) {
+                    const allProjects = context.getAllProjects();
+                    const associatedProject = allProjects.find(p => p.id === termProjects[0]);
+                    
+                    if (associatedProject) {
+                        return {
+                            success: true,
+                            data: {
+                                found: true,
+                                project: associatedProject,
+                                matchedVia: 'term_sounds_like',
+                                termName: soundsLikeMatch.name,
+                            },
+                        };
+                    }
+                }
+            }
         }
     
         // Try getting all projects and matching trigger phrases

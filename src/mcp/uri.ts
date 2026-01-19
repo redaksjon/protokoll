@@ -1,0 +1,264 @@
+/**
+ * URI Parser for Protokoll MCP Resources
+ * 
+ * Handles parsing and construction of protokoll:// URIs.
+ * 
+ * URI Schemes:
+ * - protokoll://transcript/{path}
+ * - protokoll://entity/{type}/{id}
+ * - protokoll://config/{path}
+ * - protokoll://transcripts?directory={dir}&startDate={date}&...
+ * - protokoll://entities/{type}
+ */
+
+import type {
+    ParsedResourceUri,
+    TranscriptUri,
+    EntityUri,
+    ConfigUri,
+    TranscriptsListUri,
+    EntitiesListUri,
+    ResourceType,
+} from './types';
+
+const SCHEME = 'protokoll';
+
+/**
+ * Parse a protokoll:// URI into its components
+ */
+export function parseUri(uri: string): ParsedResourceUri {
+    if (!uri.startsWith(`${SCHEME}://`)) {
+        throw new Error(`Invalid URI scheme: ${uri}. Expected protokoll://`);
+    }
+
+    const withoutScheme = uri.substring(`${SCHEME}://`.length);
+    const [pathPart, queryPart] = withoutScheme.split('?');
+    const segments = pathPart.split('/').filter(s => s.length > 0);
+
+    if (segments.length === 0) {
+        throw new Error(`Invalid URI: ${uri}. No resource type specified.`);
+    }
+
+    const firstSegment = segments[0];
+    const params = parseQueryParams(queryPart);
+
+    switch (firstSegment) {
+        case 'transcript':
+            return parseTranscriptUri(uri, segments, params);
+        case 'entity':
+            return parseEntityUri(uri, segments, params);
+        case 'config':
+            return parseConfigUri(uri, segments, params);
+        case 'transcripts':
+        case 'transcripts-list':
+            return parseTranscriptsListUri(uri, segments, params);
+        case 'entities':
+        case 'entities-list':
+            return parseEntitiesListUri(uri, segments, params);
+        default:
+            throw new Error(`Unknown resource type: ${firstSegment}`);
+    }
+}
+
+function parseQueryParams(queryPart?: string): Record<string, string> {
+    if (!queryPart) return {};
+    
+    const params: Record<string, string> = {};
+    const pairs = queryPart.split('&');
+    
+    for (const pair of pairs) {
+        const [key, value] = pair.split('=');
+        if (key && value !== undefined) {
+            params[decodeURIComponent(key)] = decodeURIComponent(value);
+        }
+    }
+    
+    return params;
+}
+
+function parseTranscriptUri(
+    uri: string,
+    segments: string[],
+    params: Record<string, string>
+): TranscriptUri {
+    // protokoll://transcript/path/to/file.md
+    const transcriptPath = segments.slice(1).join('/');
+    
+    if (!transcriptPath) {
+        throw new Error(`Invalid transcript URI: ${uri}. No path specified.`);
+    }
+
+    return {
+        scheme: SCHEME,
+        resourceType: 'transcript',
+        path: transcriptPath,
+        params,
+        transcriptPath: decodeURIComponent(transcriptPath),
+    };
+}
+
+function parseEntityUri(
+    uri: string,
+    segments: string[],
+    params: Record<string, string>
+): EntityUri {
+    // protokoll://entity/{type}/{id}
+    if (segments.length < 3) {
+        throw new Error(`Invalid entity URI: ${uri}. Expected protokoll://entity/{type}/{id}`);
+    }
+
+    const entityType = segments[1] as EntityUri['entityType'];
+    const entityId = segments.slice(2).join('/');
+
+    const validTypes = ['person', 'project', 'term', 'company', 'ignored'];
+    if (!validTypes.includes(entityType)) {
+        throw new Error(`Invalid entity type: ${entityType}. Expected one of: ${validTypes.join(', ')}`);
+    }
+
+    return {
+        scheme: SCHEME,
+        resourceType: 'entity',
+        path: `${entityType}/${entityId}`,
+        params,
+        entityType,
+        entityId: decodeURIComponent(entityId),
+    };
+}
+
+function parseConfigUri(
+    uri: string,
+    segments: string[],
+    params: Record<string, string>
+): ConfigUri {
+    // protokoll://config/{path}
+    const configPath = segments.slice(1).join('/');
+
+    return {
+        scheme: SCHEME,
+        resourceType: 'config',
+        path: configPath || '',
+        params,
+        configPath: configPath ? decodeURIComponent(configPath) : '',
+    };
+}
+
+function parseTranscriptsListUri(
+    uri: string,
+    segments: string[],
+    params: Record<string, string>
+): TranscriptsListUri {
+    // protokoll://transcripts?directory={dir}&startDate={date}&...
+    const directory = params.directory || '';
+
+    return {
+        scheme: SCHEME,
+        resourceType: 'transcripts-list',
+        path: segments.slice(1).join('/'),
+        params,
+        directory,
+        startDate: params.startDate,
+        endDate: params.endDate,
+        limit: params.limit ? parseInt(params.limit, 10) : undefined,
+        offset: params.offset ? parseInt(params.offset, 10) : undefined,
+    };
+}
+
+function parseEntitiesListUri(
+    uri: string,
+    segments: string[],
+    params: Record<string, string>
+): EntitiesListUri {
+    // protokoll://entities/{type}
+    const entityType = (segments[1] || params.type || 'project') as EntitiesListUri['entityType'];
+
+    return {
+        scheme: SCHEME,
+        resourceType: 'entities-list',
+        path: entityType,
+        params,
+        entityType,
+    };
+}
+
+// ============================================================================
+// URI Builders
+// ============================================================================
+
+/**
+ * Build a transcript resource URI
+ */
+export function buildTranscriptUri(transcriptPath: string): string {
+    const encoded = encodeURIComponent(transcriptPath).replace(/%2F/g, '/');
+    return `${SCHEME}://transcript/${encoded}`;
+}
+
+/**
+ * Build an entity resource URI
+ */
+export function buildEntityUri(
+    entityType: 'person' | 'project' | 'term' | 'company' | 'ignored',
+    entityId: string
+): string {
+    return `${SCHEME}://entity/${entityType}/${encodeURIComponent(entityId)}`;
+}
+
+/**
+ * Build a config resource URI
+ */
+export function buildConfigUri(configPath?: string): string {
+    if (configPath) {
+        return `${SCHEME}://config/${encodeURIComponent(configPath)}`;
+    }
+    return `${SCHEME}://config`;
+}
+
+/**
+ * Build a transcripts list URI
+ */
+export function buildTranscriptsListUri(options: {
+    directory: string;
+    startDate?: string;
+    endDate?: string;
+    limit?: number;
+    offset?: number;
+}): string {
+    const params = new URLSearchParams();
+    params.set('directory', options.directory);
+    if (options.startDate) params.set('startDate', options.startDate);
+    if (options.endDate) params.set('endDate', options.endDate);
+    if (options.limit !== undefined) params.set('limit', String(options.limit));
+    if (options.offset !== undefined) params.set('offset', String(options.offset));
+    
+    return `${SCHEME}://transcripts?${params.toString()}`;
+}
+
+/**
+ * Build an entities list URI
+ */
+export function buildEntitiesListUri(
+    entityType: 'person' | 'project' | 'term' | 'company' | 'ignored'
+): string {
+    return `${SCHEME}://entities/${entityType}`;
+}
+
+/**
+ * Check if a string is a valid Protokoll URI
+ */
+export function isProtokolUri(uri: string): boolean {
+    return uri.startsWith(`${SCHEME}://`);
+}
+
+/**
+ * Get the resource type from a URI without full parsing
+ */
+export function getResourceType(uri: string): ResourceType | null {
+    if (!isProtokolUri(uri)) return null;
+    
+    const withoutScheme = uri.substring(`${SCHEME}://`.length);
+    const firstSegment = withoutScheme.split('/')[0].split('?')[0];
+    
+    if (firstSegment === 'transcripts') return 'transcripts-list';
+    if (firstSegment === 'entities') return 'entities-list';
+    
+    return firstSegment as ResourceType;
+}

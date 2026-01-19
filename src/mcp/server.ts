@@ -21,6 +21,10 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
     CallToolRequestSchema,
     ListToolsRequestSchema,
+    ListResourcesRequestSchema,
+    ReadResourceRequestSchema,
+    ListPromptsRequestSchema,
+    GetPromptRequestSchema,
     type Tool,
 // eslint-disable-next-line import/extensions
 } from '@modelcontextprotocol/sdk/types.js';
@@ -45,6 +49,12 @@ import * as Media from '@/util/media';
 import * as Storage from '@/util/storage';
 import * as Reasoning from '@/reasoning';
 import { getLogger } from '@/logging';
+import * as Resources from './resources';
+import * as Prompts from './prompts';
+import * as ProjectAssist from '@/cli/project-assist';
+import * as TermAssist from '@/cli/term-assist';
+import * as TermContext from '@/cli/term-context';
+import * as ContentFetcher from '@/cli/content-fetcher';
 import {
     DEFAULT_OUTPUT_DIRECTORY,
     DEFAULT_OUTPUT_STRUCTURE,
@@ -57,6 +67,7 @@ import {
     DEFAULT_TEMP_DIRECTORY,
 } from '@/constants';
 import { parseTranscript, combineTranscripts, editTranscript } from '@/cli/action';
+import { listTranscripts } from '@/cli/transcript';
 import { processFeedback, applyChanges, type FeedbackContext } from '@/cli/feedback';
 import type { Person, Project, Term, Company, IgnoredTerm, Entity, EntityType } from '@/context/types';
 
@@ -578,19 +589,25 @@ const tools: Tool[] = [
     {
         name: 'protokoll_add_project',
         description:
-            'Add a new project to the context. ' +
+            'Add a new project to the context with optional smart assistance for generating metadata. ' +
             'Projects define where transcripts should be routed based on classification signals. ' +
-            'Include explicit_phrases that should trigger routing to this project.',
+            'Smart assistance auto-generates sounds_like (phonetic variants for transcription correction) and ' +
+            'explicit_phrases (content-matching trigger phrases for classification). ' +
+            'Provide a source URL or file path to also generate topics and description from content analysis.',
         inputSchema: {
             type: 'object',
             properties: {
                 name: {
                     type: 'string',
-                    description: 'Project name',
+                    description: 'Project name (required)',
                 },
                 id: {
                     type: 'string',
                     description: 'Unique ID (default: slugified name)',
+                },
+                source: {
+                    type: 'string',
+                    description: 'URL or file path to analyze for generating topics, description, sounds_like, and explicit_phrases (optional)',
                 },
                 destination: {
                     type: 'string',
@@ -609,16 +626,25 @@ const tools: Tool[] = [
                 explicit_phrases: {
                     type: 'array',
                     items: { type: 'string' },
-                    description: 'Phrases that trigger routing to this project',
+                    description: 'Content-matching trigger phrases for classification (auto-generated if smart assistance enabled)',
+                },
+                sounds_like: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Phonetic variants of project NAME for transcription correction (auto-generated if smart assistance enabled)',
                 },
                 topics: {
                     type: 'array',
                     items: { type: 'string' },
-                    description: 'Topic keywords for classification',
+                    description: 'Topic keywords for classification (auto-generated from source if provided)',
                 },
                 description: {
                     type: 'string',
-                    description: 'Project description',
+                    description: 'Project description (auto-generated from source if provided)',
+                },
+                useSmartAssist: {
+                    type: 'boolean',
+                    description: 'Enable smart assistance for auto-generating metadata (default: true if configured)',
                 },
                 contextDirectory: {
                     type: 'string',
@@ -629,11 +655,36 @@ const tools: Tool[] = [
         },
     },
     {
+        name: 'protokoll_suggest_project_metadata',
+        description:
+            'Generate project metadata suggestions without creating the project. ' +
+            'Returns sounds_like (phonetic variants for transcription), explicit_phrases (content-matching trigger phrases), ' +
+            'topics and description from source content. Useful for interactive workflows where ' +
+            'AI assistant presents suggestions for user review before creating the project.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                name: {
+                    type: 'string',
+                    description: 'Project name for generating sounds_like and trigger phrases',
+                },
+                source: {
+                    type: 'string',
+                    description: 'URL or file path to analyze for topics, description, and suggested name',
+                },
+                contextDirectory: {
+                    type: 'string',
+                    description: 'Path to the .protokoll context directory',
+                },
+            },
+        },
+    },
+    {
         name: 'protokoll_add_term',
         description:
             'Add a new technical term or abbreviation to the context. ' +
-            'Terms help Protokoll correctly transcribe domain-specific vocabulary. ' +
-            'Include sounds_like variants for phonetic matching.',
+            'Terms help Protokoll correctly transcribe domain-specific vocabulary and enable topic-based routing. ' +
+            'Include sounds_like variants for phonetic matching, description for clarity, and topics for classification.',
         inputSchema: {
             type: 'object',
             properties: {
@@ -651,17 +702,26 @@ const tools: Tool[] = [
                 },
                 domain: {
                     type: 'string',
-                    description: 'Domain or field (e.g., engineering, finance)',
+                    description: 'Domain or field (e.g., devops, engineering, security, finance)',
+                },
+                description: {
+                    type: 'string',
+                    description: 'Clear explanation of what the term means',
                 },
                 sounds_like: {
                     type: 'array',
                     items: { type: 'string' },
                     description: 'Phonetic variants (how Whisper might mishear the term)',
                 },
+                topics: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Related topic keywords for classification (e.g., containers, orchestration, devops)',
+                },
                 projects: {
                     type: 'array',
                     items: { type: 'string' },
-                    description: 'Associated project IDs',
+                    description: 'Associated project IDs where this term is relevant',
                 },
                 contextDirectory: {
                     type: 'string',
@@ -669,6 +729,114 @@ const tools: Tool[] = [
                 },
             },
             required: ['term'],
+        },
+    },
+    {
+        name: 'protokoll_suggest_term_metadata',
+        description:
+            'Generate term metadata suggestions without creating the term. ' +
+            'Returns sounds_like (phonetic variants), description, topics, domain, and suggested projects. ' +
+            'Useful for interactive workflows where AI assistant presents suggestions for user review before creating the term.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                term: {
+                    type: 'string',
+                    description: 'Term name for generating metadata',
+                },
+                source: {
+                    type: 'string',
+                    description: 'URL or file path to analyze for richer suggestions (optional)',
+                },
+                expansion: {
+                    type: 'string',
+                    description: 'Full expansion if acronym (helps with analysis)',
+                },
+                contextDirectory: {
+                    type: 'string',
+                    description: 'Path to the .protokoll context directory',
+                },
+            },
+            required: ['term'],
+        },
+    },
+    {
+        name: 'protokoll_merge_terms',
+        description:
+            'Merge two duplicate terms into one. Combines metadata (sounds_like, topics, projects) and deletes the source term.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                sourceId: {
+                    type: 'string',
+                    description: 'ID of the term to merge from (will be deleted)',
+                },
+                targetId: {
+                    type: 'string',
+                    description: 'ID of the term to merge into (will be kept and updated)',
+                },
+                contextDirectory: {
+                    type: 'string',
+                    description: 'Path to the .protokoll context directory',
+                },
+            },
+            required: ['sourceId', 'targetId'],
+        },
+    },
+    {
+        name: 'protokoll_update_term',
+        description:
+            'Update an existing term by regenerating metadata from a source URL or file. ' +
+            'Fetches content and uses LLM to regenerate description, topics, domain, and sounds_like.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                id: {
+                    type: 'string',
+                    description: 'Term ID to update',
+                },
+                source: {
+                    type: 'string',
+                    description: 'URL or file path to analyze for regenerating metadata',
+                },
+                expansion: {
+                    type: 'string',
+                    description: 'Update expansion (optional)',
+                },
+                contextDirectory: {
+                    type: 'string',
+                    description: 'Path to the .protokoll context directory',
+                },
+            },
+            required: ['id', 'source'],
+        },
+    },
+    {
+        name: 'protokoll_update_project',
+        description:
+            'Update an existing project by regenerating metadata from a source URL or file. ' +
+            'Fetches content and uses LLM to regenerate sounds_like, explicit_phrases, topics, and description.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                id: {
+                    type: 'string',
+                    description: 'Project ID to update',
+                },
+                source: {
+                    type: 'string',
+                    description: 'URL or file path to analyze for regenerating metadata',
+                },
+                name: {
+                    type: 'string',
+                    description: 'Update project name (optional)',
+                },
+                contextDirectory: {
+                    type: 'string',
+                    description: 'Path to the .protokoll context directory',
+                },
+            },
+            required: ['id', 'source'],
         },
     },
     {
@@ -813,6 +981,52 @@ const tools: Tool[] = [
         },
     },
     {
+        name: 'protokoll_list_transcripts',
+        description:
+            'List transcripts in a directory with pagination, filtering, and search. ' +
+            'Returns transcript metadata including date, time, title, and file path. ' +
+            'Supports sorting by date (default), filename, or title. ' +
+            'Can filter by date range and search within transcript content.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                directory: {
+                    type: 'string',
+                    description: 'Directory to search for transcripts (searches recursively)',
+                },
+                limit: {
+                    type: 'number',
+                    description: 'Maximum number of results to return (default: 50)',
+                    default: 50,
+                },
+                offset: {
+                    type: 'number',
+                    description: 'Number of results to skip for pagination (default: 0)',
+                    default: 0,
+                },
+                sortBy: {
+                    type: 'string',
+                    enum: ['date', 'filename', 'title'],
+                    description: 'Field to sort by (default: date)',
+                    default: 'date',
+                },
+                startDate: {
+                    type: 'string',
+                    description: 'Filter transcripts from this date onwards (YYYY-MM-DD format)',
+                },
+                endDate: {
+                    type: 'string',
+                    description: 'Filter transcripts up to this date (YYYY-MM-DD format)',
+                },
+                search: {
+                    type: 'string',
+                    description: 'Search for transcripts containing this text (searches filename and content)',
+                },
+            },
+            required: ['directory'],
+        },
+    },
+    {
         name: 'protokoll_provide_feedback',
         description:
             'Provide natural language feedback to correct a transcript. ' +
@@ -879,6 +1093,7 @@ const formatEntity = (entity: Entity): Record<string, unknown> => {
         if (project.description) result.description = project.description;
         if (project.classification) result.classification = project.classification;
         if (project.routing) result.routing = project.routing;
+        if (project.sounds_like) result.sounds_like = project.sounds_like;
         result.active = project.active !== false;
     } else if (entity.type === 'term') {
         const term = entity as Term;
@@ -1294,12 +1509,15 @@ async function handleAddPerson(args: {
 async function handleAddProject(args: {
     name: string;
     id?: string;
+    source?: string;
     destination?: string;
     structure?: 'none' | 'year' | 'month' | 'day';
     contextType?: 'work' | 'personal' | 'mixed';
     explicit_phrases?: string[];
+    sounds_like?: string[];
     topics?: string[];
     description?: string;
+    useSmartAssist?: boolean;
     contextDirectory?: string;
 }) {
     const context = await Context.create({
@@ -1316,21 +1534,67 @@ async function handleAddProject(args: {
         throw new Error(`Project with ID "${id}" already exists`);
     }
 
+    // Smart assistance integration
+    const smartConfig = context.getSmartAssistanceConfig();
+    const useSmartAssist = args.useSmartAssist !== false && smartConfig.enabled;
+
+    let soundsLike = args.sounds_like || [];
+    let triggerPhrases = args.explicit_phrases || [];
+    let topics = args.topics || [];
+    let description = args.description;
+    let suggestedName: string | undefined;
+
+    if (useSmartAssist) {
+        const assist = ProjectAssist.create(smartConfig);
+
+        // Analyze source if provided
+        if (args.source) {
+            const suggestions = await assist.analyzeSource(args.source, args.name);
+
+            // Only use suggestions for fields not explicitly provided (undefined, not just empty)
+            if (args.sounds_like === undefined) {
+                soundsLike = suggestions.soundsLike;
+            }
+            if (args.explicit_phrases === undefined) {
+                triggerPhrases = suggestions.triggerPhrases;
+            }
+            if (args.topics === undefined && suggestions.topics) {
+                topics = suggestions.topics;
+            }
+            if (!args.description && suggestions.description) {
+                description = suggestions.description;
+            }
+            if (suggestions.name) {
+                suggestedName = suggestions.name;
+            }
+        } else {
+            // Generate sounds_like and trigger phrases from name even without source
+            if (args.sounds_like === undefined) {
+                soundsLike = await assist.generateSoundsLike(args.name);
+            }
+            if (args.explicit_phrases === undefined) {
+                triggerPhrases = await assist.generateTriggerPhrases(args.name);
+            }
+        }
+    }
+
     const project: Project = {
         id,
         name: args.name,
         type: 'project',
         classification: {
             context_type: args.contextType || 'work',
-            explicit_phrases: args.explicit_phrases || [],
-            ...(args.topics && { topics: args.topics }),
+            explicit_phrases: triggerPhrases,
+            ...(topics.length && { topics }),
         },
         routing: {
             ...(args.destination && { destination: args.destination }),
             structure: args.structure || 'month',
             filename_options: ['date', 'time', 'subject'],
         },
-        ...(args.description && { description: args.description }),
+        // Include sounds_like if explicitly provided (even if empty) or if generated
+        ...((args.sounds_like !== undefined || soundsLike.length) && { sounds_like: soundsLike }),
+        ...(description && { description }),
         active: true,
     };
 
@@ -1340,6 +1604,14 @@ async function handleAddProject(args: {
         success: true,
         message: `Project "${args.name}" added successfully`,
         entity: formatEntity(project),
+        smartAssistUsed: useSmartAssist,
+        ...(suggestedName && { suggestedName }),
+        generated: {
+            soundsLike,
+            triggerPhrases,
+            topics,
+            description,
+        },
     };
 }
 
@@ -1348,7 +1620,9 @@ async function handleAddTerm(args: {
     id?: string;
     expansion?: string;
     domain?: string;
+    description?: string;
     sounds_like?: string[];
+    topics?: string[];
     projects?: string[];
     contextDirectory?: string;
 }) {
@@ -1372,7 +1646,9 @@ async function handleAddTerm(args: {
         type: 'term',
         ...(args.expansion && { expansion: args.expansion }),
         ...(args.domain && { domain: args.domain }),
+        ...(args.description && { description: args.description }),
         ...(args.sounds_like && { sounds_like: args.sounds_like }),
+        ...(args.topics && { topics: args.topics }),
         ...(args.projects && { projects: args.projects }),
     };
 
@@ -1573,6 +1849,57 @@ async function handleReadTranscript(args: { transcriptPath: string }) {
     };
 }
 
+async function handleListTranscripts(args: {
+    directory: string;
+    limit?: number;
+    offset?: number;
+    sortBy?: 'date' | 'filename' | 'title';
+    startDate?: string;
+    endDate?: string;
+    search?: string;
+}) {
+    const directory = resolve(args.directory);
+
+    if (!await fileExists(directory)) {
+        throw new Error(`Directory not found: ${directory}`);
+    }
+
+    const result = await listTranscripts({
+        directory,
+        limit: args.limit ?? 50,
+        offset: args.offset ?? 0,
+        sortBy: args.sortBy ?? 'date',
+        startDate: args.startDate,
+        endDate: args.endDate,
+        search: args.search,
+    });
+
+    return {
+        directory,
+        transcripts: result.transcripts.map(t => ({
+            path: t.path,
+            filename: t.filename,
+            date: t.date,
+            time: t.time,
+            title: t.title,
+            hasRawTranscript: t.hasRawTranscript,
+        })),
+        pagination: {
+            total: result.total,
+            limit: result.limit,
+            offset: result.offset,
+            hasMore: result.hasMore,
+            nextOffset: result.hasMore ? result.offset + result.limit : null,
+        },
+        filters: {
+            sortBy: args.sortBy ?? 'date',
+            startDate: args.startDate,
+            endDate: args.endDate,
+            search: args.search,
+        },
+    };
+}
+
 async function handleProvideFeedback(args: {
     transcriptPath: string;
     feedback: string;
@@ -1620,6 +1947,335 @@ async function handleProvideFeedback(args: {
     };
 }
 
+async function handleSuggestProjectMetadata(args: {
+    name?: string;
+    source?: string;
+    contextDirectory?: string;
+}) {
+    const context = await Context.create({
+        startingDir: args.contextDirectory || process.cwd(),
+    });
+
+    const smartConfig = context.getSmartAssistanceConfig();
+
+    if (!smartConfig.enabled) {
+        throw new Error('Smart assistance is disabled in configuration.');
+    }
+
+    const assist = ProjectAssist.create(smartConfig);
+
+    const result: {
+        soundsLike?: string[];
+        triggerPhrases?: string[];
+        topics?: string[];
+        description?: string;
+        suggestedName?: string;
+    } = {};
+
+    // Generate sounds_like and trigger phrases if name provided
+    if (args.name) {
+        // Generate in parallel for efficiency
+        const [soundsLike, triggerPhrases] = await Promise.all([
+            assist.generateSoundsLike(args.name),
+            assist.generateTriggerPhrases(args.name),
+        ]);
+        result.soundsLike = soundsLike;
+        result.triggerPhrases = triggerPhrases;
+    }
+
+    // Analyze source if provided
+    if (args.source) {
+        const suggestions = await assist.analyzeSource(args.source, args.name);
+
+        if (!args.name && suggestions.name) {
+            result.suggestedName = suggestions.name;
+            result.soundsLike = suggestions.soundsLike;
+            result.triggerPhrases = suggestions.triggerPhrases;
+        }
+        result.topics = suggestions.topics;
+        result.description = suggestions.description;
+    }
+
+    return {
+        success: true,
+        data: result,
+    };
+}
+
+async function handleSuggestTermMetadata(args: {
+    term: string;
+    source?: string;
+    expansion?: string;
+    contextDirectory?: string;
+}) {
+    const context = await Context.create({
+        startingDir: args.contextDirectory || process.cwd(),
+    });
+
+    const smartConfig = context.getSmartAssistanceConfig();
+
+    if (!smartConfig.enabled || smartConfig.termsEnabled === false) {
+        throw new Error('Term smart assistance is disabled in configuration.');
+    }
+
+    const termAssist = TermAssist.create(smartConfig);
+    const termContextHelper = TermContext.create(context);
+    const contentFetcher = ContentFetcher.create();
+
+    // Gather internal context
+    const internalContext = termContextHelper.gatherInternalContext(args.term, args.expansion);
+
+    // Fetch external content if source provided
+    let fetchResult: ContentFetcher.FetchResult | undefined;
+    if (args.source) {
+        fetchResult = await contentFetcher.fetch(args.source);
+    }
+
+    // Build analysis context
+    const analysisContext = TermContext.buildAnalysisContext(
+        args.term,
+        args.expansion,
+        fetchResult,
+        internalContext
+    );
+
+    // Generate suggestions
+    const suggestions = await termAssist.generateAll(args.term, analysisContext);
+
+    // Find related projects based on generated topics
+    let suggestedProjects: string[] = [];
+    if (suggestions.topics && suggestions.topics.length > 0) {
+        const projects = termContextHelper.findProjectsByTopic(suggestions.topics);
+        suggestedProjects = projects.map(p => p.id);
+    }
+
+    return {
+        success: true,
+        data: {
+            soundsLike: suggestions.soundsLike,
+            description: suggestions.description,
+            topics: suggestions.topics,
+            domain: suggestions.domain,
+            suggestedProjects,
+        },
+    };
+}
+
+/* c8 ignore start */
+async function handleMergeTerms(args: {
+    sourceId: string;
+    targetId: string;
+    contextDirectory?: string;
+}) {
+    const context = await Context.create({
+        startingDir: args.contextDirectory || process.cwd(),
+    });
+
+    if (!context.hasContext()) {
+        throw new Error('No .protokoll directory found. Initialize context first.');
+    }
+
+    const sourceTerm = context.getTerm(args.sourceId);
+    const targetTerm = context.getTerm(args.targetId);
+
+    if (!sourceTerm) {
+        throw new Error(`Source term "${args.sourceId}" not found`);
+    }
+
+    if (!targetTerm) {
+        throw new Error(`Target term "${args.targetId}" not found`);
+    }
+
+    // Merge metadata
+    const mergedTerm: Term = {
+        ...targetTerm,
+        sounds_like: [
+            ...(targetTerm.sounds_like || []),
+            ...(sourceTerm.sounds_like || []),
+        ].filter((v, i, arr) => arr.indexOf(v) === i),
+        topics: [
+            ...(targetTerm.topics || []),
+            ...(sourceTerm.topics || []),
+        ].filter((v, i, arr) => arr.indexOf(v) === i),
+        projects: [
+            ...(targetTerm.projects || []),
+            ...(sourceTerm.projects || []),
+        ].filter((v, i, arr) => arr.indexOf(v) === i),
+        description: targetTerm.description || sourceTerm.description,
+        domain: targetTerm.domain || sourceTerm.domain,
+        expansion: targetTerm.expansion || sourceTerm.expansion,
+        updatedAt: new Date(),
+    };
+
+    // Remove empty arrays
+    if (mergedTerm.sounds_like && mergedTerm.sounds_like.length === 0) {
+        delete mergedTerm.sounds_like;
+    }
+    if (mergedTerm.topics && mergedTerm.topics.length === 0) {
+        delete mergedTerm.topics;
+    }
+    if (mergedTerm.projects && mergedTerm.projects.length === 0) {
+        delete mergedTerm.projects;
+    }
+
+    // Save merged term and delete source
+    await context.saveEntity(mergedTerm);
+    await context.deleteEntity(sourceTerm);
+
+    return {
+        success: true,
+        message: `Merged "${sourceTerm.name}" into "${targetTerm.name}"`,
+        mergedTerm: formatEntity(mergedTerm),
+        deletedTerm: args.sourceId,
+    };
+}
+/* c8 ignore stop */
+
+/* c8 ignore start */
+async function handleUpdateTerm(args: {
+    id: string;
+    source: string;
+    expansion?: string;
+    contextDirectory?: string;
+}) {
+    const context = await Context.create({
+        startingDir: args.contextDirectory || process.cwd(),
+    });
+
+    if (!context.hasContext()) {
+        throw new Error('No .protokoll directory found. Initialize context first.');
+    }
+
+    const existingTerm = context.getTerm(args.id);
+    if (!existingTerm) {
+        throw new Error(`Term "${args.id}" not found`);
+    }
+
+    const smartConfig = context.getSmartAssistanceConfig();
+    if (!smartConfig.enabled || smartConfig.termsEnabled === false) {
+        throw new Error('Term smart assistance is disabled in configuration.');
+    }
+
+    // Fetch content from source
+    const contentFetcher = ContentFetcher.create();
+    const fetchResult = await contentFetcher.fetch(args.source);
+
+    if (!fetchResult.success) {
+        throw new Error(`Failed to fetch source: ${fetchResult.error}`);
+    }
+
+    // Gather context and generate suggestions
+    const termAssist = TermAssist.create(smartConfig);
+    const termContextHelper = TermContext.create(context);
+    
+    const internalContext = termContextHelper.gatherInternalContext(
+        existingTerm.name,
+        args.expansion || existingTerm.expansion
+    );
+    
+    const analysisContext = TermContext.buildAnalysisContext(
+        existingTerm.name,
+        args.expansion || existingTerm.expansion,
+        fetchResult,
+        internalContext
+    );
+
+    const suggestions = await termAssist.generateAll(existingTerm.name, analysisContext);
+
+    // Update term with regenerated metadata
+    const updatedTerm: Term = {
+        ...existingTerm,
+        ...(args.expansion && { expansion: args.expansion }),
+        ...(suggestions.description && { description: suggestions.description }),
+        ...(suggestions.domain && { domain: suggestions.domain }),
+        ...(suggestions.soundsLike.length > 0 && { sounds_like: suggestions.soundsLike }),
+        ...(suggestions.topics.length > 0 && { topics: suggestions.topics }),
+        updatedAt: new Date(),
+    };
+
+    // Suggest projects based on topics
+    let suggestedProjects: string[] = [];
+    if (suggestions.topics.length > 0) {
+        const projects = termContextHelper.findProjectsByTopic(suggestions.topics);
+        suggestedProjects = projects.map(p => p.id);
+    }
+
+    await context.saveEntity(updatedTerm);
+
+    return {
+        success: true,
+        message: `Updated term "${existingTerm.name}" from source`,
+        term: formatEntity(updatedTerm),
+        generated: {
+            soundsLike: suggestions.soundsLike,
+            description: suggestions.description,
+            topics: suggestions.topics,
+            domain: suggestions.domain,
+            suggestedProjects,
+        },
+    };
+}
+
+async function handleUpdateProject(args: {
+    id: string;
+    source: string;
+    name?: string;
+    contextDirectory?: string;
+}) {
+    const context = await Context.create({
+        startingDir: args.contextDirectory || process.cwd(),
+    });
+
+    if (!context.hasContext()) {
+        throw new Error('No .protokoll directory found. Initialize context first.');
+    }
+
+    const existingProject = context.getProject(args.id);
+    if (!existingProject) {
+        throw new Error(`Project "${args.id}" not found`);
+    }
+
+    const smartConfig = context.getSmartAssistanceConfig();
+    if (!smartConfig.enabled) {
+        throw new Error('Smart assistance is disabled in configuration.');
+    }
+
+    const assist = ProjectAssist.create(smartConfig);
+    const projectName = args.name || existingProject.name;
+
+    // Analyze source for new metadata
+    const suggestions = await assist.analyzeSource(args.source, projectName);
+
+    // Update project with regenerated metadata
+    const updatedProject: Project = {
+        ...existingProject,
+        ...(args.name && { name: args.name }),
+        ...(suggestions.description && { description: suggestions.description }),
+        ...(suggestions.soundsLike.length > 0 && { sounds_like: suggestions.soundsLike }),
+        classification: {
+            ...existingProject.classification,
+            ...(suggestions.triggerPhrases.length > 0 && { explicit_phrases: suggestions.triggerPhrases }),
+            ...(suggestions.topics && suggestions.topics.length > 0 && { topics: suggestions.topics }),
+        },
+        updatedAt: new Date(),
+    };
+
+    await context.saveEntity(updatedProject);
+
+    return {
+        success: true,
+        message: `Updated project "${existingProject.name}" from source`,
+        project: formatEntity(updatedProject),
+        generated: {
+            soundsLike: suggestions.soundsLike,
+            triggerPhrases: suggestions.triggerPhrases,
+            topics: suggestions.topics,
+            description: suggestions.description,
+        },
+    };
+}
+/* c8 ignore stop */
+
 // ============================================================================
 // Server Setup
 // ============================================================================
@@ -1628,7 +2284,7 @@ async function main() {
     const server = new Server(
         {
             name: 'protokoll',
-            version: '0.0.1',
+            version: '0.1.0',
             description:
                 'Intelligent audio transcription with context-aware enhancement. ' +
                 'Process audio files through a pipeline that transcribes with Whisper, ' +
@@ -1639,6 +2295,13 @@ async function main() {
         {
             capabilities: {
                 tools: {},
+                resources: {
+                    subscribe: false,
+                    listChanged: true,
+                },
+                prompts: {
+                    listChanged: false,
+                },
             },
         }
     );
@@ -1647,6 +2310,41 @@ async function main() {
     server.setRequestHandler(ListToolsRequestSchema, async () => ({
         tools,
     }));
+
+    // List available resources
+    server.setRequestHandler(ListResourcesRequestSchema, async () => {
+        return Resources.handleListResources();
+    });
+
+    // Read a resource
+    server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+        const { uri } = request.params;
+        
+        try {
+            const contents = await Resources.handleReadResource(uri);
+            return { contents: [contents] };
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            throw new Error(`Failed to read resource ${uri}: ${message}`);
+        }
+    });
+
+    // List available prompts
+    server.setRequestHandler(ListPromptsRequestSchema, async () => {
+        return Prompts.handleListPrompts();
+    });
+
+    // Get a prompt with arguments
+    server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+        const { name, arguments: args } = request.params;
+        
+        try {
+            return Prompts.handleGetPrompt(name, args || {});
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            throw new Error(`Failed to get prompt ${name}: ${message}`);
+        }
+    });
 
     // Handle tool calls
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -1713,6 +2411,21 @@ async function main() {
                 case 'protokoll_delete_entity':
                     result = await handleDeleteEntity(args as Parameters<typeof handleDeleteEntity>[0]);
                     break;
+                case 'protokoll_suggest_project_metadata':
+                    result = await handleSuggestProjectMetadata(args as Parameters<typeof handleSuggestProjectMetadata>[0]);
+                    break;
+                case 'protokoll_suggest_term_metadata':
+                    result = await handleSuggestTermMetadata(args as Parameters<typeof handleSuggestTermMetadata>[0]);
+                    break;
+                case 'protokoll_merge_terms':
+                    result = await handleMergeTerms(args as Parameters<typeof handleMergeTerms>[0]);
+                    break;
+                case 'protokoll_update_term':
+                    result = await handleUpdateTerm(args as Parameters<typeof handleUpdateTerm>[0]);
+                    break;
+                case 'protokoll_update_project':
+                    result = await handleUpdateProject(args as Parameters<typeof handleUpdateProject>[0]);
+                    break;
 
                 // Transcript Actions
                 case 'protokoll_edit_transcript':
@@ -1723,6 +2436,9 @@ async function main() {
                     break;
                 case 'protokoll_read_transcript':
                     result = await handleReadTranscript(args as Parameters<typeof handleReadTranscript>[0]);
+                    break;
+                case 'protokoll_list_transcripts':
+                    result = await handleListTranscripts(args as Parameters<typeof handleListTranscripts>[0]);
                     break;
                 case 'protokoll_provide_feedback':
                     result = await handleProvideFeedback(args as Parameters<typeof handleProvideFeedback>[0]);
@@ -1750,10 +2466,17 @@ async function main() {
     // Start server
     const transport = new StdioServerTransport();
     await server.connect(transport);
+    
+    // Keep the process alive - MCP servers should run indefinitely
+    // The StdioServerTransport will handle stdin/stdout until the connection closes
+    await new Promise(() => {
+        // This promise never resolves, keeping the event loop alive
+        // The process will only exit when killed or stdin closes
+    });
 }
 
 // Only run main when this is the entry point, not when imported for testing
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
     main().catch((error) => {
         // eslint-disable-next-line no-console
         console.error(error);

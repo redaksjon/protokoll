@@ -29,6 +29,32 @@ export interface ClarificationResponse {
     response: string;
     shouldRemember: boolean;
     additionalInfo?: Record<string, unknown>;
+    skipRestOfFile?: boolean;  // User wants to skip remaining prompts for this file
+}
+
+/**
+ * Tracks processing of a single file
+ */
+export interface FileProcessing {
+    inputPath: string;
+    outputPath?: string;
+    movedTo?: string;
+    promptsAnswered: number;
+    skipped: boolean;
+    startedAt: Date;
+    completedAt?: Date;
+}
+
+/**
+ * Tracks entities added/updated during session
+ */
+export interface SessionChanges {
+    termsAdded: string[];
+    termsUpdated: string[];
+    projectsAdded: string[];
+    projectsUpdated: string[];
+    peopleAdded: string[];
+    aliasesAdded: Array<{ alias: string; linkedTo: string }>;
 }
 
 export interface InteractiveSession {
@@ -36,6 +62,16 @@ export interface InteractiveSession {
     responses: ClarificationResponse[];
     startedAt: Date;
     completedAt?: Date;
+    
+    // File tracking
+    currentFile?: string;
+    filesProcessed: FileProcessing[];
+    
+    // Entity changes
+    changes: SessionChanges;
+    
+    // Session control
+    shouldStop: boolean;  // User requested to stop mid-session
 }
 
 export interface InteractiveConfig {
@@ -85,8 +121,10 @@ export interface NewProjectWizardResult {
     projectName?: string;
     destination?: string;
     description?: string;
-    // For 'link' (link term to existing project)
+    // For 'link' (link this variation to existing term/project)
     linkedProjectIndex?: number;
+    linkedTermName?: string;      // Name of existing term this is an alias for
+    aliasName?: string;           // The new variant/alias to add to the term
     termDescription?: string;
     // For 'term' (create a new term entity)
     termName?: string;

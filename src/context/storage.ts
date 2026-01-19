@@ -159,11 +159,38 @@ export const create = (): StorageInstance => {
     const search = (query: string): Entity[] => {
         const normalizedQuery = query.toLowerCase();
         const results: Entity[] = [];
+        const seen = new Set<string>(); // Track by ID to avoid duplicates
     
         for (const entityMap of entities.values()) {
             for (const entity of entityMap.values()) {
+                let matched = false;
+                
+                // Check name
                 if (entity.name.toLowerCase().includes(normalizedQuery)) {
+                    matched = true;
+                }
+                
+                // Also check sounds_like field
+                if (!matched) {
+                    const entityWithSoundsLike = entity as Entity & { sounds_like?: string[] };
+                    const variants = entityWithSoundsLike.sounds_like;
+                    if (variants?.some(v => v.toLowerCase().includes(normalizedQuery))) {
+                        matched = true;
+                    }
+                }
+                
+                // Also check exact match in sounds_like (for full phrase matching)
+                if (!matched) {
+                    const entityWithSoundsLike = entity as Entity & { sounds_like?: string[] };
+                    const variants = entityWithSoundsLike.sounds_like;
+                    if (variants?.some(v => v.toLowerCase() === normalizedQuery)) {
+                        matched = true;
+                    }
+                }
+                
+                if (matched && !seen.has(entity.id)) {
                     results.push(entity);
+                    seen.add(entity.id);
                 }
             }
         }

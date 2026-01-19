@@ -125,14 +125,16 @@ sounds_like:
                             <div className="file-card">
                                 <div className="file-header">
                                     <span className="file-icon file-icon-text">R</span>
-                                    <span className="file-name">projects/work.yaml</span>
+                                    <span className="file-name">projects/protokoll.yaml</span>
                                 </div>
-                                <pre className="file-content">{`id: work
+                                <pre className="file-content">{`id: protokoll
 destination: ~/work/notes
-triggers:
-  - "work meeting"
-  - "standup"
-  - "sprint"`}</pre>
+explicit_phrases:
+  - "work on protokoll"
+  - "protokoll project"
+sounds_like:
+  - "protocol"
+  - "pro to call"`}</pre>
                             </div>
                             <div className="file-card">
                                 <div className="file-header">
@@ -294,6 +296,22 @@ sounds_like:
                                 <div className="code-line">protokoll context search "acme"</div>
                             </div>
                         </div>
+                        <div className="command-group">
+                            <h4>Smart Project Creation</h4>
+                            <div className="code-block">
+                                <div className="code-line"><span className="code-comment"># AI-assisted project creation</span></div>
+                                <div className="code-line">protokoll project add --smart</div>
+                                <div className="code-line"></div>
+                                <div className="code-line"><span className="code-comment"># Non-interactive: trust AI suggestions</span></div>
+                                <div className="code-line">protokoll project add --name "My Project" --yes</div>
+                                <div className="code-line"></div>
+                                <div className="code-line"><span className="code-comment"># From GitHub repo</span></div>
+                                <div className="code-line">protokoll project add https://github.com/org/repo</div>
+                                <div className="code-line"></div>
+                                <div className="code-line"><span className="code-comment"># From local file</span></div>
+                                <div className="code-line">protokoll project add ./README.md</div>
+                            </div>
+                        </div>
                     </div>
 
                     <div className="terminal-demo" style={{marginTop: '2rem'}}>
@@ -331,6 +349,103 @@ sounds_like:
                             <div className="terminal-line">
                                 <span className="terminal-success">Person "Priya Sharma" saved successfully.</span>
                             </div>
+                        </div>
+                    </div>
+
+                    <div className="terminal-demo" style={{marginTop: '2rem'}}>
+                        <div className="terminal-header">
+                            <span className="terminal-dot red"></span>
+                            <span className="terminal-dot yellow"></span>
+                            <span className="terminal-dot green"></span>
+                            <span className="terminal-title">protokoll project add https://github.com/org/repo</span>
+                        </div>
+                        <div className="terminal-body">
+                            <div className="terminal-line">
+                                <span className="terminal-highlight">[Add New Project]</span>
+                            </div>
+                            <div className="terminal-line"></div>
+                            <div className="terminal-line">
+                                <span className="terminal-dim">[Fetching content from source...]</span>
+                            </div>
+                            <div className="terminal-line">
+                                <span className="terminal-dim">Found: github - org/repo</span>
+                            </div>
+                            <div className="terminal-line"></div>
+                            <div className="terminal-line">
+                                <span className="terminal-dim">[Analyzing content...]</span>
+                            </div>
+                            <div className="terminal-line"></div>
+                            <div className="terminal-line">
+                                <span className="terminal-dim">Project name: </span>
+                                <span className="terminal-user">Protokoll</span>
+                            </div>
+                            <div className="terminal-line">
+                                <span className="terminal-dim">ID (Enter for "protokoll"): </span>
+                            </div>
+                            <div className="terminal-line"></div>
+                            <div className="terminal-line">
+                                <span className="terminal-highlight">[Generating phonetic variants...]</span>
+                            </div>
+                            <div className="terminal-line indent">
+                                <span className="terminal-dim">  (Phonetic variants help when Whisper mishears the project name)</span>
+                            </div>
+                            <div className="terminal-line">
+                                <span className="terminal-dim">Sounds like (Enter for suggested, or edit):</span>
+                            </div>
+                            <div className="terminal-line indent">
+                                <span className="terminal-ai">  protocol,pro to call,proto call,protocolle,...</span>
+                            </div>
+                            <div className="terminal-line">
+                                <span className="terminal-user">&gt; </span>
+                            </div>
+                            <div className="terminal-line"></div>
+                            <div className="terminal-line">
+                                <span className="terminal-highlight">[Generating trigger phrases...]</span>
+                            </div>
+                            <div className="terminal-line indent">
+                                <span className="terminal-dim">  (Trigger phrases indicate content belongs to this project)</span>
+                            </div>
+                            <div className="terminal-line">
+                                <span className="terminal-dim">Trigger phrases (Enter for suggested, or edit):</span>
+                            </div>
+                            <div className="terminal-line indent">
+                                <span className="terminal-ai">  protokoll,working on protokoll,protokoll meeting,...</span>
+                            </div>
+                            <div className="terminal-line">
+                                <span className="terminal-user">&gt; </span>
+                            </div>
+                            <div className="terminal-line"></div>
+                            <div className="terminal-line">
+                                <span className="terminal-dim">Topic keywords (Enter for suggested, or edit):</span>
+                            </div>
+                            <div className="terminal-line indent">
+                                <span className="terminal-ai">  typescript,transcription,audio,automation,...</span>
+                            </div>
+                            <div className="terminal-line">
+                                <span className="terminal-user">&gt; </span>
+                            </div>
+                            <div className="terminal-line"></div>
+                            <div className="terminal-line">
+                                <span className="terminal-success">Project "Protokoll" saved successfully.</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="context-features" style={{marginTop: '2rem'}}>
+                        <div className="context-feature">
+                            <div className="feature-number">T</div>
+                            <h3>Trigger Phrases</h3>
+                            <p>High-confidence content matching. Routes transcripts when these phrases appear in your audio.</p>
+                        </div>
+                        <div className="context-feature">
+                            <div className="feature-number">S</div>
+                            <h3>Sounds Like</h3>
+                            <p>Phonetic variants for when Whisper mishears the project name itself. Great for Norwegian names!</p>
+                        </div>
+                        <div className="context-feature">
+                            <div className="feature-number">K</div>
+                            <h3>Topic Keywords</h3>
+                            <p>Lower-confidence theme associations. Helps with classification but shouldn't be relied on alone.</p>
                         </div>
                     </div>
                 </div>
@@ -550,6 +665,118 @@ sounds_like:
                         <div className="routing-feature">
                             <h4>Flexible Structure</h4>
                             <p>Organize by year, month, day, or flat. Choose what works for you.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            {/* Proactive Phonetic with Observasjon */}
+            <section className="proactive-section">
+                <div className="container">
+                    <h2 className="section-title">Proactive Phonetic Enhancement</h2>
+                    <p className="section-subtitle">
+                        Protokoll and Observasjon work together for the most accurate transcriptions possible.
+                        <br/>Your project data fixes names <strong>during</strong> transcription, not after.
+                    </p>
+                    
+                    <div className="proactive-hero">
+                        <div className="proactive-flow">
+                            <div className="proactive-step">
+                                <div className="proactive-number">1</div>
+                                <h4>Define in Protokoll</h4>
+                                <div className="code-block">
+                                    <div className="code-line">protokoll project add</div>
+                                    <div className="code-line"><span className="terminal-dim">Name: </span>Observasjon</div>
+                                    <div className="code-line"><span className="terminal-dim">Sounds like: </span>observation, observashun</div>
+                                </div>
+                            </div>
+                            <div className="proactive-arrow">→</div>
+                            <div className="proactive-step">
+                                <div className="proactive-number">2</div>
+                                <h4>Observasjon Detects</h4>
+                                <p className="proactive-detail">
+                                    Automatically finds projects in<br/>
+                                    <code>~/.protokoll/context/projects/</code>
+                                </p>
+                            </div>
+                            <div className="proactive-arrow">→</div>
+                            <div className="proactive-step">
+                                <div className="proactive-number">3</div>
+                                <h4>Whisper Gets It Right</h4>
+                                <p className="proactive-detail highlight">
+                                    "Observasjon" ✓<br/>
+                                    <span className="crossed">not "observation" ✗</span>
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div className="proactive-benefits">
+                        <div className="benefit-card">
+                            <div className="benefit-icon">A</div>
+                            <h4>Better Accuracy</h4>
+                            <p>Project names spelled correctly from the start</p>
+                        </div>
+                        <div className="benefit-card">
+                            <div className="benefit-icon">$</div>
+                            <h4>Lower Cost</h4>
+                            <p>~$0.0045 per transcription for 30 projects<br/>Eliminates correction passes</p>
+                        </div>
+                        <div className="benefit-card">
+                            <div className="benefit-icon">C</div>
+                            <h4>Zero Configuration</h4>
+                            <p>Works automatically if you use both tools<br/>Enabled by default</p>
+                        </div>
+                        <div className="benefit-card">
+                            <div className="benefit-icon">S</div>
+                            <h4>Smart Defaults</h4>
+                            <p>Auto-enabled for ≤50 projects<br/>Override with CLI flags</p>
+                        </div>
+                    </div>
+                    
+                    <div className="proactive-example">
+                        <h3>How It Works</h3>
+                        <div className="example-grid">
+                            <div className="example-step">
+                                <h4>In Protokoll</h4>
+                                <div className="code-block">
+                                    <div className="code-line"># ~/.protokoll/context/projects/observasjon.yaml</div>
+                                    <div className="code-line">id: observasjon</div>
+                                    <div className="code-line">name: Observasjon</div>
+                                    <div className="code-line">sounds_like:</div>
+                                    <div className="code-line">  - observation</div>
+                                    <div className="code-line">  - observashun</div>
+                                    <div className="code-line">  - observe a shun</div>
+                                </div>
+                            </div>
+                            <div className="example-step">
+                                <h4>In Observasjon</h4>
+                                <div className="code-block">
+                                    <div className="code-line"># Just run normally!</div>
+                                    <div className="code-line">observasjon --input-directory ./recordings</div>
+                                    <div className="code-line"></div>
+                                    <div className="code-line terminal-success">✓ Loaded 30 projects for proactive phonetic</div>
+                                    <div className="code-line terminal-dim">  (~1,520 tokens, ~$0.0045)</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div className="proactive-cli">
+                        <h3>CLI Options (Optional)</h3>
+                        <div className="code-block">
+                            <div className="code-line"><span className="code-comment"># Disable proactive phonetic</span></div>
+                            <div className="code-line">observasjon --no-proactive-phonetic --input-directory ./recordings</div>
+                            <div className="code-line"></div>
+                            <div className="code-line"><span className="code-comment"># Force enable even if >50 projects (accepts higher cost)</span></div>
+                            <div className="code-line">observasjon --force-proactive-phonetic --input-directory ./recordings</div>
+                        </div>
+                    </div>
+                    
+                    <div className="integration-note">
+                        <p><strong>New to Observasjon?</strong> Install it alongside Protokoll:</p>
+                        <div className="code-block">
+                            <div className="code-line">npm install -g @redaksjon/observasjon</div>
                         </div>
                     </div>
                 </div>

@@ -14,6 +14,7 @@ export type ReasoningModel =
     | 'gpt-4o-mini'
     | 'gpt-4-turbo'
     | 'gpt-5'
+    | 'gpt-5-nano'
     | 'gpt-5-mini'
     | 'gpt-5.1'
     | 'gpt-5.2'
@@ -23,7 +24,7 @@ export type ReasoningModel =
     | 'o3-mini'
     | string;  // Allow any model string
 
-export type ReasoningLevel = 'low' | 'medium' | 'high';
+export type ReasoningLevel = 'none' | 'low' | 'medium' | 'high';
 
 export interface ReasoningConfig {
     model: ReasoningModel;
@@ -88,6 +89,7 @@ export const REASONING_MODELS: Record<string, ModelSettings> = {
     'gpt-4o': { maxTokens: 4096, supportsTools: true },
     'gpt-4o-mini': { maxTokens: 4096, supportsTools: true },
     'gpt-5': { maxTokens: 8192, supportsTools: true },
+    'gpt-5-nano': { maxTokens: 2048, supportsTools: true },
     'gpt-5-mini': { maxTokens: 4096, supportsTools: true },
     'gpt-5.1': { maxTokens: 16384, supportsTools: true, reasoningLevel: true },
     'gpt-5.2': { maxTokens: 32768, supportsTools: true, reasoningLevel: true },

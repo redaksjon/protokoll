@@ -41,11 +41,12 @@ When you first start using Protokoll, it doesn't know anything about you. It doe
    name: Project Alpha
    classification:
      context_type: work
-     explicit_phrases: ["project alpha", "update on alpha"]
-     topics: ["client engagement", "Q1 planning"]
+     explicit_phrases: ["project alpha", "update on alpha"]  # Routes when these appear in audio
+     topics: ["client engagement", "Q1 planning"]            # Lower-confidence associations
    routing:
      destination: ~/notes/projects/alpha
      structure: month
+   sounds_like: ["project alfa"]  # Phonetic variants for misheard project names
    ```
 
    **You can read these files. You can edit them. You can version control them.** This is YOUR context, not a proprietary model hidden in someone else's cloud.
@@ -68,6 +69,65 @@ This means:
 
 The goal is simple: **After a few weeks of use, Protokoll should understand your world well enough to route notes perfectly with minimal intervention.**
 
+## MCP Server: AI Assistant Integration
+
+**NEW:** Protokoll now implements the Model Context Protocol (MCP), making all its capabilities available to AI coding assistants like Claude, Cursor, and other MCP-compatible tools.
+
+### What is MCP?
+
+MCP is a protocol that allows AI assistants to access external data and functionality. Protokoll's MCP server exposes:
+
+#### Resources (Read-Only Data Access)
+- **Transcripts**: Read individual transcript files with `protokoll://transcript/{path}`
+- **Entities**: Access context entities (people, projects, terms) as YAML with `protokoll://entity/{type}/{id}`
+- **Configuration**: View Protokoll setup and entity counts with `protokoll://config`
+- **Transcript Lists**: Browse transcripts by directory with filtering and pagination
+- **Entity Lists**: List all entities of a given type with URIs for navigation
+
+#### Prompts (Workflow Templates)
+- **transcribe_with_context**: Guided transcription with automatic context discovery
+- **setup_project**: Interactive project creation with metadata assistance
+- **review_transcript**: Analyze and improve transcript accuracy
+- **enrich_entity**: Add or update context entities
+- **batch_transcription**: Process multiple audio files
+- **find_and_analyze**: Search and analyze transcript content
+
+#### Tools (Direct Operations)
+All existing CLI tools remain available through MCP for direct operations.
+
+### Using the MCP Server
+
+1. **Build the server**:
+   ```bash
+   npm run mcp:build
+   ```
+
+2. **Test with MCP Inspector**:
+   ```bash
+   npm run mcp:inspect
+   ```
+
+3. **Configure in your AI assistant** (example for Claude Desktop):
+   ```json
+   {
+     "mcpServers": {
+       "protokoll": {
+         "command": "node",
+         "args": ["/path/to/protokoll/dist/mcp/server.js"]
+       }
+     }
+   }
+   ```
+
+Now your AI assistant can:
+- Transcribe audio with context awareness
+- Browse and read transcripts
+- Analyze context entities
+- Guide project setup interactively
+- And much more!
+
+**See**: `guide/mcp-integration.md` for complete MCP documentation.
+
 ## Table of Contents
 
 - [The Problem](#the-problem)
@@ -84,6 +144,7 @@ The goal is simple: **After a few weeks of use, Protokoll should understand your
   - [Quick Configuration Commands](#quick-configuration-commands)
 - [Command Line Options](#command-line-options)
 - [Context Management Commands](#context-management-commands)
+  - [Smart Project Creation](#smart-project-creation)
 - [Transcript Actions](#transcript-actions)
 - [Feedback Command](#feedback-command)
 - [Key Features](#key-features)
@@ -405,6 +466,15 @@ selfReflection: true          # Generate reports by default
 silent: false                 # Sound notifications
 debug: false                  # Debug mode
 
+# Smart assistance for project creation
+smartAssistance:
+  enabled: true                   # Enable AI-assisted project creation
+  phoneticModel: "gpt-5-nano"     # Fast model for phonetic variant generation
+  analysisModel: "gpt-5-mini"     # Model for content analysis and suggestions
+  soundsLikeOnAdd: true           # Auto-generate phonetic variants
+  triggerPhrasesOnAdd: true       # Auto-generate content-matching phrases
+  promptForSource: true           # Ask for URL/file when creating projects
+
 # Advanced
 maxAudioSize: 26214400        # Max audio file size in bytes (25MB)
 tempDirectory: "/tmp"         # Temporary file storage
@@ -506,6 +576,19 @@ protokoll project add
 protokoll person add
 protokoll term add
 
+# Add term with command-line arguments
+protokoll term add --term "Kubernetes" --domain "devops" \
+  --description "Container orchestration platform" \
+  --topics "containers,orchestration,cloud-native" \
+  --projects "infrastructure"
+
+# Update existing entity with new content (regenerates metadata)
+protokoll project update redaksjon https://github.com/user/redaksjon/README.md
+protokoll term update kubernetes https://kubernetes.io/docs/concepts/overview/
+
+# Merge duplicate terms
+protokoll term merge kubernetes-old kubernetes  # Combines metadata, deletes source
+
 # Delete an entity
 protokoll project delete <id>
 protokoll person delete john-smith --force
@@ -540,24 +623,175 @@ Context notes (Enter to skip): Colleague from product team
 Person "Priya Sharma" saved successfully.
 ```
 
+### Smart Project Creation
+
+Protokoll can use AI assistance to help create projects faster by automatically generating:
+
+- **Sounds like**: Phonetic variants of your project NAME for when Whisper mishears it (e.g., "Protokoll" → "protocol", "pro to call")
+- **Trigger phrases**: Content-matching phrases that indicate audio content belongs to this project (e.g., "working on protokoll", "protokoll meeting")
+- **Topic keywords**: Relevant keywords extracted from project documentation
+- **Description**: A contextual description of your project
+
+#### Understanding Sounds Like vs Trigger Phrases
+
+| Field | Purpose | Example for "Protokoll" |
+|-------|---------|------------------------|
+| **Sounds like** | Correct misheard project NAME | "protocol", "pro to call" |
+| **Trigger phrases** | Match content to project | "working on protokoll", "protokoll meeting" |
+
+- `sounds_like` is used during transcription to correct the project name when Whisper mishears it
+- `trigger phrases` are used during classification to route content to the right project
+
+#### Basic Usage
+
+```bash
+# Interactive mode with smart assistance (default when configured)
+protokoll project add
+
+# With a source URL for full context analysis
+protokoll project add https://github.com/myorg/myproject
+
+# With a local file or directory
+protokoll project add ./README.md
+protokoll project add /path/to/project
+```
+
+#### Command-Line Options
+
+```bash
+protokoll project add [source] [options]
+
+Arguments:
+  source                    URL or file path to analyze for project context
+
+Options:
+  --name <name>            Project name (skips name prompt)
+  --id <id>                Project ID (auto-generated from name if not provided)
+  --context <type>         Context type: work, personal, or mixed (default: work)
+  --destination <path>     Output destination path for transcripts
+  --structure <type>       Directory structure: none, year, month, day (default: month)
+  --smart                  Force enable smart assistance
+  --no-smart               Force disable smart assistance
+  -y, --yes                Accept all AI-generated suggestions without prompting (non-interactive)
+```
+
+#### Examples
+
+```bash
+# Quick project from GitHub repo
+protokoll project add https://github.com/myorg/myproject --name "My Project"
+
+# Create project with pre-set options
+protokoll project add --name "Quarterly Planning" --context work
+
+# Analyze local documentation
+protokoll project add ./docs/README.md --name "Documentation"
+
+# Non-interactive mode: accept all AI suggestions automatically
+protokoll project add https://github.com/myorg/myproject --name "My Project" --yes
+
+# Disable smart assistance for manual entry
+protokoll project add --no-smart
+```
+
+#### How It Works
+
+1. **Name Entry**: When you provide a project name, smart assistance generates:
+   - **Sounds like**: Phonetic variants for when Whisper mishears the name
+   - **Trigger phrases**: Content-matching phrases for classification
+
+2. **Content Analysis**: When you provide a URL or file path, smart assistance:
+   - Fetches the content (supports GitHub repos, web pages, local files)
+   - Analyzes it to suggest topic keywords and description
+
+3. **Editable Suggestions**: All suggestions are presented as defaults that you can accept (press Enter) or edit
+
+4. **Non-Interactive Mode**: Use the `--yes` flag to automatically accept all AI-generated suggestions without prompting. This is useful for automation or when you want to trust the AI completely
+
+#### Configuration
+
+Enable or disable smart assistance globally in your `.protokoll/config.yaml`:
+
+```yaml
+smartAssistance:
+  enabled: true                   # Enable smart assistance globally
+  phoneticModel: "gpt-5-nano"     # Fast model for phonetic variant generation (default)
+  analysisModel: "gpt-5-mini"     # Model for content analysis and suggestions (default)
+  soundsLikeOnAdd: true           # Auto-generate phonetic variants
+  triggerPhrasesOnAdd: true       # Auto-generate content-matching phrases
+  promptForSource: true           # Ask about URL/file when not provided
+```
+
+Override per-command with `--smart` or `--no-smart` flags.
+
+#### Requirements
+
+- OpenAI API key set in environment (`OPENAI_API_KEY`)
+- Network access for URL fetching and API calls
+
 ### Example: Adding a Project
+
+The interactive prompt guides you through each field with explanations:
 
 ```bash
 $ protokoll project add
 
 [Add New Project]
 
+Projects define where transcripts are filed and how they're classified.
+Each field helps Protokoll route your audio notes to the right place.
+
 Project name: Client Alpha
+
+  ID is used for the filename to store project info (e.g., "client-alpha.yaml")
+  and as a reference when linking other entities to this project.
 ID (Enter for "client-alpha"): 
-Output destination path: ~/clients/alpha/notes
+
+  Output destination is where transcripts for this project will be saved.
+  Leave blank to use the configured default: ~/notes
+Output destination path (Enter for default): ~/clients/alpha/notes
+
+  Directory structure determines how transcripts are organized by date:
+    none:  output/transcript.md
+    year:  output/2025/transcript.md
+    month: output/2025/01/transcript.md
+    day:   output/2025/01/15/transcript.md
 Directory structure (none/year/month/day, Enter for month): month
+
+  Context type helps classify the nature of this project:
+    work:     Professional/business content
+    personal: Personal notes and ideas
+    mixed:    Contains both work and personal content
 Context type (work/personal/mixed, Enter for work): work
+
+  Trigger phrases are words/phrases that identify content belongs to this project.
+  When these phrases appear in your audio, Protokoll routes it here.
+  Examples: "client alpha", "alpha project", "working on alpha"
 Trigger phrases (comma-separated): client alpha, alpha project
+
+  Sounds-like variants help when Whisper mishears the project name.
+  Useful for non-English names (Norwegian, etc.) that may be transcribed differently.
+  Examples for "Protokoll": "protocol", "pro to call", "proto call"
+Sounds like (comma-separated, Enter to skip): 
+
+  Topic keywords are themes/subjects associated with this project.
+  These provide additional context for classification but are lower-confidence
+  than trigger phrases. Examples: "budget", "roadmap", "client engagement"
 Topic keywords (comma-separated, Enter to skip): client engagement
+
+  Description is a brief note about this project for your reference.
 Description (Enter to skip): Primary client project
 
 Project "Client Alpha" saved successfully.
 ```
+
+#### Project Field Reference
+
+| Field | Purpose |
+|-------|---------|
+| **Trigger phrases** | High-confidence matching - routes transcripts when these phrases appear in audio |
+| **Sounds like** | Phonetic variants for when Whisper mishears the project name (useful for non-English names) |
+| **Topic keywords** | Lower-confidence theme associations for classification |
 
 ### Options
 
@@ -570,7 +804,74 @@ For complete documentation, see the [Context Commands Guide](./guide/context-com
 
 ## Transcript Actions
 
-Protokoll includes the `action` command for editing and combining existing transcripts. This is useful for post-processing, organizing, and managing your transcript library.
+Protokoll includes commands for working with transcripts: listing, editing, combining, and analyzing your transcript library.
+
+### List Transcripts
+
+Search, filter, and browse your transcript library with pagination:
+
+```bash
+# List recent transcripts (default: 50 most recent)
+protokoll transcript list ~/notes
+
+# Search for transcripts containing specific text
+protokoll transcript list ~/notes --search "kubernetes"
+
+# Filter by date range
+protokoll transcript list ~/notes --start-date 2026-01-01 --end-date 2026-01-31
+
+# Sort by filename or title instead of date
+protokoll transcript list ~/notes --sort-by title
+
+# Pagination - show next 50 results
+protokoll transcript list ~/notes --limit 50 --offset 50
+
+# Combine filters
+protokoll transcript list ~/notes \
+  --search "meeting" \
+  --start-date 2026-01-01 \
+  --sort-by date \
+  --limit 25
+```
+
+**Example Output:**
+
+```
+📂 Transcripts in: ~/notes
+📊 Showing 1-3 of 45 total
+
+✅ 2026-01-18 14:30 - Meeting with Priya about Q1 Planning
+   2026-01-18-1430_Meeting_with_Priya.md
+
+✅ 2026-01-17 - Quick Ideas for New Feature
+   2026-01-17_Quick_Ideas.md
+
+   2026-01-16 09:15 - Sprint Planning Session
+   2026-01-16-0915_Sprint_Planning.md
+
+💡 More results available. Use --offset 50 to see the next page.
+```
+
+**List Options:**
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--limit <number>` | Max results to return | 50 |
+| `--offset <number>` | Results to skip (pagination) | 0 |
+| `--sort-by <field>` | Sort by: date, filename, title | date |
+| `--start-date <YYYY-MM-DD>` | Filter from this date | none |
+| `--end-date <YYYY-MM-DD>` | Filter to this date | none |
+| `--search <text>` | Search filename and content | none |
+
+**What Gets Displayed:**
+
+- ✅ or space (indicates if raw transcript exists)
+- Date from filename (YYYY-MM-DD format)
+- Time if available (HH:MM format)
+- Extracted title from document heading
+- Filename
+
+**MCP Tool:** Also available as `protokoll_list_transcripts` for AI assistants.
 
 ### Edit a Single Transcript
 
@@ -861,10 +1162,13 @@ type: project
 
 classification:
   context_type: work
+  # Trigger phrases: high-confidence content matching
+  # When these phrases appear in audio, route to this project
   explicit_phrases:
     - "quarterly planning"
     - "Q1 planning"
     - "roadmap review"
+  # Topic keywords: lower-confidence theme associations
   topics:
     - "roadmap"
     - "budget"
@@ -876,6 +1180,12 @@ routing:
     - date
     - time
     - subject
+
+# Phonetic variants: how Whisper might mishear the project name
+# Useful for non-English names (Norwegian, etc.)
+sounds_like:
+  - "quarterly plan"
+  - "quarter planning"
 
 active: true
 ```
@@ -898,13 +1208,24 @@ context: "Primary client"
 ```yaml
 # ~/.protokoll/terms/kubernetes.yaml
 id: kubernetes
-term: Kubernetes
+name: Kubernetes
+type: term
+expansion: ""  # For acronyms (e.g., "K8s" → "Kubernetes")
+domain: devops  # E.g., devops, engineering, security, finance
+description: "Container orchestration platform that automates deployment, scaling, and management"
 sounds_like:
   - "kube"
   - "k8s"
   - "kubernetes"
   - "cube er net ease"
-context: "Container orchestration platform"
+topics:  # Related keywords for classification
+  - containers
+  - orchestration
+  - cloud-native
+  - devops
+projects:  # Associated project IDs where this term is relevant
+  - infrastructure
+  - myapp
 ```
 
 ## Routing System
@@ -1043,6 +1364,195 @@ Welcome to Protokoll!
 Configuration saved to ~/.protokoll/config.yaml
 ```
 
+### Interactive Session Tracking & Control
+
+Protokoll now provides comprehensive tracking and control during interactive sessions:
+
+#### Per-File Progress Monitoring
+
+Every prompt shows your progress for the current file:
+
+```
+[File: recording1.m4a] [Prompts: 3]
+(Type 'S' to skip remaining prompts for this file)
+
+────────────────────────────────────────────────────────────
+[Unknown: "Kubernetes"]
+...
+```
+
+#### Skip Rest of File
+
+When processing long recordings with many prompts, you can skip ahead:
+
+```
+> S
+
+[Skipping remaining prompts for this file...]
+```
+
+This is useful when:
+- You've answered enough questions for one file
+- A recording has too many unknown terms to process now
+- You want to move to the next file quickly
+
+The file will still be transcribed, but no more interactive prompts will appear for it.
+
+#### Session Summary Report
+
+At the end of every interactive session, you get a comprehensive summary:
+
+```
+═══════════════════════════════════════════════════════════
+  INTERACTIVE SESSION SUMMARY
+═══════════════════════════════════════════════════════════
+
+Duration: 8m 23s
+Total prompts answered: 12
+
+────────────────────────────────────────────────────────────
+  FILES PROCESSED
+────────────────────────────────────────────────────────────
+
+1. /recordings/meeting1.m4a
+   Prompts answered: 5
+   Status: Completed
+   Transcript: ~/notes/2026/01/2026-01-18_Meeting_Notes.md
+   Audio moved to: ~/archive/2026/01/meeting1.m4a
+
+2. /recordings/ideas.m4a
+   Prompts answered: 3
+   Status: SKIPPED (user requested)
+   Transcript: ~/notes/2026/01/2026-01-18_Quick_Ideas.md
+
+────────────────────────────────────────────────────────────
+  CHANGES MADE
+────────────────────────────────────────────────────────────
+
+✓ Terms added (3):
+  - Kubernetes
+  - Docker
+  - GraphQL
+
+✓ Projects added (1):
+  - Project Alpha
+
+✓ Aliases created (2):
+  - "K8s" → "Kubernetes"
+  - "Chronology" → "Kronologi"
+
+═══════════════════════════════════════════════════════════
+```
+
+This summary shows:
+- **Session duration** and total prompts answered
+- **Each file** processed with prompt counts, status, and output locations
+- **All changes** made to your context (new terms, projects, aliases)
+
+#### Mid-Session Stop
+
+Press `Ctrl+C` at any time during an interactive session to stop and see the summary:
+
+```
+^C
+[Session interrupted by user]
+
+═══════════════════════════════════════════════════════════
+  INTERACTIVE SESSION SUMMARY
+═══════════════════════════════════════════════════════════
+...
+```
+
+All progress up to that point is saved. You can resume processing the remaining files later.
+
+### Streamlined Learning Flow
+
+The interactive wizard has been redesigned for speed and efficiency:
+
+#### Smart Similarity Matching
+
+Protokoll automatically detects similar existing terms:
+
+```
+────────────────────────────────────────────────────────────
+[Unknown: "Chronology"]
+────────────────────────────────────────────────────────────
+
+Found similar term(s): Kronologi
+Is "Chronology" the same as "Kronologi"? (Y/N): Y
+
+info: Added alias "Chronology" to existing term "Kronologi"
+```
+
+No more duplicate entries for similar spellings!
+
+#### Automated Content Analysis
+
+Instead of answering multiple questions, just provide a URL or file:
+
+```
+────────────────────────────────────────────────────────────
+[Unknown: "Cursor"]
+────────────────────────────────────────────────────────────
+
+Ignore this? (X to ignore, or Enter to continue): 
+
+[How should I learn about this?]
+Options:
+  1. Provide a file path (e.g., ~/docs/project.md)
+  2. Provide a URL (e.g., https://example.com)
+  3. Paste text directly
+  4. Enter details manually
+
+Enter 1-4, or paste path/URL directly: https://cursor.com
+
+Fetching content from: https://cursor.com...
+Analyzing content from cursor.com...
+
+────────────────────────────────────────────────────────────
+[Analysis Results]
+Type: TERM
+Name: Cursor
+Description: Cursor is an AI-powered code editor...
+Topics: ai, code-editor, vscode, development
+Confidence: high
+────────────────────────────────────────────────────────────
+
+Use this? (Y/N, or Enter to accept): 
+
+Which project(s) is this related to?
+  1. FjellGrunn
+  2. Redaksjon
+  3. Grunnverk
+  N. Create new project
+
+Enter numbers (comma-separated) or N, or Enter to skip: 2
+Associated with: Redaksjon
+
+info: Added term "Cursor" to Redaksjon
+```
+
+**95% automated**: Just provide documentation and let AI extract:
+- Entity type (Project vs Term)
+- Correct name
+- Description
+- Related topics
+- Acronym expansions
+
+#### Clean Project Selection
+
+Project lists now show only names, not full descriptions:
+
+```
+Which project(s) is this related to?
+  1. FjellGrunn
+  2. Grunnverk
+  3. Redaksjon
+  4. Utilarium
+```
+
+Much easier to scan and select!
+
 ## Self-Reflection Reports
 
 Enable with `--self-reflection` to generate detailed reports:
@@ -1137,6 +1647,32 @@ Each transcript includes:
 ---
 
 # Your Transcript Content Here
+
+...transcript content...
+
+---
+
+## Entity References
+
+<!-- Machine-readable entity metadata for indexing and querying -->
+
+### People
+
+- `priya-sharma`: Priya Sharma
+- `john-smith`: John Smith
+
+### Projects
+
+- `project-alpha`: Project Alpha
+
+### Terms
+
+- `kubernetes`: Kubernetes
+- `graphql`: GraphQL
+
+### Companies
+
+- `acme-corp`: Acme Corp
 ```
 
 ### Metadata Fields
@@ -1154,6 +1690,17 @@ Each transcript includes:
 | **Reasoning** | Explanation of routing decision |
 | **Tags** | Auto-extracted from signals (people, companies, topics) |
 | **Duration** | Audio duration in human-readable format |
+
+### Entity References (Footer)
+
+At the bottom of each transcript, Protokoll automatically includes structured entity metadata showing all entities (people, projects, terms, companies) that were referenced or used during processing. This metadata:
+
+- **Enables querying**: Find all transcripts that mention a specific person or project
+- **Machine-readable**: Structured format for programmatic access
+- **Auto-generated**: Tracks everything used during transcription enhancement
+- **Indexable**: Perfect for building search indexes or knowledge graphs
+
+The entity metadata is tracked automatically as Protokoll processes the transcript - whenever a lookup tool finds a person, project, term, or company in your context, it's recorded in the footer.
 
 ### Using Metadata
 
@@ -1251,6 +1798,31 @@ sounds_like:
   - "another variant"
 ```
 
+#### Smart Project Creation Issues
+
+**"Smart assistance not available"**
+- Ensure `OPENAI_API_KEY` is set in your environment
+- Check that smart assistance is enabled in config or use `--smart` flag
+
+**Slow sounds_like/trigger phrase generation**
+- The first call may take a few seconds as the model generates variations
+- Subsequent calls are typically faster
+- Both sounds_like and trigger phrases are generated in parallel for efficiency
+
+**URL fetch failing**
+- Ensure network connectivity
+- For private repositories, use local file paths instead
+- Check that the URL is accessible (not behind authentication)
+
+**Sounds like variants not matching your project**
+- For Norwegian or non-English project names, you may need to manually add English phonetic variants
+- Example: "Protokoll" might need "protocol", "pro to call" added manually
+
+**Suggestions don't match my project**
+- You can edit all suggestions before saving
+- Try providing more context with a README or documentation file
+- Adjust the topics and description manually as needed
+
 ### Debug Mode
 
 Run with `--debug` to see all intermediate files:
@@ -1277,7 +1849,7 @@ Traditional workflow:
 4. Copy-paste file paths
 5. Run commands
 
-With MCP, you just talk naturally:
+With MCP, you can use natural language:
 - *"Can you transcribe this meeting recording?"*
 - *"Add Sanjay Gupta as a person - Whisper mishears him as 'San Jay Grouper'"*  
 - *"This should be in the Quantum Readiness project"*
@@ -1300,28 +1872,28 @@ When you ask to transcribe a file, the AI:
 #### Example: Ambiguous Location
 
 ```
-You: "Can you transcribe ~/Downloads/meeting.m4a?"
+User: Can you transcribe ~/Downloads/meeting.m4a?
 
-AI: "I found your Protokoll configuration with 3 projects configured. 
-     Based on the file location in Downloads, I can't automatically 
-     determine which project this belongs to. Is this for:
-     1. Client Alpha
-     2. Internal Notes
-     3. Personal
-     Which project should I use?"
+AI: I found your Protokoll configuration with 3 projects configured. 
+    Based on the file location in Downloads, I can't automatically 
+    determine which project this belongs to. Is this for:
+    1. Client Alpha
+    2. Internal Notes
+    3. Personal
+    Which project should I use?
 
-You: "It's for Client Alpha"
+User: It's for Client Alpha
 
-AI: "Got it! Processing with Client Alpha configuration..."
+AI: Got it! Processing with Client Alpha configuration...
     [transcribes and routes to ~/notes/client-alpha/]
 ```
 
 #### Example: Clear Location
 
 ```
-You: "Transcribe ~/work/client-alpha/recordings/standup.m4a"
+User: Transcribe ~/work/client-alpha/recordings/standup.m4a
 
-AI: "Found Client Alpha configuration nearby. Processing..."
+AI: Found Client Alpha configuration nearby. Processing...
     [automatically uses the right config and routing]
 ```
 
@@ -1391,45 +1963,45 @@ Or if installed globally (`npm install -g @redaksjon/protokoll`):
 
 **Basic Transcription:**
 ```
-Human: Transcribe ~/recordings/standup.m4a
+User: Transcribe ~/recordings/standup.m4a
 
 AI: [discovers config, suggests project]
 
-AI: Done! Transcript saved to ~/notes/2026/01/16-0900-standup.md
+Done! Transcript saved to ~/notes/2026/01/16-0900-standup.md
     Project: Daily Standups (95% confidence)
     People recognized: Sarah Chen, Mike Johnson
 ```
 
 **Add Context:**
 ```
-Human: "San Jay" should be "Sanjay Gupta" - he's a product manager at Acme
+User: "San Jay" should be "Sanjay Gupta" - he's a product manager at Acme
 
 AI: [calls protokoll_add_person]
 
-AI: Added Sanjay Gupta to your context. Future transcripts will 
+Added Sanjay Gupta to your context. Future transcripts will 
     recognize "San Jay", "Sanjay", and similar variations.
 ```
 
 **Provide Feedback:**
 ```
-Human: In that last transcript, WCMP should be WCNP
+User: In that last transcript, WCMP should be WCNP
 
 AI: [calls protokoll_provide_feedback]
 
-AI: Fixed! I replaced "WCMP" with "WCNP" (3 occurrences) and added 
+Fixed! I replaced "WCMP" with "WCNP" (3 occurrences) and added 
     WCNP to your vocabulary for future transcripts.
 ```
 
 **Combine Transcripts:**
 ```
-Human: Combine these three meeting parts into one:
-       ~/notes/meeting-part1.md
-       ~/notes/meeting-part2.md
-       ~/notes/meeting-part3.md
+User: Combine these three meeting parts into one:
+      ~/notes/meeting-part1.md
+      ~/notes/meeting-part2.md
+      ~/notes/meeting-part3.md
 
 AI: [calls protokoll_combine_transcripts]
 
-AI: Combined into ~/notes/16-1400-full-meeting.md
+Combined into ~/notes/16-1400-full-meeting.md
     The source files have been deleted.
 ```
 
@@ -1458,7 +2030,7 @@ When processing a file, the nearest `.protokoll` takes precedence, but inherits 
 1. **Create project-specific configs** when you have different routing needs
 2. **Use global config** for shared context (common terms, general contacts)
 3. **Let the AI discover** - it will ask when clarification is needed
-4. **Accept context suggestions** - when the AI offers to add terms/people, say yes
+4. **Accept context suggestions** - when the AI offers to add terms/people, accept the suggestions
 
 For complete documentation, see the [MCP Integration Guide](./guide/mcp-integration.md).
 

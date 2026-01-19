@@ -16,7 +16,7 @@ export class OpenAIError extends Error {
 }
 
 
-export async function createCompletion(messages: ChatCompletionMessageParam[], options: { responseFormat?: any, model?: string, reasoningLevel?: 'low' | 'medium' | 'high', debug?: boolean, debugFile?: string } = {}): Promise<string | any> {
+export async function createCompletion(messages: ChatCompletionMessageParam[], options: { responseFormat?: any, model?: string, reasoningLevel?: 'none' | 'low' | 'medium' | 'high', maxTokens?: number, debug?: boolean, debugFile?: string, reason?: string } = {}): Promise<string | any> {
     const logger = getLogger();
     const storage = Storage.create({ log: logger.debug });
     try {
@@ -30,26 +30,26 @@ export async function createCompletion(messages: ChatCompletionMessageParam[], o
         });
 
         const model = options.model || DEFAULT_MODEL;
-        logger.info('Sending request to reasoning model (%s)... this may take a minute', model);
+        
+        // Check if model supports reasoning_effort
+        const supportsReasoning = model.includes('gpt-5') || 
+                                  model.includes('o1') || model.includes('o3');
+        const isReasoningCall = supportsReasoning && options.reasoningLevel && options.reasoningLevel !== 'none';
+        
         logger.debug('Sending prompt to OpenAI: %j', messages);
 
         const startTime = Date.now();
         
-        // Check if model supports reasoning_effort
-        const supportsReasoning = model.includes('gpt-5.1') || model.includes('gpt-5.2') || 
-                                  model.includes('o1') || model.includes('o3');
-        
         const requestParams: Record<string, unknown> = {
             model,
             messages,
-            max_completion_tokens: 10000,
+            max_completion_tokens: options.maxTokens || 10000,
             response_format: options.responseFormat,
         };
         
-        if (supportsReasoning) {
-            const reasoningLevel = options.reasoningLevel || 'medium';
-            requestParams.reasoning_effort = reasoningLevel;
-            logger.debug('Using reasoning_effort: %s', reasoningLevel);
+        if (isReasoningCall) {
+            requestParams.reasoning_effort = options.reasoningLevel;
+            logger.debug('Using reasoning_effort: %s', options.reasoningLevel);
         }
         
         const completion = await openai.chat.completions.create(
@@ -57,7 +57,15 @@ export async function createCompletion(messages: ChatCompletionMessageParam[], o
         );
         const duration = ((Date.now() - startTime) / 1000).toFixed(1);
 
-        logger.info('Reasoning model responded in %ss', duration);
+        // Log token usage with reason if provided
+        const usage = completion.usage;
+        const reasonSuffix = options.reason ? ` - ${options.reason}` : '';
+        if (usage) {
+            logger.info('%s (%ss, %d→%d tokens)%s', 
+                model, duration, usage.prompt_tokens, usage.completion_tokens, reasonSuffix);
+        } else {
+            logger.info('%s (%ss)%s', model, duration, reasonSuffix);
+        }
 
         if (options.debug && options.debugFile) {
             await storage.writeFile(options.debugFile, JSON.stringify(completion, null, 2), 'utf8');
@@ -66,6 +74,8 @@ export async function createCompletion(messages: ChatCompletionMessageParam[], o
 
         const response = completion.choices[0]?.message?.content?.trim();
         if (!response) {
+            // Log the full completion object to help debug
+            logger.error('Empty response from OpenAI. Full completion object: %j', completion);
             throw new OpenAIError('No response received from OpenAI');
         }
 
@@ -97,8 +107,7 @@ export async function transcribeAudio(filePath: string, options: { model?: strin
 
         const model = options.model || DEFAULT_TRANSCRIPTION_MODEL;
         const fileName = filePath.split('/').pop() || filePath;
-        logger.info('Transcribing audio with %s: %s ... this may take several minutes for long recordings', model, fileName);
-        logger.debug('Full path: %s', filePath);
+        logger.debug('Transcribing: %s (full path: %s)', fileName, filePath);
 
         const startTime = Date.now();
         const audioStream = await storage.readStream(filePath);
@@ -113,7 +122,7 @@ export async function transcribeAudio(filePath: string, options: { model?: strin
         }
         
         const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-        logger.info('Transcription completed in %ss (%d characters)', duration, transcription.text?.length || 0);
+        logger.info('%s (%ss, %d chars)', model, duration, transcription.text?.length || 0);
 
         if (options.debug && options.debugFile) {
             await storage.writeFile(options.debugFile, JSON.stringify(transcription, null, 2), 'utf8');

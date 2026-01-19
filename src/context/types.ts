@@ -57,6 +57,10 @@ export interface Project extends BaseEntity {
   // Routing configuration (uses Dreadcabinet structures)
   routing: ProjectRouting;
   
+  // Phonetic variants for when Whisper mishears the project name
+  // Useful for non-English names (Norwegian, etc.) that may be transcribed differently
+  sounds_like?: string[];
+  
   active?: boolean;
 }
 
@@ -70,9 +74,13 @@ export interface Company extends BaseEntity {
 export interface Term extends BaseEntity {
   type: 'term';
   expansion?: string;     // Full form if it's an acronym
-  domain?: string;        // E.g., "engineering", "finance"
+  domain?: string;        // E.g., "engineering", "finance", "devops"
   sounds_like?: string[];
   projects?: string[];    // Associated project IDs - triggers routing to these projects
+  
+  // NEW fields for smart assistance
+  description?: string;   // Clear explanation of what the term means
+  topics?: string[];      // Thematic keywords related to this term
 }
 
 /**
@@ -116,4 +124,76 @@ export interface HierarchicalContextResult {
   discoveredDirs: DiscoveredContextDir[];
   contextDirs: string[];  // All context subdirectories to load
 }
+
+/**
+ * Smart Assistance Configuration
+ * Controls LLM-assisted project and term metadata generation
+ */
+export interface SmartAssistanceConfig {
+  enabled: boolean;
+  phoneticModel: string;          // Fast model for phonetic variants (e.g., gpt-5-nano)
+  analysisModel: string;          // More capable model for content analysis (e.g., gpt-5-mini)
+  
+  // Project-specific settings
+  soundsLikeOnAdd: boolean;       // Generate phonetic variants for project name
+  triggerPhrasesOnAdd: boolean;   // Generate content-matching phrases
+  promptForSource: boolean;
+  
+  // Term-specific settings
+  termsEnabled?: boolean;              // Enable smart assistance for terms
+  termSoundsLikeOnAdd?: boolean;       // Generate phonetic variants for terms
+  termDescriptionOnAdd?: boolean;      // Generate term descriptions
+  termTopicsOnAdd?: boolean;           // Generate related topics
+  termProjectSuggestions?: boolean;    // Suggest relevant projects based on topics
+  
+  timeout?: number;
+}
+
+/**
+ * Protokoll Configuration
+ * Top-level configuration structure
+ */
+export interface ProtokollConfig {
+  version?: number;
+  smartAssistance?: SmartAssistanceConfig;
+  // Other config fields can be added here as needed
+}
+
+/**
+ * Helper functions for Term type
+ */
+
+/**
+ * Check if a term is associated with a given project
+ */
+export const isTermAssociatedWithProject = (term: Term, projectId: string): boolean => {
+    return term.projects?.includes(projectId) ?? false;
+};
+
+/**
+ * Add a project association to a term
+ */
+export const addProjectToTerm = (term: Term, projectId: string): Term => {
+    const projects = term.projects || [];
+    if (projects.includes(projectId)) {
+        return term;
+    }
+    return {
+        ...term,
+        projects: [...projects, projectId],
+        updatedAt: new Date(),
+    };
+};
+
+/**
+ * Remove a project association from a term
+ */
+export const removeProjectFromTerm = (term: Term, projectId: string): Term => {
+    const projects = term.projects || [];
+    return {
+        ...term,
+        projects: projects.filter(id => id !== projectId),
+        updatedAt: new Date(),
+    };
+};
 

@@ -37,13 +37,27 @@ export interface ToolResult {
     userPrompt?: string;
 }
 
+export interface ReferencedEntity {
+    id: string;
+    name: string;
+    type: 'person' | 'project' | 'term' | 'company';
+}
+
 export interface TranscriptionState {
     originalText: string;
     correctedText: string;
     unknownEntities: string[];
-    resolvedEntities: Map<string, string>;
+    resolvedEntities: Map<string, string>;  // name mapping (old -> new)
      
     routeDecision?: any;
     confidence: number;
+    
+    // Track all entities referenced during processing
+    referencedEntities: {
+        people: Set<string>;      // IDs of people mentioned
+        projects: Set<string>;    // IDs of projects mentioned
+        terms: Set<string>;       // IDs of terms mentioned
+        companies: Set<string>;   // IDs of companies mentioned
+    };
 }
 

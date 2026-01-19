@@ -42,54 +42,80 @@ Projects define routing destinations and classification rules.
 protokoll project list
 ```
 
-Output:
+Output (compact table with row numbers):
 ```
 Projects (3):
 
-  quarterly-planning Quarterly Planning -> ~/work/planning/notes
-  personal Personal Notes -> ~/notes [inactive]
-  work Work Notes -> ~/work/notes
+┌─────┬────────────────────┬────────────────────┬───────────────────────────┐
+│ #   │ ID                 │ Name               │ Info                      │
+├─────┼────────────────────┼────────────────────┼───────────────────────────┤
+│ 1   │ personal           │ Personal Notes     │ INACTIVE → ~/notes        │
+├─────┼────────────────────┼────────────────────┼───────────────────────────┤
+│ 2   │ quarterly-planning │ Quarterly Planning │ → ~/work/planning/notes   │
+├─────┼────────────────────┼────────────────────┼───────────────────────────┤
+│ 3   │ work               │ Work Notes         │ → ~/work/notes            │
+└─────┴────────────────────┴────────────────────┴───────────────────────────┘
+
+Use "project show <id>" or "project show <#>" to see full details for any entry.
 ```
 
-With verbose output:
+The table uses fixed column widths and truncates long paths intelligently. For full details including descriptions, trigger phrases, and all configuration, use either the ID or row number:
+```bash
+protokoll project show walmart    # By ID
+protokoll project show 6          # By row number from list
+```
+
+Or for verbose output with full YAML details:
 ```bash
 protokoll project list --verbose
 ```
 
-Shows full YAML for each project.
-
 ### Show Project Details
 
+You can show details using either the ID or the row number from the list:
+
 ```bash
-protokoll project show quarterly-planning
+protokoll project show quarterly-planning    # By ID
+protokoll project show 2                     # By row number
 ```
 
-Output:
+Output (formatted table):
 ```
 Project: Quarterly Planning
 
-id: quarterly-planning
-name: Quarterly Planning
-type: project
-classification:
-  context_type: work
-  explicit_phrases:
-    - quarterly planning
-    - Q1 planning
-  topics:
-    - roadmap
-    - budget
-routing:
-  destination: ~/work/planning/notes
-  structure: month
-  filename_options:
-    - date
-    - time
-    - subject
-active: true
+┌─────────────────────┬────────────────────────────────────────────┐
+│ ID                  │ quarterly-planning                         │
+├─────────────────────┼────────────────────────────────────────────┤
+│ Name                │ Quarterly Planning                         │
+├─────────────────────┼────────────────────────────────────────────┤
+│ Type                │ project                                    │
+├─────────────────────┼────────────────────────────────────────────┤
+│ Context Type        │ work                                       │
+├─────────────────────┼────────────────────────────────────────────┤
+│ Trigger Phrases     │   • quarterly planning                     │
+│                     │   • Q1 planning                            │
+├─────────────────────┼────────────────────────────────────────────┤
+│ Topics              │   • roadmap                                │
+│                     │   • budget                                 │
+├─────────────────────┼────────────────────────────────────────────┤
+│ Destination         │ ~/work/planning/notes                      │
+├─────────────────────┼────────────────────────────────────────────┤
+│ Directory Structure │ month                                      │
+├─────────────────────┼────────────────────────────────────────────┤
+│ Filename Options    │   • date                                   │
+│                     │   • time                                   │
+│                     │   • subject                                │
+├─────────────────────┼────────────────────────────────────────────┤
+│ Sounds Like         │   • quarterly plan                         │
+│                     │   • quarter planning                       │
+├─────────────────────┼────────────────────────────────────────────┤
+│ Active              │ true                                       │
+└─────────────────────┴────────────────────────────────────────────┘
 
 File: /Users/you/.protokoll/projects/quarterly-planning.yaml
 ```
+
+The formatted output makes it easy to read all fields. Arrays are displayed as bullet points, and nested objects are expanded in a readable format.
 
 ### Add a Project
 
@@ -97,21 +123,221 @@ File: /Users/you/.protokoll/projects/quarterly-planning.yaml
 protokoll project add
 ```
 
-Interactive prompts:
+For the best experience, provide the project name on the command line:
+
+```bash
+protokoll project add --name "Client Alpha"
+```
+
+The streamlined process uses sensible defaults and focuses on the smart assistance features:
+
 ```
 [Add New Project]
 
 Project name: Client Alpha
-ID (Enter for "client-alpha"): 
-Output destination path: ~/clients/alpha/notes
-Directory structure (none/year/month/day, Enter for month): month
-Context type (work/personal/mixed, Enter for work): work
-Trigger phrases (comma-separated): client alpha, alpha project, working on alpha
-Topic keywords (comma-separated, Enter to skip): client engagement, consulting
-Description (Enter to skip): Primary client project for Q1
+
+[Generating phonetic variants...]
+  • Calling AI model...
+  (Phonetic variants help when Whisper mishears the project name)
+Sounds like (Enter for suggested, or edit):
+  client alpha,client alfa,klient alpha,clint alpha,...(+4 more)
+> 
+
+[Generating trigger phrases...]
+  • Calling AI model...
+  (Trigger phrases indicate content belongs to this project)
+Trigger phrases (Enter for suggested, or edit):
+  client alpha,alpha project,working on alpha,alpha client,...(+8 more)
+> 
+
+Topic keywords (Enter for suggested, or edit):
+  client engagement,consulting,project management,...(+5 more)
+> 
+
+Description (Enter for suggested, or edit):
+  Primary client project for Q1
+> 
 
 Project "Client Alpha" saved successfully.
 ```
+
+The project creation now uses these sensible defaults:
+- **ID**: Auto-generated from name (e.g., "Client Alpha" → "client-alpha")
+- **Context type**: Defaults to "work"
+- **Directory structure**: Defaults to "month"
+- **Output destination**: Uses your configured default
+
+You can override any default using command-line options:
+
+```bash
+protokoll project add --name "Personal Notes" \
+  --context personal \
+  --structure day \
+  --destination ~/personal-notes
+```
+
+#### Non-Interactive Mode
+
+If you want to accept all AI-generated suggestions automatically without being prompted, use the `--yes` flag:
+
+```bash
+protokoll project add --name "FjellGrunn" --yes
+```
+
+This will generate phonetic variants, trigger phrases, topics, and description using AI, then immediately save the project without waiting for your confirmation. Output looks like:
+
+```
+[Add New Project]
+
+[Generating phonetic variants...]
+  • Calling AI model...
+  (Phonetic variants help when Whisper mishears the project name)
+  fyellgruhn,feelgrun,feellgrun,fyellgrunn,fyehlgrunn,fjehlgrun,...(+16 more)
+  ✓ Accepted (--yes mode)
+
+[Generating trigger phrases...]
+  • Calling AI model...
+  (Trigger phrases indicate content belongs to this project)
+  fjellgrunn,fjell grunn project,working on fjellgrunn,...(+12 more)
+  ✓ Accepted (--yes mode)
+
+Project "FjellGrunn" saved successfully.
+```
+
+This mode is useful for:
+- **Automation**: Scripts that create projects without manual intervention
+- **Trusting the AI**: When you're confident the AI will generate good suggestions
+- **Speed**: Quickly creating multiple projects in a batch
+
+You can combine `--yes` with other flags:
+
+```bash
+# Non-interactive with source URL
+protokoll project add https://github.com/myorg/myproject --name "My Project" --yes
+
+# Non-interactive with local README
+protokoll project add /path/to/README.md --name "Documentation" --yes
+```
+
+#### Project Field Reference
+
+| Field | How Set | Purpose | Examples |
+|-------|---------|---------|----------|
+| **Name** | Prompted (or `--name` flag) | Display name for the project | "Client Alpha", "Personal Notes" |
+| **ID** | Auto-generated from name | Filename and reference identifier | "client-alpha", "personal-notes" |
+| **Context type** | Auto: "work" (override with `--context`) | Nature of content | work, personal, mixed |
+| **Directory structure** | Auto: "month" (override with `--structure`) | Date-based folder organization | none, year, month, day |
+| **Output destination** | Auto: configured default (override with `--destination`) | Where transcripts are saved | "~/clients/alpha/notes" |
+| **Sounds like** | AI-suggested (editable) | Phonetic variants for misheard names | "protocol" for "Protokoll" |
+| **Trigger phrases** | AI-suggested (editable) | High-confidence matching phrases | "client alpha", "working on alpha" |
+| **Topic keywords** | AI-suggested (editable) | Lower-confidence theme associations | "budget", "roadmap" |
+| **Description** | AI-suggested (editable) | Your reference note | "Primary client project for Q1" |
+
+##### Understanding Trigger Phrases vs Sounds Like vs Topics
+
+- **Trigger phrases** (`explicit_phrases`): High-confidence content matching. If someone says "working on the alpha project" in a recording, and "alpha project" is a trigger phrase, the transcript routes to this project. These match the *content* being discussed.
+
+- **Sounds like** (`sounds_like`): Phonetic variants for when Whisper mishears the *project name itself*. If your project is named "Protokoll" (Norwegian), Whisper might transcribe it as "protocol" or "pro to call". Add these variants so lookups still find the project.
+
+- **Topic keywords** (`topics`): Lower-confidence associations. If a transcript mentions "budget" and your project has "budget" as a topic, it's a weaker signal than a trigger phrase. Topics help with classification but shouldn't be relied on alone.
+
+#### Smart Project Creation
+
+Protokoll can use AI assistance to automatically generate sounds_like, trigger phrases, topics, and descriptions:
+
+**Basic Smart Creation**
+
+```bash
+# AI generates sounds_like and trigger phrases from project name
+protokoll project add
+
+[Add New Project]
+
+Project name: Protokoll
+ID (Enter for "protokoll"): 
+
+[Generating phonetic variants...]
+Sounds like (Enter for suggested, or edit):
+  protocol,pro to call,proto call,protocolle,...
+
+[Generating trigger phrases...]
+Trigger phrases (Enter for suggested, or edit):
+  protokoll,working on protokoll,protokoll project,protokoll meeting,...
+```
+
+**With Source Content**
+
+```bash
+# Provide URL or file for full context analysis
+protokoll project add https://github.com/myorg/myproject
+
+[Fetching content from source...]
+Found: github - myorg/myproject
+
+[Analyzing content...]
+
+Project name (Enter for "MyProject"): 
+ID (Enter for "myproject"): 
+
+[Generating phonetic variants...]
+[Generating trigger phrases...]
+
+Topic keywords (Enter for suggested, or edit):
+  typescript,automation,api,github,...
+
+Description (Enter for suggested, or edit):
+  MyProject is a comprehensive automation toolkit...
+```
+
+**Command-Line Options**
+
+```bash
+# Skip prompts with arguments
+protokoll project add --name "My Project"
+protokoll project add --name "My Project" --context work
+
+# Combine with source
+protokoll project add https://github.com/org/repo --name "Repo Name"
+
+# Control smart assistance
+protokoll project add --smart       # Force enable
+protokoll project add --no-smart    # Force disable
+```
+
+**Supported Source Types**
+
+| Type | Description | Example |
+|------|-------------|---------|
+| GitHub URL | Fetches raw README.md | `https://github.com/org/repo` |
+| Web URL | Fetches page content | `https://example.com/docs` |
+| Local file | Reads file content | `./README.md` |
+| Directory | Finds README in directory | `./my-project/` |
+
+**Configuration**
+
+```yaml
+# .protokoll/config.yaml
+smartAssistance:
+  enabled: true                   # Enable AI-assisted project creation
+  phoneticModel: "gpt-5-nano"     # Fast model for phonetic variants
+  analysisModel: "gpt-5-mini"     # Model for content analysis
+  soundsLikeOnAdd: true           # Auto-generate phonetic variants
+  triggerPhrasesOnAdd: true       # Auto-generate trigger phrases
+  promptForSource: true           # Ask for URL/file when creating projects
+```
+
+**How It Works**
+
+1. Enter project name
+2. AI generates sounds_like (phonetic variants for transcription correction)
+3. AI generates trigger phrases (content-matching for classification)
+4. Optionally provide URL/file for topics and description
+5. All suggestions are editable before saving
+
+**Requirements**
+
+- `OPENAI_API_KEY` environment variable set
+- Network access for URL fetching and API calls
 
 ### Delete a Project
 
@@ -141,37 +367,55 @@ People are used for name recognition and correction in transcripts.
 protokoll person list
 ```
 
-Output:
+Output (compact table with row numbers):
 ```
-People (5):
+People (3):
 
-  john-smith John Smith (acme-corp) - Engineering Lead
-  priya-sharma Priya Sharma (acme-corp) - Product Manager
-  sarah-chen Sarah Chen - Designer
+┌─────┬──────────────┬──────────────┬────────────────────────────┐
+│ #   │ ID           │ Name         │ Info                       │
+├─────┼──────────────┼──────────────┼────────────────────────────┤
+│ 1   │ john-smith   │ John Smith   │ Engineering Lead · @acme   │
+├─────┼──────────────┼──────────────┼────────────────────────────┤
+│ 2   │ priya-sharma │ Priya Sharma │ Product Manager · @acme    │
+├─────┼──────────────┼──────────────┼────────────────────────────┤
+│ 3   │ sarah-chen   │ Sarah Chen   │ Designer                   │
+└─────┴──────────────┴──────────────┴────────────────────────────┘
+
+Use "person show <id>" or "person show <#>" to see full details for any entry.
 ```
 
 ### Show Person Details
 
 ```bash
-protokoll person show priya-sharma
+protokoll person show priya-sharma    # By ID
+protokoll person show 2               # By row number
 ```
 
-Output:
+Output (formatted table):
 ```
 Person: Priya Sharma
 
-id: priya-sharma
-name: Priya Sharma
-type: person
-firstName: Priya
-lastName: Sharma
-company: acme-corp
-role: Product Manager
-sounds_like:
-  - pre a
-  - pria
-  - preeya
-context: Colleague from product team
+┌─────────────┬──────────────────────────────────────────┐
+│ ID          │ priya-sharma                             │
+├─────────────┼──────────────────────────────────────────┤
+│ Name        │ Priya Sharma                             │
+├─────────────┼──────────────────────────────────────────┤
+│ Type        │ person                                   │
+├─────────────┼──────────────────────────────────────────┤
+│ First Name  │ Priya                                    │
+├─────────────┼──────────────────────────────────────────┤
+│ Last Name   │ Sharma                                   │
+├─────────────┼──────────────────────────────────────────┤
+│ Company     │ acme-corp                                │
+├─────────────┼──────────────────────────────────────────┤
+│ Role        │ Product Manager                          │
+├─────────────┼──────────────────────────────────────────┤
+│ Sounds Like │   • pre a                                │
+│             │   • pria                                 │
+│             │   • preeya                               │
+├─────────────┼──────────────────────────────────────────┤
+│ Context     │ Colleague from product team              │
+└─────────────┴──────────────────────────────────────────┘
 
 File: /Users/you/.protokoll/people/priya-sharma.yaml
 ```
@@ -218,37 +462,57 @@ Terms define technical vocabulary and their phonetic variants.
 protokoll term list
 ```
 
-Output:
+Output (compact table with row numbers):
 ```
-Terms (4):
+Terms (3):
 
-  graphql GraphQL (GraphQL Query Language)
-  kubernetes Kubernetes (Container orchestration platform)
-  react React (JavaScript UI library)
+┌─────┬────────────┬────────────┬──────────────────────────────────┐
+│ #   │ ID         │ Name       │ Info                             │
+├─────┼────────────┼────────────┼──────────────────────────────────┤
+│ 1   │ graphql    │ GraphQL    │ GraphQL Query Language           │
+├─────┼────────────┼────────────┼──────────────────────────────────┤
+│ 2   │ kubernetes │ Kubernetes │ Container orchestration platform │
+├─────┼────────────┼────────────┼──────────────────────────────────┤
+│ 3   │ react      │ React      │ JavaScript UI library            │
+└─────┴────────────┴────────────┴──────────────────────────────────┘
+
+Use "term show <id>" or "term show <#>" to see full details for any entry.
+```
+
+Long expansions are truncated in the table view. For verbose output with full YAML details:
+```bash
+protokoll term list --verbose
 ```
 
 ### Show Term Details
 
 ```bash
-protokoll term show kubernetes
+protokoll term show kubernetes    # By ID
+protokoll term show 2             # By row number
 ```
 
-Output:
+Output (formatted table):
 ```
 Term: Kubernetes
 
-id: kubernetes
-name: Kubernetes
-type: term
-expansion: Container orchestration platform
-domain: engineering
-sounds_like:
-  - kube
-  - k8s
-  - cube er net ease
-  - kuber netties
-projects:
-  - infrastructure
+┌─────────────┬────────────────────────────────────────┐
+│ ID          │ kubernetes                             │
+├─────────────┼────────────────────────────────────────┤
+│ Name        │ Kubernetes                             │
+├─────────────┼────────────────────────────────────────┤
+│ Type        │ term                                   │
+├─────────────┼────────────────────────────────────────┤
+│ Expansion   │ Container orchestration platform       │
+├─────────────┼────────────────────────────────────────┤
+│ Domain      │ engineering                            │
+├─────────────┼────────────────────────────────────────┤
+│ Sounds Like │   • kube                               │
+│             │   • k8s                                │
+│             │   • cube er net ease                   │
+│             │   • kuber netties                      │
+├─────────────┼────────────────────────────────────────┤
+│ Projects    │   • infrastructure                     │
+└─────────────┴────────────────────────────────────────┘
 
 File: /Users/you/.protokoll/terms/kubernetes.yaml
 ```
@@ -273,6 +537,39 @@ Associated project IDs (comma-separated, Enter to skip): api-project
 Term "GraphQL" saved successfully.
 ```
 
+### Update a Term from Source
+
+Regenerate term metadata by analyzing updated documentation:
+
+```bash
+protokoll term update kubernetes https://kubernetes.io/docs/concepts/overview/
+```
+
+This will:
+- Fetch content from the URL
+- Regenerate description, topics, domain using LLM
+- Generate new sounds_like variants
+- Suggest relevant projects based on topics
+- Update the term file with new metadata
+
+**Use case**: The Kubernetes project has evolved significantly. Update the term definition to reflect current documentation.
+
+### Merge Duplicate Terms
+
+```bash
+protokoll term merge kubernetes-dupe kubernetes
+```
+
+This will:
+- Combine sounds_like arrays (deduplicated)
+- Combine topics arrays (deduplicated)
+- Combine projects arrays (deduplicated)
+- Keep target's description/domain (fall back to source if missing)
+- Delete the source term
+- Save the merged term
+
+**Use case**: You accidentally created "kubernetes" and "k8s" as separate terms. Merge them into one.
+
 ### Delete a Term
 
 ```bash
@@ -289,34 +586,49 @@ Companies are used for organization recognition and can be linked to people.
 protokoll company list
 ```
 
-Output:
+Output (compact table with row numbers):
 ```
 Companies (3):
 
-  acme-corp Acme Corporation [Manufacturing]
-  techstart TechStart Inc [Technology]
-  globalbank Global Bank [Finance]
+┌─────┬────────────┬──────────────────┬──────────────┐
+│ #   │ ID         │ Name             │ Info         │
+├─────┼────────────┼──────────────────┼──────────────┤
+│ 1   │ acme-corp  │ Acme Corporation │ Manufacturing│
+├─────┼────────────┼──────────────────┼──────────────┤
+│ 2   │ globalbank │ Global Bank      │ Finance      │
+├─────┼────────────┼──────────────────┼──────────────┤
+│ 3   │ techstart  │ TechStart Inc    │ Technology   │
+└─────┴────────────┴──────────────────┴──────────────┘
+
+Use "company show <id>" or "company show <#>" to see full details for any entry.
 ```
 
 ### Show Company Details
 
 ```bash
-protokoll company show acme-corp
+protokoll company show acme-corp    # By ID
+protokoll company show 1            # By row number
 ```
 
-Output:
+Output (formatted table):
 ```
 Company: Acme Corporation
 
-id: acme-corp
-name: Acme Corporation
-type: company
-fullName: Acme Corporation Ltd.
-industry: Manufacturing
-sounds_like:
-  - acme
-  - acme corp
-  - a c m e
+┌─────────────┬──────────────────────────┐
+│ ID          │ acme-corp                │
+├─────────────┼──────────────────────────┤
+│ Name        │ Acme Corporation         │
+├─────────────┼──────────────────────────┤
+│ Type        │ company                  │
+├─────────────┼──────────────────────────┤
+│ Full Name   │ Acme Corporation Ltd.    │
+├─────────────┼──────────────────────────┤
+│ Industry    │ Manufacturing            │
+├─────────────┼──────────────────────────┤
+│ Sounds Like │   • acme                 │
+│             │   • acme corp            │
+│             │   • a c m e              │
+└─────────────┴──────────────────────────┘
 
 File: /Users/you/.protokoll/companies/acme-corp.yaml
 ```
@@ -356,13 +668,21 @@ Ignored terms are words or phrases that Protokoll won't ask about during interac
 protokoll ignored list
 ```
 
-Output:
+Output (compact table with row numbers):
 ```
 Ignored terms (3):
 
-  um um [ignored 2026-01-12]
-  like like [ignored 2026-01-10]
-  basically basically [ignored 2026-01-08]
+┌─────┬───────────┬───────────┬──────────────┐
+│ #   │ ID        │ Name      │ Info         │
+├─────┼───────────┼───────────┼──────────────┤
+│ 1   │ basically │ basically │ 1/8/2026     │
+├─────┼───────────┼───────────┼──────────────┤
+│ 2   │ like      │ like      │ 1/10/2026    │
+├─────┼───────────┼───────────┼──────────────┤
+│ 3   │ um        │ um        │ 1/12/2026    │
+└─────┴───────────┴───────────┴──────────────┘
+
+Use "ignored show <id>" to see full details for any entry.
 ```
 
 ### Show Ignored Term Details
