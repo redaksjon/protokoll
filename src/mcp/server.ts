@@ -21,9 +21,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
     CallToolRequestSchema,
     ListToolsRequestSchema,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     ListResourcesRequestSchema,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     ReadResourceRequestSchema,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     ListPromptsRequestSchema,
@@ -53,6 +51,7 @@ import * as Media from '@/util/media';
 import * as Storage from '@/util/storage';
 import * as Reasoning from '@/reasoning';
 import { getLogger } from '@/logging';
+import * as Resources from './resources';
 import * as ProjectAssist from '@/cli/project-assist';
 import * as TermAssist from '@/cli/term-assist';
 import * as TermContext from '@/cli/term-context';
@@ -2312,6 +2311,24 @@ async function main() {
     server.setRequestHandler(ListToolsRequestSchema, async () => ({
         tools,
     }));
+
+    // List available resources
+    server.setRequestHandler(ListResourcesRequestSchema, async () => {
+        return Resources.handleListResources();
+    });
+
+    // Read a resource
+    server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+        const { uri } = request.params;
+        
+        try {
+            const contents = await Resources.handleReadResource(uri);
+            return { contents: [contents] };
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            throw new Error(`Failed to read resource ${uri}: ${message}`);
+        }
+    });
 
     // Handle tool calls
     server.setRequestHandler(CallToolRequestSchema, async (request) => {

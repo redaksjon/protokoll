@@ -9,7 +9,17 @@ import type {
     McpResource,
     McpResourceTemplate,
     McpResourceContents,
+    TranscriptUri,
+    EntityUri,
+    ConfigUri,
+    TranscriptsListUri,
+    EntitiesListUri,
 } from './types';
+import { parseUri, buildTranscriptUri, buildEntityUri } from './uri';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import * as Context from '@/context';
+import * as yaml from 'js-yaml';
 
 // ============================================================================
 // Resource Definitions
@@ -80,8 +90,32 @@ export async function handleListResources(): Promise<{
  * Handle resources/read request
  */
 export async function handleReadResource(uri: string): Promise<McpResourceContents> {
-    // TODO: Implement resource reading
-    throw new Error(`Resource reading not yet implemented: ${uri}`);
+    const parsed = parseUri(uri);
+
+    switch (parsed.resourceType) {
+        case 'transcript':
+            return readTranscriptResource((parsed as TranscriptUri).transcriptPath);
+        case 'entity': {
+            const entityUri = parsed as EntityUri;
+            return readEntityResource(entityUri.entityType, entityUri.entityId);
+        }
+        case 'config':
+            return readConfigResource((parsed as ConfigUri).configPath);
+        case 'transcripts-list': {
+            const listUri = parsed as TranscriptsListUri;
+            return readTranscriptsListResource({
+                directory: listUri.directory,
+                startDate: listUri.startDate,
+                endDate: listUri.endDate,
+                limit: listUri.limit,
+                offset: listUri.offset,
+            });
+        }
+        case 'entities-list':
+            return readEntitiesListResource((parsed as EntitiesListUri).entityType);
+        default:
+            throw new Error(`Unknown resource type: ${parsed.resourceType}`);
+    }
 }
 
 // ============================================================================
@@ -89,24 +123,77 @@ export async function handleReadResource(uri: string): Promise<McpResourceConten
 // ============================================================================
 
 export async function readTranscriptResource(transcriptPath: string): Promise<McpResourceContents> {
-    // TODO: Implement
-    throw new Error('Not implemented');
+    // Handle both absolute and relative paths
+    const fullPath = transcriptPath.startsWith('/')
+        ? transcriptPath
+        : resolve(process.cwd(), transcriptPath);
+
+    try {
+        const content = await readFile(fullPath, 'utf-8');
+        
+        return {
+            uri: buildTranscriptUri(transcriptPath),
+            mimeType: 'text/markdown',
+            text: content,
+        };
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+            throw new Error(`Transcript not found: ${fullPath}`);
+        }
+        throw error;
+    }
 }
 
 export async function readEntityResource(
     entityType: string,
-    entityId: string
+    entityId: string,
+    contextDirectory?: string
 ): Promise<McpResourceContents> {
+    const context = await Context.create({
+        startingDir: contextDirectory || process.cwd(),
+    });
+
+    let entity;
+    switch (entityType) {
+        case 'person':
+            entity = context.getPerson(entityId);
+            break;
+        case 'project':
+            entity = context.getProject(entityId);
+            break;
+        case 'term':
+            entity = context.getTerm(entityId);
+            break;
+        case 'company':
+            entity = context.getCompany(entityId);
+            break;
+        case 'ignored':
+            entity = context.getIgnored(entityId);
+            break;
+        default:
+            throw new Error(`Unknown entity type: ${entityType}`);
+    }
+
+    if (!entity) {
+        throw new Error(`${entityType} "${entityId}" not found`);
+    }
+
+    // Convert to YAML for readability
+    const yamlContent = yaml.dump(entity);
+
+    return {
+        uri: buildEntityUri(entityType as any, entityId),
+        mimeType: 'application/yaml',
+        text: yamlContent,
+    };
+}
+
+export async function readConfigResource(_configPath?: string): Promise<McpResourceContents> {
     // TODO: Implement
     throw new Error('Not implemented');
 }
 
-export async function readConfigResource(configPath?: string): Promise<McpResourceContents> {
-    // TODO: Implement
-    throw new Error('Not implemented');
-}
-
-export async function readTranscriptsListResource(options: {
+export async function readTranscriptsListResource(_options: {
     directory: string;
     startDate?: string;
     endDate?: string;
@@ -118,7 +205,7 @@ export async function readTranscriptsListResource(options: {
 }
 
 export async function readEntitiesListResource(
-    entityType: string
+    _entityType: string
 ): Promise<McpResourceContents> {
     // TODO: Implement
     throw new Error('Not implemented');

@@ -14,6 +14,7 @@ import type { McpRoot } from './types';
 
 // Cached roots from the client
 let cachedRoots: McpRoot[] | null = null;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 let rootsListChangedSupported = false;
 
 /**
