@@ -2466,6 +2466,13 @@ async function main() {
     // Start server
     const transport = new StdioServerTransport();
     await server.connect(transport);
+    
+    // Keep the process alive - MCP servers should run indefinitely
+    // The StdioServerTransport will handle stdin/stdout until the connection closes
+    await new Promise(() => {
+        // This promise never resolves, keeping the event loop alive
+        // The process will only exit when killed or stdin closes
+    });
 }
 
 // Only run main when this is the entry point, not when imported for testing
