@@ -69,6 +69,65 @@ This means:
 
 The goal is simple: **After a few weeks of use, Protokoll should understand your world well enough to route notes perfectly with minimal intervention.**
 
+## MCP Server: AI Assistant Integration
+
+**NEW:** Protokoll now implements the Model Context Protocol (MCP), making all its capabilities available to AI coding assistants like Claude, Cursor, and other MCP-compatible tools.
+
+### What is MCP?
+
+MCP is a protocol that allows AI assistants to access external data and functionality. Protokoll's MCP server exposes:
+
+#### Resources (Read-Only Data Access)
+- **Transcripts**: Read individual transcript files with `protokoll://transcript/{path}`
+- **Entities**: Access context entities (people, projects, terms) as YAML with `protokoll://entity/{type}/{id}`
+- **Configuration**: View Protokoll setup and entity counts with `protokoll://config`
+- **Transcript Lists**: Browse transcripts by directory with filtering and pagination
+- **Entity Lists**: List all entities of a given type with URIs for navigation
+
+#### Prompts (Workflow Templates)
+- **transcribe_with_context**: Guided transcription with automatic context discovery
+- **setup_project**: Interactive project creation with metadata assistance
+- **review_transcript**: Analyze and improve transcript accuracy
+- **enrich_entity**: Add or update context entities
+- **batch_transcription**: Process multiple audio files
+- **find_and_analyze**: Search and analyze transcript content
+
+#### Tools (Direct Operations)
+All existing CLI tools remain available through MCP for direct operations.
+
+### Using the MCP Server
+
+1. **Build the server**:
+   ```bash
+   npm run mcp:build
+   ```
+
+2. **Test with MCP Inspector**:
+   ```bash
+   npm run mcp:inspect
+   ```
+
+3. **Configure in your AI assistant** (example for Claude Desktop):
+   ```json
+   {
+     "mcpServers": {
+       "protokoll": {
+         "command": "node",
+         "args": ["/path/to/protokoll/dist/mcp/server.js"]
+       }
+     }
+   }
+   ```
+
+Now your AI assistant can:
+- Transcribe audio with context awareness
+- Browse and read transcripts
+- Analyze context entities
+- Guide project setup interactively
+- And much more!
+
+**See**: `guide/mcp-integration.md` for complete MCP documentation.
+
 ## Table of Contents
 
 - [The Problem](#the-problem)
