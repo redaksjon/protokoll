@@ -785,33 +785,78 @@ const addProject = async (
     }
 };
 
+interface TermAddArgs {
+    source?: string;
+    term?: string;
+    id?: string;
+    expansion?: string;
+    domain?: string;
+    description?: string;
+    topics?: string;
+    projects?: string;
+    smart?: boolean;
+}
+
 /**
- * Interactive prompts for adding a term
+ * Add a new term with optional smart assistance
  */
-const addTerm = async (context: Context.ContextInstance): Promise<void> => {
+const addTermEnhanced = async (
+    context: Context.ContextInstance,
+    args: TermAddArgs = {}
+): Promise<void> => {
     const rl = createReadline();
     
     try {
         print('\n[Add New Term]\n');
         
-        const name = await askQuestion(rl, 'Term: ');
+        // Get term name
+        const name = args.term || await askQuestion(rl, 'Term: ');
         if (!name) {
             print('Term is required. Aborting.');
             return;
         }
         
         // Auto-generate ID from term name
-        const finalId = calculateId(name);
+        const finalId = args.id || calculateId(name);
         
         if (context.getTerm(finalId)) {
             print(`Error: Term with ID "${finalId}" already exists.`);
             return;
         }
         
-        const expansion = await askQuestion(rl, 'Expansion (if acronym, Enter to skip): ');
-        const domain = await askQuestion(rl, 'Domain (e.g., engineering, finance, Enter to skip): ');
+        // Get expansion
+        const expansion = args.expansion || await askQuestion(rl, 'Expansion (if acronym, Enter to skip): ');
+        
+        // Get domain
+        const domain = args.domain || await askQuestion(rl, 'Domain (e.g., engineering, finance, Enter to skip): ');
+        
+        // Get description
+        const description = args.description || await askQuestion(rl, 'Description (Enter to skip): ');
+        
+        // Get topics
+        let topicsArray: string[] = [];
+        if (args.topics) {
+            topicsArray = args.topics.split(',').map(t => t.trim()).filter(t => t.length > 0);
+        } else {
+            const topicsStr = await askQuestion(rl, 'Topics (comma-separated, Enter to skip): ');
+            if (topicsStr) {
+                topicsArray = topicsStr.split(',').map(t => t.trim()).filter(t => t.length > 0);
+            }
+        }
+        
+        // Get sounds_like
         const soundsLikeStr = await askQuestion(rl, 'Sounds like (comma-separated, Enter to skip): ');
-        const projectsStr = await askQuestion(rl, 'Associated project IDs (comma-separated, Enter to skip): ');
+        
+        // Get projects
+        let projectsArray: string[] = [];
+        if (args.projects) {
+            projectsArray = args.projects.split(',').map(p => p.trim()).filter(p => p.length > 0);
+        } else {
+            const projectsStr = await askQuestion(rl, 'Associated project IDs (comma-separated, Enter to skip): ');
+            if (projectsStr) {
+                projectsArray = projectsStr.split(',').map(p => p.trim()).filter(p => p.length > 0);
+            }
+        }
         
         const term: Term = {
             id: finalId,
@@ -819,8 +864,10 @@ const addTerm = async (context: Context.ContextInstance): Promise<void> => {
             type: 'term',
             ...(expansion && { expansion }),
             ...(domain && { domain }),
+            ...(description && { description }),
+            ...(topicsArray.length > 0 && { topics: topicsArray }),
             ...(soundsLikeStr && { sounds_like: soundsLikeStr.split(',').map(s => s.trim()) }),
-            ...(projectsStr && { projects: projectsStr.split(',').map(s => s.trim()) }),
+            ...(projectsArray.length > 0 && { projects: projectsArray }),
         };
         
         await context.saveEntity(term);
@@ -1112,15 +1159,13 @@ const createTermCommand = (): Command => {
         .option('--projects <ids>', 'Comma-separated project IDs to associate with')
         .option('--smart', 'Enable smart assistance (override config)')
         .option('--no-smart', 'Disable smart assistance (override config)')
-        .action(async (_source, _cmdOptions) => {
+        .action(async (source, cmdOptions) => {
             const context = await Context.create();
             if (!context.hasContext()) {
                 print('Error: No .protokoll directory found. Run "protokoll --init-config" first.');
                 process.exit(1);
             }
-            // For Step 03, we just pass through to the old addTerm
-            // Step 04 will implement the full smart assistance flow
-            await addTerm(context);
+            await addTermEnhanced(context, { source, ...cmdOptions });
         });
     
     cmd
