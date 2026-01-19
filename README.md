@@ -517,6 +517,12 @@ protokoll project add
 protokoll person add
 protokoll term add
 
+# Add term with command-line arguments
+protokoll term add --term "Kubernetes" --domain "devops" \
+  --description "Container orchestration platform" \
+  --topics "containers,orchestration,cloud-native" \
+  --projects "infrastructure"
+
 # Delete an entity
 protokoll project delete <id>
 protokoll person delete john-smith --force
@@ -1069,13 +1075,24 @@ context: "Primary client"
 ```yaml
 # ~/.protokoll/terms/kubernetes.yaml
 id: kubernetes
-term: Kubernetes
+name: Kubernetes
+type: term
+expansion: ""  # For acronyms (e.g., "K8s" → "Kubernetes")
+domain: devops  # E.g., devops, engineering, security, finance
+description: "Container orchestration platform that automates deployment, scaling, and management"
 sounds_like:
   - "kube"
   - "k8s"
   - "kubernetes"
   - "cube er net ease"
-context: "Container orchestration platform"
+topics:  # Related keywords for classification
+  - containers
+  - orchestration
+  - cloud-native
+  - devops
+projects:  # Associated project IDs where this term is relevant
+  - infrastructure
+  - myapp
 ```
 
 ## Routing System
