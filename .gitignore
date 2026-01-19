@@ -15,4 +15,4 @@ pnpm-workspace.yaml
 # Note: /output/ means only root-level output dir, not src/output/
 package-lock.json
 tsconfig.tsbuildinfo
-*~
+tsconfig (1).tsbuildinfo

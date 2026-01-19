@@ -30,6 +30,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { resolve, dirname } from 'node:path';
 import { readFile, writeFile, mkdir, unlink, stat } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { glob } from 'glob';
 
 // Helper for async file existence check
@@ -1206,6 +1207,8 @@ const tools: Tool[] = [
         name: 'protokoll_edit_transcript',
         description:
             'Edit an existing transcript\'s title and/or project assignment. ' +
+            'IMPORTANT: When you change the title, this tool RENAMES THE FILE to match the new title (slugified). ' +
+            'Always use this tool instead of directly editing transcript files when changing titles. ' +
             'Changing the project will update metadata and may move the file to a new location ' +
             'based on the project\'s routing configuration.',
         inputSchema: {
@@ -1217,7 +1220,7 @@ const tools: Tool[] = [
                 },
                 title: {
                     type: 'string',
-                    description: 'New title for the transcript',
+                    description: 'New title for the transcript. This will RENAME the file to match the slugified title.',
                 },
                 projectId: {
                     type: 'string',
@@ -1513,6 +1516,7 @@ async function handleProcessAudio(args: {
     const outputDirectory = args.outputDirectory || (config.outputDirectory as string) || DEFAULT_OUTPUT_DIRECTORY;
     const outputStructure = (config.outputStructure as string) || DEFAULT_OUTPUT_STRUCTURE;
     const outputFilenameOptions = (config.outputFilenameOptions as string[]) || DEFAULT_OUTPUT_FILENAME_OPTIONS;
+    const processedDirectory = (config.processedDirectory as string) || undefined;
 
     // Get audio file metadata (creation time and hash)
     const { creationTime, hash } = await getAudioMetadata(audioFile);
@@ -1533,6 +1537,7 @@ async function handleProcessAudio(args: {
         outputDirectory,
         outputStructure,
         outputFilenameOptions,
+        processedDirectory,
         maxAudioSize: DEFAULT_MAX_AUDIO_SIZE,
         tempDirectory: DEFAULT_TEMP_DIRECTORY,
     });
@@ -3272,6 +3277,11 @@ async function main() {
 // Only run main when this is the entry point, not when imported for testing
 // Also run if executed directly (not imported)
 if (import.meta.url === `file://${process.argv[1]}` || !process.argv[1] || process.argv[1].includes('server.js')) {
+// ES module equivalent of CommonJS `require.main === module`
+const isMainModule = import.meta.url.startsWith('file:') && 
+    process.argv[1] === fileURLToPath(import.meta.url);
+
+if (isMainModule) {
     main().catch((error) => {
         // eslint-disable-next-line no-console
         console.error(error);
