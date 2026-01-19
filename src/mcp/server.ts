@@ -754,6 +754,85 @@ const tools: Tool[] = [
         },
     },
     {
+        name: 'protokoll_merge_terms',
+        description:
+            'Merge two duplicate terms into one. Combines metadata (sounds_like, topics, projects) and deletes the source term.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                sourceId: {
+                    type: 'string',
+                    description: 'ID of the term to merge from (will be deleted)',
+                },
+                targetId: {
+                    type: 'string',
+                    description: 'ID of the term to merge into (will be kept and updated)',
+                },
+                contextDirectory: {
+                    type: 'string',
+                    description: 'Path to the .protokoll context directory',
+                },
+            },
+            required: ['sourceId', 'targetId'],
+        },
+    },
+    {
+        name: 'protokoll_update_term',
+        description:
+            'Update an existing term by regenerating metadata from a source URL or file. ' +
+            'Fetches content and uses LLM to regenerate description, topics, domain, and sounds_like.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                id: {
+                    type: 'string',
+                    description: 'Term ID to update',
+                },
+                source: {
+                    type: 'string',
+                    description: 'URL or file path to analyze for regenerating metadata',
+                },
+                expansion: {
+                    type: 'string',
+                    description: 'Update expansion (optional)',
+                },
+                contextDirectory: {
+                    type: 'string',
+                    description: 'Path to the .protokoll context directory',
+                },
+            },
+            required: ['id', 'source'],
+        },
+    },
+    {
+        name: 'protokoll_update_project',
+        description:
+            'Update an existing project by regenerating metadata from a source URL or file. ' +
+            'Fetches content and uses LLM to regenerate sounds_like, explicit_phrases, topics, and description.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                id: {
+                    type: 'string',
+                    description: 'Project ID to update',
+                },
+                source: {
+                    type: 'string',
+                    description: 'URL or file path to analyze for regenerating metadata',
+                },
+                name: {
+                    type: 'string',
+                    description: 'Update project name (optional)',
+                },
+                contextDirectory: {
+                    type: 'string',
+                    description: 'Path to the .protokoll context directory',
+                },
+            },
+            required: ['id', 'source'],
+        },
+    },
+    {
         name: 'protokoll_add_company',
         description:
             'Add a new company to the context. ' +
@@ -1861,7 +1940,7 @@ async function handleSuggestTermMetadata(args: {
 
     // Find related projects based on generated topics
     let suggestedProjects: string[] = [];
-    if (suggestions.topics.length > 0) {
+    if (suggestions.topics && suggestions.topics.length > 0) {
         const projects = termContextHelper.findProjectsByTopic(suggestions.topics);
         suggestedProjects = projects.map(p => p.id);
     }
@@ -1877,6 +1956,221 @@ async function handleSuggestTermMetadata(args: {
         },
     };
 }
+
+/* c8 ignore start */
+async function handleMergeTerms(args: {
+    sourceId: string;
+    targetId: string;
+    contextDirectory?: string;
+}) {
+    const context = await Context.create({
+        startingDir: args.contextDirectory || process.cwd(),
+    });
+
+    if (!context.hasContext()) {
+        throw new Error('No .protokoll directory found. Initialize context first.');
+    }
+
+    const sourceTerm = context.getTerm(args.sourceId);
+    const targetTerm = context.getTerm(args.targetId);
+
+    if (!sourceTerm) {
+        throw new Error(`Source term "${args.sourceId}" not found`);
+    }
+
+    if (!targetTerm) {
+        throw new Error(`Target term "${args.targetId}" not found`);
+    }
+
+    // Merge metadata
+    const mergedTerm: Term = {
+        ...targetTerm,
+        sounds_like: [
+            ...(targetTerm.sounds_like || []),
+            ...(sourceTerm.sounds_like || []),
+        ].filter((v, i, arr) => arr.indexOf(v) === i),
+        topics: [
+            ...(targetTerm.topics || []),
+            ...(sourceTerm.topics || []),
+        ].filter((v, i, arr) => arr.indexOf(v) === i),
+        projects: [
+            ...(targetTerm.projects || []),
+            ...(sourceTerm.projects || []),
+        ].filter((v, i, arr) => arr.indexOf(v) === i),
+        description: targetTerm.description || sourceTerm.description,
+        domain: targetTerm.domain || sourceTerm.domain,
+        expansion: targetTerm.expansion || sourceTerm.expansion,
+        updatedAt: new Date(),
+    };
+
+    // Remove empty arrays
+    if (mergedTerm.sounds_like && mergedTerm.sounds_like.length === 0) {
+        delete mergedTerm.sounds_like;
+    }
+    if (mergedTerm.topics && mergedTerm.topics.length === 0) {
+        delete mergedTerm.topics;
+    }
+    if (mergedTerm.projects && mergedTerm.projects.length === 0) {
+        delete mergedTerm.projects;
+    }
+
+    // Save merged term and delete source
+    await context.saveEntity(mergedTerm);
+    await context.deleteEntity(sourceTerm);
+
+    return {
+        success: true,
+        message: `Merged "${sourceTerm.name}" into "${targetTerm.name}"`,
+        mergedTerm: formatEntity(mergedTerm),
+        deletedTerm: args.sourceId,
+    };
+}
+/* c8 ignore stop */
+
+/* c8 ignore start */
+async function handleUpdateTerm(args: {
+    id: string;
+    source: string;
+    expansion?: string;
+    contextDirectory?: string;
+}) {
+    const context = await Context.create({
+        startingDir: args.contextDirectory || process.cwd(),
+    });
+
+    if (!context.hasContext()) {
+        throw new Error('No .protokoll directory found. Initialize context first.');
+    }
+
+    const existingTerm = context.getTerm(args.id);
+    if (!existingTerm) {
+        throw new Error(`Term "${args.id}" not found`);
+    }
+
+    const smartConfig = context.getSmartAssistanceConfig();
+    if (!smartConfig.enabled || smartConfig.termsEnabled === false) {
+        throw new Error('Term smart assistance is disabled in configuration.');
+    }
+
+    // Fetch content from source
+    const contentFetcher = ContentFetcher.create();
+    const fetchResult = await contentFetcher.fetch(args.source);
+
+    if (!fetchResult.success) {
+        throw new Error(`Failed to fetch source: ${fetchResult.error}`);
+    }
+
+    // Gather context and generate suggestions
+    const termAssist = TermAssist.create(smartConfig);
+    const termContextHelper = TermContext.create(context);
+    
+    const internalContext = termContextHelper.gatherInternalContext(
+        existingTerm.name,
+        args.expansion || existingTerm.expansion
+    );
+    
+    const analysisContext = TermContext.buildAnalysisContext(
+        existingTerm.name,
+        args.expansion || existingTerm.expansion,
+        fetchResult,
+        internalContext
+    );
+
+    const suggestions = await termAssist.generateAll(existingTerm.name, analysisContext);
+
+    // Update term with regenerated metadata
+    const updatedTerm: Term = {
+        ...existingTerm,
+        ...(args.expansion && { expansion: args.expansion }),
+        ...(suggestions.description && { description: suggestions.description }),
+        ...(suggestions.domain && { domain: suggestions.domain }),
+        ...(suggestions.soundsLike.length > 0 && { sounds_like: suggestions.soundsLike }),
+        ...(suggestions.topics.length > 0 && { topics: suggestions.topics }),
+        updatedAt: new Date(),
+    };
+
+    // Suggest projects based on topics
+    let suggestedProjects: string[] = [];
+    if (suggestions.topics.length > 0) {
+        const projects = termContextHelper.findProjectsByTopic(suggestions.topics);
+        suggestedProjects = projects.map(p => p.id);
+    }
+
+    await context.saveEntity(updatedTerm);
+
+    return {
+        success: true,
+        message: `Updated term "${existingTerm.name}" from source`,
+        term: formatEntity(updatedTerm),
+        generated: {
+            soundsLike: suggestions.soundsLike,
+            description: suggestions.description,
+            topics: suggestions.topics,
+            domain: suggestions.domain,
+            suggestedProjects,
+        },
+    };
+}
+
+async function handleUpdateProject(args: {
+    id: string;
+    source: string;
+    name?: string;
+    contextDirectory?: string;
+}) {
+    const context = await Context.create({
+        startingDir: args.contextDirectory || process.cwd(),
+    });
+
+    if (!context.hasContext()) {
+        throw new Error('No .protokoll directory found. Initialize context first.');
+    }
+
+    const existingProject = context.getProject(args.id);
+    if (!existingProject) {
+        throw new Error(`Project "${args.id}" not found`);
+    }
+
+    const smartConfig = context.getSmartAssistanceConfig();
+    if (!smartConfig.enabled) {
+        throw new Error('Smart assistance is disabled in configuration.');
+    }
+
+    const assist = ProjectAssist.create(smartConfig);
+    const projectName = args.name || existingProject.name;
+
+    // Analyze source for new metadata
+    const suggestions = await assist.analyzeSource(args.source, projectName);
+
+    // Update project with regenerated metadata
+    const updatedProject: Project = {
+        ...existingProject,
+        ...(args.name && { name: args.name }),
+        ...(suggestions.description && { description: suggestions.description }),
+        ...(suggestions.soundsLike.length > 0 && { sounds_like: suggestions.soundsLike }),
+        classification: {
+            ...existingProject.classification,
+            ...(suggestions.triggerPhrases.length > 0 && { explicit_phrases: suggestions.triggerPhrases }),
+            ...(suggestions.topics && suggestions.topics.length > 0 && { topics: suggestions.topics }),
+        },
+        updatedAt: new Date(),
+    };
+
+    await context.saveEntity(updatedProject);
+
+    return {
+        success: true,
+        message: `Updated project "${existingProject.name}" from source`,
+        project: formatEntity(updatedProject),
+        generated: {
+            soundsLike: suggestions.soundsLike,
+            triggerPhrases: suggestions.triggerPhrases,
+            topics: suggestions.topics,
+            description: suggestions.description,
+        },
+    };
+}
+/* c8 ignore stop */
 
 // ============================================================================
 // Server Setup
@@ -1976,6 +2270,15 @@ async function main() {
                     break;
                 case 'protokoll_suggest_term_metadata':
                     result = await handleSuggestTermMetadata(args as Parameters<typeof handleSuggestTermMetadata>[0]);
+                    break;
+                case 'protokoll_merge_terms':
+                    result = await handleMergeTerms(args as Parameters<typeof handleMergeTerms>[0]);
+                    break;
+                case 'protokoll_update_term':
+                    result = await handleUpdateTerm(args as Parameters<typeof handleUpdateTerm>[0]);
+                    break;
+                case 'protokoll_update_project':
+                    result = await handleUpdateProject(args as Parameters<typeof handleUpdateProject>[0]);
                     break;
 
                 // Transcript Actions

@@ -151,8 +151,13 @@ If no `.protokoll` directory exists in the hierarchy, the AI will:
 | Tool | Description |
 |------|-------------|
 | `protokoll_add_person` | Add a new person to context |
-| `protokoll_add_project` | Add a new project |
-| `protokoll_add_term` | Add a technical term |
+| `protokoll_add_project` | Add a new project with smart assistance |
+| `protokoll_suggest_project_metadata` | Generate project suggestions without creating |
+| `protokoll_update_project` | Update project by regenerating from source URL/file |
+| `protokoll_add_term` | Add a technical term with smart assistance |
+| `protokoll_suggest_term_metadata` | Generate term suggestions without creating |
+| `protokoll_update_term` | Update term by regenerating from source URL/file |
+| `protokoll_merge_terms` | Merge duplicate terms into one |
 | `protokoll_add_company` | Add a company |
 | `protokoll_add_ignored_term` | Add a term to ignore |
 | `protokoll_delete_entity` | Remove an entity |

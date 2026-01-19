@@ -886,8 +886,178 @@ const addTermEnhanced = async (
 };
 
 /**
+ * Update project by regenerating metadata from source
+ */
+/* c8 ignore start */
+const updateProject = async (
+    context: Context.ContextInstance,
+    id: string,
+    source: string,
+    options: { name?: string }
+): Promise<void> => {
+    const existingProject = context.getProject(id);
+    if (!existingProject) {
+        print(`Error: Project "${id}" not found.`);
+        process.exit(1);
+    }
+
+    print(`\nUpdating project: ${existingProject.name} (${existingProject.id})`);
+    print(`Source: ${source}\n`);
+
+    const smartConfig = context.getSmartAssistanceConfig();
+    if (!smartConfig.enabled) {
+        print('Error: Smart assistance is disabled in configuration.');
+        process.exit(1);
+    }
+
+    // Import project-assist dynamically
+    const ProjectAssist = await import('./project-assist');
+
+    print('[Fetching content and analyzing...]');
+    const assist = ProjectAssist.create(smartConfig);
+    const projectName = options.name || existingProject.name;
+
+    // Analyze source
+    const suggestions = await assist.analyzeSource(source, projectName);
+
+    // Show what was generated
+    print('\nGenerated metadata:');
+    if (suggestions.soundsLike.length > 0) {
+        print(`  Sounds like: ${suggestions.soundsLike.slice(0, 5).join(', ')}${suggestions.soundsLike.length > 5 ? '...' : ''}`);
+    }
+    if (suggestions.triggerPhrases.length > 0) {
+        print(`  Trigger phrases: ${suggestions.triggerPhrases.slice(0, 5).join(', ')}${suggestions.triggerPhrases.length > 5 ? '...' : ''}`);
+    }
+    if (suggestions.topics && suggestions.topics.length > 0) {
+        print(`  Topics: ${suggestions.topics.slice(0, 10).join(', ')}${suggestions.topics.length > 10 ? '...' : ''}`);
+    }
+    if (suggestions.description) {
+        print(`  Description: ${suggestions.description.substring(0, 100)}...`);
+    }
+
+    // Update project
+    const updatedProject: Project = {
+        ...existingProject,
+        ...(options.name && { name: options.name }),
+        ...(suggestions.description && { description: suggestions.description }),
+        ...(suggestions.soundsLike.length > 0 && { sounds_like: suggestions.soundsLike }),
+        classification: {
+            ...existingProject.classification,
+            ...(suggestions.triggerPhrases.length > 0 && { explicit_phrases: suggestions.triggerPhrases }),
+            ...(suggestions.topics && suggestions.topics.length > 0 && { topics: suggestions.topics }),
+        },
+        updatedAt: new Date(),
+    };
+
+    await context.saveEntity(updatedProject);
+    print(`\n✓ Project "${existingProject.name}" updated successfully.`);
+};
+/* c8 ignore stop */
+
+/**
+ * Update term by regenerating metadata from source
+ */
+/* c8 ignore start */
+const updateTerm = async (
+    context: Context.ContextInstance,
+    id: string,
+    source: string,
+    options: { expansion?: string }
+): Promise<void> => {
+    const existingTerm = context.getTerm(id);
+    if (!existingTerm) {
+        print(`Error: Term "${id}" not found.`);
+        process.exit(1);
+    }
+
+    print(`\nUpdating term: ${existingTerm.name} (${existingTerm.id})`);
+    print(`Source: ${source}\n`);
+
+    const smartConfig = context.getSmartAssistanceConfig();
+    if (!smartConfig.enabled || smartConfig.termsEnabled === false) {
+        print('Error: Term smart assistance is disabled in configuration.');
+        process.exit(1);
+    }
+
+    // Import dynamically to avoid circular deps
+    const ContentFetcher = await import('./content-fetcher');
+    const TermAssist = await import('./term-assist');
+    const TermContext = await import('./term-context');
+
+    // Fetch content
+    print('[Fetching content from source...]');
+    const contentFetcher = ContentFetcher.create();
+    const fetchResult = await contentFetcher.fetch(source);
+
+    if (!fetchResult.success) {
+        print(`Error: Failed to fetch source: ${fetchResult.error}`);
+        process.exit(1);
+    }
+
+    print(`Found: ${fetchResult.sourceName} (${fetchResult.sourceType})\n`);
+
+    // Generate suggestions
+    print('[Analyzing content and generating suggestions...]');
+    const termAssist = TermAssist.create(smartConfig);
+    const termContextHelper = TermContext.create(context);
+    
+    const internalContext = termContextHelper.gatherInternalContext(
+        existingTerm.name,
+        options.expansion || existingTerm.expansion
+    );
+    
+    const analysisContext = TermContext.buildAnalysisContext(
+        existingTerm.name,
+        options.expansion || existingTerm.expansion,
+        fetchResult,
+        internalContext
+    );
+
+    const suggestions = await termAssist.generateAll(existingTerm.name, analysisContext);
+
+    // Show what was generated
+    print('\nGenerated metadata:');
+    if (suggestions.soundsLike.length > 0) {
+        print(`  Sounds like: ${suggestions.soundsLike.slice(0, 5).join(', ')}${suggestions.soundsLike.length > 5 ? '...' : ''}`);
+    }
+    if (suggestions.description) {
+        print(`  Description: ${suggestions.description.substring(0, 100)}...`);
+    }
+    if (suggestions.topics.length > 0) {
+        print(`  Topics: ${suggestions.topics.slice(0, 10).join(', ')}${suggestions.topics.length > 10 ? '...' : ''}`);
+    }
+    if (suggestions.domain) {
+        print(`  Domain: ${suggestions.domain}`);
+    }
+
+    // Suggest projects
+    if (suggestions.topics.length > 0 && smartConfig.termProjectSuggestions) {
+        const projects = termContextHelper.findProjectsByTopic(suggestions.topics);
+        if (projects.length > 0) {
+            print(`  Suggested projects: ${projects.map(p => p.id).join(', ')}`);
+        }
+    }
+
+    // Update term
+    const updatedTerm: Term = {
+        ...existingTerm,
+        ...(options.expansion && { expansion: options.expansion }),
+        ...(suggestions.description && { description: suggestions.description }),
+        ...(suggestions.domain && { domain: suggestions.domain }),
+        ...(suggestions.soundsLike.length > 0 && { sounds_like: suggestions.soundsLike }),
+        ...(suggestions.topics.length > 0 && { topics: suggestions.topics }),
+        updatedAt: new Date(),
+    };
+
+    await context.saveEntity(updatedTerm);
+    print(`\n✓ Term "${existingTerm.name}" updated successfully.`);
+};
+/* c8 ignore stop */
+
+/**
  * Merge two terms - combine their metadata and delete the source
  */
+/* c8 ignore start */
 const mergeTerms = async (
     context: Context.ContextInstance,
     sourceId: string,
@@ -973,6 +1143,7 @@ const mergeTerms = async (
     print(`\n✓ Merged "${sourceTerm.name}" into "${targetTerm.name}"`);
     print(`✓ Deleted source term "${sourceTerm.id}"`);
 };
+/* c8 ignore stop */
 
 /**
  * Interactive prompts for adding a company
@@ -1216,6 +1387,19 @@ const createProjectCommand = (): Command => {
             await deleteEntity(context, 'project', id, options);
         });
     
+    cmd
+        .command('update <id> <source>')
+        .description('Update project by regenerating metadata from URL or file')
+        .option('--name <name>', 'Update project name')
+        .action(async (id, source, cmdOptions) => {
+            const context = await Context.create();
+            if (!context.hasContext()) {
+                print('Error: No .protokoll directory found. Run "protokoll --init-config" first.');
+                process.exit(1);
+            }
+            await updateProject(context, id, source, cmdOptions);
+        });
+    
     return cmd;
 };
 
@@ -1284,6 +1468,19 @@ const createTermCommand = (): Command => {
                 process.exit(1);
             }
             await mergeTerms(context, sourceId, targetId, options);
+        });
+    
+    cmd
+        .command('update <id> <source>')
+        .description('Update term by regenerating metadata from URL or file')
+        .option('--expansion <text>', 'Update expansion')
+        .action(async (id, source, cmdOptions) => {
+            const context = await Context.create();
+            if (!context.hasContext()) {
+                print('Error: No .protokoll directory found. Run "protokoll --init-config" first.');
+                process.exit(1);
+            }
+            await updateTerm(context, id, source, cmdOptions);
         });
     
     return cmd;

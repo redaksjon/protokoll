@@ -537,6 +537,39 @@ Associated project IDs (comma-separated, Enter to skip): api-project
 Term "GraphQL" saved successfully.
 ```
 
+### Update a Term from Source
+
+Regenerate term metadata by analyzing updated documentation:
+
+```bash
+protokoll term update kubernetes https://kubernetes.io/docs/concepts/overview/
+```
+
+This will:
+- Fetch content from the URL
+- Regenerate description, topics, domain using LLM
+- Generate new sounds_like variants
+- Suggest relevant projects based on topics
+- Update the term file with new metadata
+
+**Use case**: The Kubernetes project has evolved significantly. Update the term definition to reflect current documentation.
+
+### Merge Duplicate Terms
+
+```bash
+protokoll term merge kubernetes-dupe kubernetes
+```
+
+This will:
+- Combine sounds_like arrays (deduplicated)
+- Combine topics arrays (deduplicated)
+- Combine projects arrays (deduplicated)
+- Keep target's description/domain (fall back to source if missing)
+- Delete the source term
+- Save the merged term
+
+**Use case**: You accidentally created "kubernetes" and "k8s" as separate terms. Merge them into one.
+
 ### Delete a Term
 
 ```bash

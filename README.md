@@ -523,6 +523,13 @@ protokoll term add --term "Kubernetes" --domain "devops" \
   --topics "containers,orchestration,cloud-native" \
   --projects "infrastructure"
 
+# Update existing entity with new content (regenerates metadata)
+protokoll project update redaksjon https://github.com/user/redaksjon/README.md
+protokoll term update kubernetes https://kubernetes.io/docs/concepts/overview/
+
+# Merge duplicate terms
+protokoll term merge kubernetes-old kubernetes  # Combines metadata, deletes source
+
 # Delete an entity
 protokoll project delete <id>
 protokoll person delete john-smith --force
