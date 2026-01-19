@@ -5,6 +5,8 @@
  * Validates that the Protokoll MCP server implements required MCP features correctly.
  */
 
+/* eslint-disable no-console */
+
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
@@ -20,7 +22,7 @@ console.log('🔍 Testing MCP Compliance...\n');
 import { access } from 'fs/promises';
 try {
     await access(serverPath);
-} catch (error) {
+} catch {
     console.error('❌ Server not built. Run `npm run build` first.');
     process.exit(1);
 }
@@ -34,6 +36,7 @@ const serverProcess = spawn('node', [serverPath], {
     stdio: ['pipe', 'pipe', 'pipe']
 });
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 let initOutput = '';
 let initError = '';
 
@@ -60,6 +63,7 @@ if (serverProcess.exitCode === null) {
 
 // Test 2: Verify capabilities are declared
 console.log('Testing: Capabilities declaration...');
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const serverCode = await import(serverPath);
 // Basic check that imports work
 console.log('✅ Server module loads\n');
@@ -72,7 +76,7 @@ try {
     execSync('npx tsc --noEmit', { cwd: resolve(__dirname, '..'), stdio: 'pipe' });
     console.log('✅ TypeScript compiles without errors\n');
     passed++;
-} catch (error) {
+} catch {
     console.log('❌ TypeScript compilation failed');
     failed++;
 }

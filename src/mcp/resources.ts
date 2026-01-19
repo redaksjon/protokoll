@@ -15,11 +15,12 @@ import type {
     TranscriptsListUri,
     EntitiesListUri,
 } from './types';
-import { parseUri, buildTranscriptUri, buildEntityUri } from './uri';
+import { parseUri, buildTranscriptUri, buildEntityUri, buildConfigUri, buildTranscriptsListUri, buildEntitiesListUri } from './uri';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import * as Context from '@/context';
 import * as yaml from 'js-yaml';
+import { listTranscripts } from '@/cli/transcript';
 
 // ============================================================================
 // Resource Definitions
@@ -75,15 +76,51 @@ export const resourceTemplates: McpResourceTemplate[] = [
 /**
  * Handle resources/list request
  */
-export async function handleListResources(): Promise<{
+export async function handleListResources(contextDirectory?: string): Promise<{
     resources: McpResource[];
     resourceTemplates?: McpResourceTemplate[];
 }> {
-    // TODO: Implement dynamic resource listing
+    // Get dynamic resources from context if available
+    const dynamicResources = await getDynamicResources(contextDirectory);
+    
     return {
-        resources: directResources,
+        resources: [...directResources, ...dynamicResources],
         resourceTemplates,
     };
+}
+
+async function getDynamicResources(contextDirectory?: string): Promise<McpResource[]> {
+    const resources: McpResource[] = [];
+    
+    try {
+        const context = await Context.create({
+            startingDir: contextDirectory || process.cwd(),
+        });
+
+        if (!context.hasContext()) {
+            return resources;
+        }
+
+        // Add config resource
+        const dirs = context.getDiscoveredDirs();
+        const configPath = dirs[0]?.path;
+        if (configPath) {
+            resources.push({
+                uri: buildConfigUri(configPath),
+                name: 'Current Configuration',
+                description: `Protokoll configuration at ${configPath}`,
+                mimeType: 'application/json',
+            });
+        }
+
+        // Could add more dynamic resources here
+        // (e.g., recently accessed transcripts, favorite entities)
+
+    } catch {
+        // Context not available, return empty
+    }
+
+    return resources;
 }
 
 /**
@@ -188,25 +225,184 @@ export async function readEntityResource(
     };
 }
 
-export async function readConfigResource(_configPath?: string): Promise<McpResourceContents> {
-    // TODO: Implement
-    throw new Error('Not implemented');
+export async function readConfigResource(
+    configPath?: string
+): Promise<McpResourceContents> {
+    const startDir = configPath || process.cwd();
+    
+    const context = await Context.create({
+        startingDir: startDir,
+    });
+
+    if (!context.hasContext()) {
+        throw new Error(`No Protokoll context found at or above: ${startDir}`);
+    }
+
+    const dirs = context.getDiscoveredDirs();
+    const config = context.getConfig();
+
+    const configData = {
+        hasContext: true,
+        discoveredDirectories: dirs.map(d => ({
+            path: d.path,
+            level: d.level,
+            isPrimary: d.level === 0,
+        })),
+        entityCounts: {
+            projects: context.getAllProjects().length,
+            people: context.getAllPeople().length,
+            terms: context.getAllTerms().length,
+            companies: context.getAllCompanies().length,
+            ignored: context.getAllIgnored().length,
+        },
+        config: {
+            outputDirectory: config.outputDirectory,
+            outputStructure: config.outputStructure,
+            model: config.model,
+            smartAssistance: context.getSmartAssistanceConfig(),
+        },
+        // Include URIs for easy navigation
+        resourceUris: {
+            projects: buildEntitiesListUri('project'),
+            people: buildEntitiesListUri('person'),
+            terms: buildEntitiesListUri('term'),
+            companies: buildEntitiesListUri('company'),
+        },
+    };
+
+    return {
+        uri: buildConfigUri(configPath),
+        mimeType: 'application/json',
+        text: JSON.stringify(configData, null, 2),
+    };
 }
 
-export async function readTranscriptsListResource(_options: {
+export async function readTranscriptsListResource(options: {
     directory: string;
     startDate?: string;
     endDate?: string;
     limit?: number;
     offset?: number;
 }): Promise<McpResourceContents> {
-    // TODO: Implement
-    throw new Error('Not implemented');
+    const { directory, startDate, endDate, limit = 50, offset = 0 } = options;
+
+    if (!directory) {
+        throw new Error('Directory is required for transcripts list');
+    }
+
+    const result = await listTranscripts({
+        directory,
+        limit,
+        offset,
+        sortBy: 'date',
+        startDate,
+        endDate,
+    });
+
+    // Convert to resource format with URIs
+    const transcriptsWithUris = result.transcripts.map(t => ({
+        uri: buildTranscriptUri(t.path),
+        path: t.path,
+        filename: t.filename,
+        date: t.date,
+        time: t.time,
+        title: t.title,
+    }));
+
+    const responseData = {
+        directory,
+        transcripts: transcriptsWithUris,
+        pagination: {
+            total: result.total,
+            limit: result.limit,
+            offset: result.offset,
+            hasMore: result.hasMore,
+        },
+        filters: {
+            startDate,
+            endDate,
+        },
+    };
+
+    return {
+        uri: buildTranscriptsListUri(options),
+        mimeType: 'application/json',
+        text: JSON.stringify(responseData, null, 2),
+    };
 }
 
 export async function readEntitiesListResource(
-    _entityType: string
+    entityType: string,
+    contextDirectory?: string
 ): Promise<McpResourceContents> {
-    // TODO: Implement
-    throw new Error('Not implemented');
+    const context = await Context.create({
+        startingDir: contextDirectory || process.cwd(),
+    });
+
+    if (!context.hasContext()) {
+        throw new Error('No Protokoll context found');
+    }
+
+    let entities: Array<{ id: string; name: string; [key: string]: unknown }>;
+    
+    switch (entityType) {
+        case 'person':
+            entities = context.getAllPeople().map(p => ({
+                uri: buildEntityUri('person', p.id),
+                id: p.id,
+                name: p.name,
+                company: p.company,
+                role: p.role,
+            }));
+            break;
+        case 'project':
+            entities = context.getAllProjects().map(p => ({
+                uri: buildEntityUri('project', p.id),
+                id: p.id,
+                name: p.name,
+                active: p.active !== false,
+                destination: p.routing?.destination,
+            }));
+            break;
+        case 'term':
+            entities = context.getAllTerms().map(t => ({
+                uri: buildEntityUri('term', t.id),
+                id: t.id,
+                name: t.name,
+                expansion: t.expansion,
+                domain: t.domain,
+            }));
+            break;
+        case 'company':
+            entities = context.getAllCompanies().map(c => ({
+                uri: buildEntityUri('company', c.id),
+                id: c.id,
+                name: c.name,
+                fullName: c.fullName,
+                industry: c.industry,
+            }));
+            break;
+        case 'ignored':
+            entities = context.getAllIgnored().map(i => ({
+                uri: buildEntityUri('ignored', i.id),
+                id: i.id,
+                name: i.name,
+                reason: i.reason,
+            }));
+            break;
+        default:
+            throw new Error(`Unknown entity type: ${entityType}`);
+    }
+
+    const responseData = {
+        entityType,
+        count: entities.length,
+        entities,
+    };
+
+    return {
+        uri: buildEntitiesListUri(entityType as any),
+        mimeType: 'application/json',
+        text: JSON.stringify(responseData, null, 2),
+    };
 }
