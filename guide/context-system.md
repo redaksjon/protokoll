@@ -91,27 +91,89 @@ context: "Client company in manufacturing"
 ```yaml
 # ~/.protokoll/terms/kubernetes.yaml
 id: kubernetes
-term: Kubernetes
+name: Kubernetes
+type: term
+expansion: "K8s"  # For acronyms
+domain: devops
+description: "Container orchestration platform"
 sounds_like:
   - "kube"
   - "k8s"
   - "kuber netties"
-  - "kubernetes"
-context: "Container orchestration platform"
+topics:
+  - containers
+  - orchestration
+projects:
+  - infrastructure
 ```
+
+---
+
+## Project Relationships (Optional)
+
+**Most users don't need this.** Only use if you have a clear parent/child project hierarchy.
+
+For modeling project hierarchies:
+
+```yaml
+# Parent project
+id: redaksjon
+name: Redaksjon
+relationships:
+  children:
+    - protokoll
+    - kronologi
+    - observasjon
+
+# Child project
+id: kronologi
+name: Kronologi
+relationships:
+  parent: redaksjon
+  siblings:
+    - protokoll
+    - observasjon
+  relatedTerms:
+    - git
+    - history
+```
+
+**Relationship types:**
+- `parent` - Parent project ID
+- `children` - Array of child project IDs
+- `siblings` - Related peer projects
+- `relatedTerms` - Terms strongly associated with this project
+
+**When useful:**
+- You have a main project with clear subprojects
+- Project names are similar and need disambiguation
+- Want related projects to boost each other in search
+
+**Example:** Parent "Redaksjon" with children "Protokoll", "Kronologi", "Observasjon"
 
 ## Phonetic Aliases (sounds_like)
 
-The `sounds_like` field maps common mishearings to correct spellings:
+The `sounds_like` field maps how Whisper transcribes things to correct spellings. Works for everything:
 
 ```yaml
+# Single words
 sounds_like:
   - "pre a"         # Whisper might hear "Priya" as "pre a"
   - "pria"          # Or as "pria"
-  - "preeya"        # Or as "preeya"
+
+# Multi-word terms (e.g., "DreadCabinet")
+sounds_like:
+  - "dread cabinet"  # How Whisper splits CamelCase
+  - "thread cabinet" # Common mishearing
+
+# Technical terms
+sounds_like:
+  - "kube"           # Short form
+  - "k8s"            # Abbreviation
+  - "coober netties" # Phonetic mishearing
 ```
 
-When Protokoll sees any of these in a transcript, it knows to correct them.
+When Protokoll sees any of these in a transcript, it corrects them to the canonical name.
 
 ## Hierarchical Discovery
 
@@ -152,16 +214,55 @@ interface ContextInstance {
   getAllCompanies(): Company[];
   getAllTerms(): Term[];
   
-  // Phonetic lookup
-  findByPhonetic(sounds_like: string): Entity | undefined;
+  // Basic search
+  search(query: string): Entity[];
+  findBySoundsLike(phonetic: string): Entity | undefined;
+  
+  // Context-aware search (prefers entities related to context project)
+  searchWithContext(query: string, contextProjectId?: string): Entity[];
+  
+  // Relationship queries
+  getRelatedProjects(projectId: string, maxDistance?: number): Project[];
   
   // State
   hasContext(): boolean;
   
   // Persistence
-  savePerson(person: Person): Promise<void>;
-  saveProject(project: Project): Promise<void>;
+  saveEntity(entity: Entity): Promise<void>;
+  deleteEntity(entity: Entity): Promise<boolean>;
 }
+```
+
+### Context-Aware Search
+
+The `searchWithContext` method prefers entities related to a context project:
+
+```typescript
+// Standard search - returns all matches
+const results = context.search("protokoll");
+
+// Context-aware search - prioritizes related projects
+const results = context.searchWithContext("protokoll", "redaksjon");
+// Scores: Protokoll (child of redaksjon) gets +100 bonus
+```
+
+**Relationship scoring:**
+- Same project: +150
+- Parent/child: +100
+- Sibling: +50
+- Term associated with project: +100
+
+### Relationship Queries
+
+```typescript
+// Get all related projects within distance 2
+const related = context.getRelatedProjects("redaksjon", 2);
+// Returns: [protokoll (distance 1), kronologi (distance 1), ...]
+
+// Check relationship distance
+import { getProjectRelationshipDistance } from '@/context/types';
+const distance = getProjectRelationshipDistance(redaksjon, kronologi);
+// Returns: 1 (parent-child)
 ```
 
 ## Usage in Agentic Tools

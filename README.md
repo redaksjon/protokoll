@@ -18,7 +18,7 @@ Protokoll solves this.
 Protokoll is an intelligent audio transcription system that uses advanced reasoning models to create highly accurate, context-enhanced transcripts. Unlike basic transcription tools, Protokoll:
 
 - **Learns Your World**: Maintains a knowledge base of people, projects, and organizations you mention. When Whisper mishears someone, Protokoll recognizes and corrects it using phonetic variants and context awareness
-- **Routes Intelligently**: Multi-signal classification sends notes to the right destination—work notes stay in your work folder, client calls go to client projects, personal thoughts go to personal notes
+- **Routes Intelligently**: Multi-signal classification sends notes to the right destination—work notes stay in your work folder, client calls go to client projects, personal thoughts go to personal notes. Tags are automatically deduplicated when multiple classification signals identify the same topic
 - **Preserves Everything**: This is NOT a summarizer. Protokoll preserves the full content of what you said while cleaning up filler words, false starts, and obvious transcription errors
 - **Improves Over Time**: The more you use it, the smarter it gets. Build context incrementally and watch transcription quality improve session after session
 - **Zero Configuration Start**: Works out of the box with sensible defaults. No API wrestling, no complex setup—just transcribe
@@ -583,6 +583,10 @@ protokoll term add --term "Kubernetes" --domain "devops" \
   --topics "containers,orchestration,cloud-native" \
   --projects "infrastructure"
 
+# Edit existing entities (incremental changes)
+protokoll project edit <id> --add-topic <topic> --add-phrase <phrase>
+protokoll term edit <id> --add-sound <variant> --add-project <id>
+
 # Update existing entity with new content (regenerates metadata)
 protokoll project update redaksjon https://github.com/user/redaksjon/README.md
 protokoll term update kubernetes https://kubernetes.io/docs/concepts/overview/
@@ -729,6 +733,35 @@ Override per-command with `--smart` or `--no-smart` flags.
 
 - OpenAI API key set in environment (`OPENAI_API_KEY`)
 - Network access for URL fetching and API calls
+
+### Editing Project Classification
+
+Modify how projects are matched to transcripts:
+
+```bash
+# Add trigger phrases (high-confidence matching)
+protokoll project edit work \
+  --add-phrase "work meeting" \
+  --add-phrase "office discussion"
+
+# Add topics (theme-based matching)
+protokoll project edit work \
+  --add-topic standup \
+  --add-topic sprint
+
+# Associate people (routes when mentioned)
+protokoll project edit client-alpha \
+  --add-person priya-sharma \
+  --add-person john-smith
+
+# Associate companies
+protokoll project edit client-work \
+  --add-company acme-corp
+```
+
+Use `protokoll project show <id>` to see all classification fields.
+
+**See:** [Context Commands Guide](./guide/context-commands.md#understanding-classification) for detailed explanation of each field.
 
 ### Example: Adding a Project
 
@@ -1228,6 +1261,29 @@ projects:  # Associated project IDs where this term is relevant
   - infrastructure
   - myapp
 ```
+
+### Project Relationships (Optional)
+
+If you have a parent project with subprojects, you can model the hierarchy. Protokoll will automatically suggest relationships when you create projects:
+
+```bash
+# When creating a project interactively, Protokoll suggests:
+protokoll project add --name "Kronologi"
+
+# [Suggested parent project: Redaksjon]
+#   Reason: topic "redaksjon-subproject" indicates subproject
+#   Confidence: high
+# Set "Redaksjon" as parent? (Y/n): y
+```
+
+Or edit relationships manually:
+
+```bash
+protokoll project edit kronologi --parent redaksjon --add-sibling protokoll
+```
+
+This helps routing and disambiguation. Most users won't need this.
+
 
 ## Routing System
 

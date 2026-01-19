@@ -36,6 +36,15 @@ npm run lint
 npm run lint:fix  # Auto-fix issues
 ```
 
+## Recent Fixes
+
+### Tag Deduplication (2026-01-19)
+
+Tags in transcript metadata are now automatically deduplicated. Previously, when the same entity (e.g., "xenocline") was identified through multiple classification signals (e.g., both as an explicit phrase and as an associated project), it would appear multiple times in the tags array. Now tags are deduplicated using Set, ensuring each tag appears only once regardless of how many signals identify it.
+
+**Changed**: `src/util/metadata.ts` - `extractTagsFromSignals()` function
+**Tests**: `tests/util/metadata.test.ts` - Added deduplication test case
+
 ## Project Structure
 
 ```

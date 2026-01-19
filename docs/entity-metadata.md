@@ -69,6 +69,8 @@ Here's a complete example showing how entity metadata appears in context:
 
 **Tags**: `kubernetes`, `deployment`, `infrastructure`
 
+**Note**: Tags are automatically deduplicated when multiple classification signals identify the same value.
+
 **Duration**: 15m 30s
 
 ---
@@ -254,6 +256,9 @@ Referenced when:
   id: string;    // e.g., "priya-sharma"
   name: string;  // e.g., "Priya Sharma"
   type: 'person';
+  company?: string;  // Company ID
+  role?: string;
+  sounds_like?: string[];
 }
 ```
 
@@ -268,10 +273,35 @@ Referenced when:
 ```typescript
 {
   id: string;    // e.g., "project-alpha"
-  name: string;  // e.g., "Project Alpha"
+  name: string;  // e.g., "Project Alpha" (always correct spelling)
   type: 'project';
+  sounds_like?: string[];  // Alternative spellings/mishearings
+  classification: {
+    context_type: 'work' | 'personal' | 'mixed';
+    topics?: string[];
+    explicit_phrases?: string[];
+    associated_people?: string[];     // Person IDs
+    associated_companies?: string[];  // Company IDs
+  };
+  routing: {
+    destination?: string;
+    structure: 'none' | 'year' | 'month' | 'day';
+    filename_options: string[];
+  };
+  relationships?: {  // Optional - for parent/child hierarchies
+    parent?: string;
+    children?: string[];
+    siblings?: string[];
+    relatedTerms?: string[];
+  };
 }
 ```
+
+**Key points:**
+- `name` is always the correct spelling (e.g., "Protokoll" for Norwegian project)
+- `sounds_like` has alternative spellings (e.g., ["protocol", "pro-to-koll"])
+- System corrects from sounds_like → name
+- Relationships are optional, only needed for hierarchies
 
 ### Terms
 
@@ -286,8 +316,16 @@ Referenced when:
   id: string;    // e.g., "kubernetes"
   name: string;  // e.g., "Kubernetes"
   type: 'term';
+  expansion?: string;  // For acronyms (e.g., "K8s")
+  domain?: string;     // e.g., "devops", "engineering"
+  description?: string;
+  sounds_like?: string[];  // Works for everything - single words, multi-word, etc.
+  topics?: string[];
+  projects?: string[];  // Associated project IDs
 }
 ```
+
+**Note:** For multi-word terms like "DreadCabinet" that Whisper splits into "Dread Cabinet", just add "dread cabinet" to `sounds_like`. No special configuration needed.
 
 ### Companies
 
@@ -302,6 +340,9 @@ Referenced when:
   id: string;    // e.g., "acme-corp"
   name: string;  // e.g., "Acme Corp"
   type: 'company';
+  fullName?: string;
+  industry?: string;
+  sounds_like?: string[];
 }
 ```
 

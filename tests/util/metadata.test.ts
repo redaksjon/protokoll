@@ -327,6 +327,20 @@ describe('metadata', () => {
 
             expect(result).toEqual([]);
         });
+
+        it('should deduplicate tags from multiple signals with same value', () => {
+            const signals: Routing.ClassificationSignal[] = [
+                { type: 'explicit_phrase', value: 'xenocline', weight: 0.9 },
+                { type: 'associated_project', value: 'xenocline', weight: 0.8 },
+                { type: 'topic', value: 'security', weight: 0.6 },
+                { type: 'topic', value: 'xenocline', weight: 0.5 },
+            ];
+
+            const result = Metadata.extractTagsFromSignals(signals);
+
+            expect(result).toEqual(['xenocline', 'security']);
+            expect(result.length).toBe(2);
+        });
     });
     
     describe('formatEntityMetadataMarkdown', () => {

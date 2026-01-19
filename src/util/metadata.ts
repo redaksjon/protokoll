@@ -306,12 +306,16 @@ export const extractTopicFromSignals = (signals: Routing.ClassificationSignal[])
 
 /**
  * Extract all tags from routing signals
+ * Tags are deduplicated to avoid duplicates from multiple signal sources
  */
 export const extractTagsFromSignals = (signals: Routing.ClassificationSignal[]): string[] => {
-    return signals
+    const tags = signals
         .filter(s => s.type !== 'context_type')  // Skip generic context type
         .map(s => s.value)
         .filter((v): v is string => typeof v === 'string');
+    
+    // Deduplicate tags using Set
+    return Array.from(new Set(tags));
 };
 
 
