@@ -1,21 +1,25 @@
-/* eslint-disable import/extensions */
 /**
  * MCP Tools - Exports all tool definitions and handlers
  */
- 
+
+// eslint-disable-next-line import/extensions
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
- 
-import * as DiscoveryTools from './discoveryTools.js';
- 
-import * as AudioTools from './audioTools.js';
- 
-import * as ContextTools from './contextTools.js';
- 
-import * as EntityTools from './entityTools.js';
- 
-import * as AssistTools from './assistTools.js';
- 
-import * as TranscriptTools from './transcriptTools.js';
+
+import * as DiscoveryTools from './discoveryTools';
+import * as AudioTools from './audioTools';
+import * as ContextTools from './contextTools';
+import * as EntityTools from './entityTools';
+import * as AssistTools from './assistTools';
+import * as TranscriptTools from './transcriptTools';
+
+// Re-export all handlers for testing
+export * from './discoveryTools';
+export * from './audioTools';
+export * from './contextTools';
+export * from './entityTools';
+export * from './assistTools';
+export * from './transcriptTools';
+export * from './shared';
 
 // ============================================================================
 // All Tools

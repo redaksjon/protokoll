@@ -1,7 +1,8 @@
 /**
  * Audio Processing Tools - Process audio files through transcription pipeline
  */
-import type { Tool } from '@modelcontextprotocol/sdk/types';
+// eslint-disable-next-line import/extensions
+import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { resolve, dirname } from 'node:path';
 import { glob } from 'glob';
 import * as Context from '@/context';

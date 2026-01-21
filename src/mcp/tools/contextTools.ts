@@ -1,7 +1,8 @@
 /**
  * Context Management Tools - View and search context entities
  */
-import type { Tool } from '@modelcontextprotocol/sdk/types';
+// eslint-disable-next-line import/extensions
+import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import * as Context from '@/context';
 import type { Entity, EntityType } from '@/context/types';
 import { formatEntity } from './shared';

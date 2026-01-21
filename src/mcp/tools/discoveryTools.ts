@@ -1,7 +1,8 @@
 /**
  * Discovery Tools - Configuration discovery and project suggestion
  */
-import type { Tool } from '@modelcontextprotocol/sdk/types';
+// eslint-disable-next-line import/extensions
+import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { resolve, dirname } from 'node:path';
 import { stat } from 'node:fs/promises';
 import * as Context from '@/context';
@@ -14,7 +15,7 @@ import { fileExists, type DiscoveredConfig, type ProjectSuggestion } from './sha
 /**
  * Walk up the directory tree from a starting path to find .protokoll directories
  */
-async function findProtokolkConfigs(startPath: string, maxLevels: number = 10): Promise<string[]> {
+export async function findProtokolkConfigs(startPath: string, maxLevels: number = 10): Promise<string[]> {
     const configs: string[] = [];
     let currentPath = resolve(startPath);
     let levels = 0;
@@ -37,7 +38,7 @@ async function findProtokolkConfigs(startPath: string, maxLevels: number = 10): 
 /**
  * Get information about a .protokoll configuration
  */
-async function getConfigInfo(protokollPath: string): Promise<DiscoveredConfig> {
+export async function getConfigInfo(protokollPath: string): Promise<DiscoveredConfig> {
     const context = await Context.create({ startingDir: dirname(protokollPath) });
     const config = context.getConfig();
 
@@ -55,7 +56,7 @@ async function getConfigInfo(protokollPath: string): Promise<DiscoveredConfig> {
 /**
  * Suggest which project an audio file might belong to based on its location
  */
-async function suggestProjectsForFile(audioFile: string): Promise<{
+export async function suggestProjectsForFile(audioFile: string): Promise<{
     configs: DiscoveredConfig[];
     suggestions: ProjectSuggestion[];
     needsUserInput: boolean;

@@ -28,12 +28,9 @@ import {
 // eslint-disable-next-line import/extensions
 } from '@modelcontextprotocol/sdk/types.js';
 import { fileURLToPath } from 'node:url';
-// eslint-disable-next-line import/extensions
-import * as Resources from './resources.js';
-// eslint-disable-next-line import/extensions
-import * as Prompts from './prompts/index.js';
-// eslint-disable-next-line import/extensions
-import { tools, handleToolCall } from './tools/index.js';
+import * as Resources from './resources';
+import * as Prompts from './prompts';
+import { tools, handleToolCall } from './tools';
 
 // ============================================================================
 // Server Setup

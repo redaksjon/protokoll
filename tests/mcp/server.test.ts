@@ -55,7 +55,7 @@ import {
     tools,
     type DiscoveredConfig,
     type ProjectSuggestion,
-} from '../../src/mcp/server';
+} from '../../src/mcp/tools';
 
 // Sample transcript content for testing
 const SAMPLE_TRANSCRIPT = `# Test Meeting Notes
@@ -1074,7 +1074,7 @@ Content from part 2.
 
     describe('handleBatchProcess', () => {
         it('should throw error for non-existent input directory', async () => {
-            const { handleBatchProcess } = await import('../../src/mcp/server');
+            const { handleBatchProcess } = await import('../../src/mcp/tools');
             const fakePath = path.join(tempDir, 'nonexistent-dir');
             await expect(handleBatchProcess({
                 inputDirectory: fakePath,
@@ -1083,7 +1083,7 @@ Content from part 2.
         });
 
         it('should return empty arrays when no audio files found', async () => {
-            const { handleBatchProcess } = await import('../../src/mcp/server');
+            const { handleBatchProcess } = await import('../../src/mcp/tools');
             const emptyDir = path.join(tempDir, 'empty-audio-dir');
             await fs.mkdir(emptyDir, { recursive: true });
 

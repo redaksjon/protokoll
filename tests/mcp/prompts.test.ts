@@ -155,9 +155,9 @@ describe('MCP Prompts', () => {
                     audioFile,
                 });
 
-                expect(result.messages.length).toBeGreaterThan(1);
-                const assistantMessage = result.messages[1];
-                expect(assistantMessage.role).toBe('assistant');
+                expect(result.messages.length).toBe(1);
+                const userMessage = result.messages[0];
+                expect(userMessage.role).toBe('user');
             });
 
             it('should show context info when available', async () => {
@@ -168,9 +168,9 @@ describe('MCP Prompts', () => {
                     audioFile,
                 });
 
-                const assistantMessage = result.messages[1];
-                if (assistantMessage.content.type === 'text') {
-                    expect(assistantMessage.content.text).toContain('Context Discovery');
+                const userMessage = result.messages[0];
+                if (userMessage.content.type === 'text') {
+                    expect(userMessage.content.text).toContain('Context Discovery');
                 }
             });
 
@@ -180,15 +180,15 @@ describe('MCP Prompts', () => {
                 });
 
                 expect(result.messages).toBeDefined();
-                const assistantMessage = result.messages[1];
-                if (assistantMessage.content.type === 'text') {
-                    expect(assistantMessage.content.text).toContain('File Check Failed');
+                const userMessage = result.messages[0];
+                if (userMessage.content.type === 'text') {
+                    expect(userMessage.content.text).toContain('File Check Failed');
                 }
             });
 
             it('should show no context message when context not available', async () => {
                 mockContext.hasContext = vi.fn(() => false);
-                
+
                 const audioFile = path.join(tempDir, 'test.m4a');
                 await fs.writeFile(audioFile, 'dummy');
 
@@ -196,9 +196,9 @@ describe('MCP Prompts', () => {
                     audioFile,
                 });
 
-                const assistantMessage = result.messages[1];
-                if (assistantMessage.content.type === 'text') {
-                    expect(assistantMessage.content.text).toContain('No Context Found');
+                const userMessage = result.messages[0];
+                if (userMessage.content.type === 'text') {
+                    expect(userMessage.content.text).toContain('No Context Found');
                 }
             });
         });
@@ -210,7 +210,7 @@ describe('MCP Prompts', () => {
                 });
 
                 expect(result.messages).toBeDefined();
-                expect(result.messages.length).toBe(2);
+                expect(result.messages.length).toBe(1);
             });
 
             it('should include project name in messages', async () => {
@@ -230,9 +230,9 @@ describe('MCP Prompts', () => {
                     sourceUrl: 'https://example.com/docs',
                 });
 
-                const assistantMessage = result.messages[1];
-                if (assistantMessage.content.type === 'text') {
-                    expect(assistantMessage.content.text).toContain('https://example.com/docs');
+                const userMessage = result.messages[0];
+                if (userMessage.content.type === 'text') {
+                    expect(userMessage.content.text).toContain('https://example.com/docs');
                 }
             });
 
@@ -242,9 +242,9 @@ describe('MCP Prompts', () => {
                     destination: '/custom/output',
                 });
 
-                const assistantMessage = result.messages[1];
-                if (assistantMessage.content.type === 'text') {
-                    expect(assistantMessage.content.text).toContain('/custom/output');
+                const userMessage = result.messages[0];
+                if (userMessage.content.type === 'text') {
+                    expect(userMessage.content.text).toContain('/custom/output');
                 }
             });
 
@@ -262,7 +262,7 @@ describe('MCP Prompts', () => {
                 });
 
                 expect(result.messages).toBeDefined();
-                expect(result.messages.length).toBe(2);
+                expect(result.messages.length).toBe(1);
             });
 
             it('should include transcript path in messages', async () => {
@@ -282,9 +282,9 @@ describe('MCP Prompts', () => {
                     focusArea: 'names',
                 });
 
-                const assistantMessage = result.messages[1];
-                if (assistantMessage.content.type === 'text') {
-                    expect(assistantMessage.content.text).toContain('names');
+                const userMessage = result.messages[0];
+                if (userMessage.content.type === 'text') {
+                    expect(userMessage.content.text).toContain('names');
                 }
             });
 
@@ -293,9 +293,9 @@ describe('MCP Prompts', () => {
                     transcriptPath: '/test/transcript.md',
                 });
 
-                const assistantMessage = result.messages[1];
-                if (assistantMessage.content.type === 'text') {
-                    expect(assistantMessage.content.text).toContain('All corrections');
+                const userMessage = result.messages[0];
+                if (userMessage.content.type === 'text') {
+                    expect(userMessage.content.text).toContain('All corrections');
                 }
             });
 
@@ -407,7 +407,7 @@ describe('MCP Prompts', () => {
                 });
 
                 expect(result.messages).toBeDefined();
-                expect(result.messages.length).toBe(2);
+                expect(result.messages.length).toBe(1);
             });
 
             it('should include person-specific guidance', async () => {
@@ -416,11 +416,11 @@ describe('MCP Prompts', () => {
                     entityId: 'priya-sharma',
                 });
 
-                const assistantMessage = result.messages[1];
-                if (assistantMessage.content.type === 'text') {
-                    expect(assistantMessage.content.text).toContain('protokoll_edit_person');
-                    expect(assistantMessage.content.text).toContain('sounds_like');
-                    expect(assistantMessage.content.text).toContain('company');
+                const userMessage = result.messages[0];
+                if (userMessage.content.type === 'text') {
+                    expect(userMessage.content.text).toContain('protokoll_edit_person');
+                    expect(userMessage.content.text).toContain('sounds_like');
+                    expect(userMessage.content.text).toContain('company');
                 }
             });
 
@@ -430,11 +430,11 @@ describe('MCP Prompts', () => {
                     entityId: 'kubernetes',
                 });
 
-                const assistantMessage = result.messages[1];
-                if (assistantMessage.content.type === 'text') {
-                    expect(assistantMessage.content.text).toContain('protokoll_edit_term');
-                    expect(assistantMessage.content.text).toContain('topics');
-                    expect(assistantMessage.content.text).toContain('domain');
+                const userMessage = result.messages[0];
+                if (userMessage.content.type === 'text') {
+                    expect(userMessage.content.text).toContain('protokoll_edit_term');
+                    expect(userMessage.content.text).toContain('topics');
+                    expect(userMessage.content.text).toContain('domain');
                 }
             });
 
@@ -444,11 +444,11 @@ describe('MCP Prompts', () => {
                     entityId: 'my-project',
                 });
 
-                const assistantMessage = result.messages[1];
-                if (assistantMessage.content.type === 'text') {
-                    expect(assistantMessage.content.text).toContain('protokoll_edit_project');
-                    expect(assistantMessage.content.text).toContain('explicit_phrases');
-                    expect(assistantMessage.content.text).toContain('destination');
+                const userMessage = result.messages[0];
+                if (userMessage.content.type === 'text') {
+                    expect(userMessage.content.text).toContain('protokoll_edit_project');
+                    expect(userMessage.content.text).toContain('explicit_phrases');
+                    expect(userMessage.content.text).toContain('destination');
                 }
             });
 
@@ -462,11 +462,7 @@ describe('MCP Prompts', () => {
                 const userMessage = result.messages[0];
                 if (userMessage.content.type === 'text') {
                     expect(userMessage.content.text).toContain('Cartesian Time');
-                }
-
-                const assistantMessage = result.messages[1];
-                if (assistantMessage.content.type === 'text') {
-                    expect(assistantMessage.content.text).toContain('Requested modification');
+                    expect(userMessage.content.text).toContain('Requested modification');
                 }
             });
 
@@ -476,9 +472,9 @@ describe('MCP Prompts', () => {
                     entityId: 'acme-corp',
                 });
 
-                const assistantMessage = result.messages[1];
-                if (assistantMessage.content.type === 'text') {
-                    expect(assistantMessage.content.text).toContain('does not support direct editing');
+                const userMessage = result.messages[0];
+                if (userMessage.content.type === 'text') {
+                    expect(userMessage.content.text).toContain('does not support direct editing');
                 }
             });
 
