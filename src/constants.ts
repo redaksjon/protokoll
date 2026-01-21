@@ -31,10 +31,10 @@ export const DEFAULT_RECURSIVE = false;
 export const DEFAULT_INPUT_DIRECTORY = './';
 export const DEFAULT_OUTPUT_DIRECTORY = './';
 
-export const DEFAULT_AUDIO_EXTENSIONS = ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'];
+export const DEFAULT_AUDIO_EXTENSIONS = ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm', 'qta'];
 
 export const ALLOWED_CONTENT_TYPES = ['log', 'diff'];
-export const ALLOWED_AUDIO_EXTENSIONS = ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'];
+export const ALLOWED_AUDIO_EXTENSIONS = ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm', 'qta'];
 
 export const DEFAULT_OUTPUT_STRUCTURE = 'month' as FilesystemStructure;
 export const DEFAULT_OUTPUT_FILENAME_OPTIONS = ['date', 'time', 'subject'] as FilenameOption[];
