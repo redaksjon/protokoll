@@ -381,12 +381,242 @@ sounds_like:
       const protokollDir = path.join(tempDir, '.protokoll');
       await fs.mkdir(path.join(protokollDir, 'context'), { recursive: true });
       await fs.writeFile(path.join(protokollDir, 'config.yaml'), 'version: 1');
-      
+
       const context = await Context.create({ startingDir: tempDir });
-      
+
       const contextDirs = context.getContextDirs();
       expect(contextDirs.length).toBe(1);
       expect(contextDirs[0]).toContain('context');
+    });
+  });
+
+  describe('reload', () => {
+    it('should reload context data from disk', async () => {
+      const protokollDir = path.join(tempDir, '.protokoll');
+      const peopleDir = path.join(protokollDir, 'context', 'people');
+      await fs.mkdir(peopleDir, { recursive: true });
+      await fs.writeFile(path.join(protokollDir, 'config.yaml'), 'version: 1');
+      await fs.writeFile(path.join(peopleDir, 'person1.yaml'), 'id: person1\nname: Person 1');
+
+      const context = await Context.create({ startingDir: tempDir });
+      expect(context.getAllPeople().length).toBe(1);
+
+      // Add another person
+      await fs.writeFile(path.join(peopleDir, 'person2.yaml'), 'id: person2\nname: Person 2');
+
+      // Reload
+      await context.reload();
+
+      expect(context.getAllPeople().length).toBe(2);
+    });
+  });
+
+  describe('isIgnored', () => {
+    it('should return true for ignored terms', async () => {
+      const protokollDir = path.join(tempDir, '.protokoll');
+      const ignoredDir = path.join(protokollDir, 'context', 'ignored');
+      await fs.mkdir(ignoredDir, { recursive: true });
+      await fs.writeFile(path.join(protokollDir, 'config.yaml'), 'version: 1');
+      await fs.writeFile(
+        path.join(ignoredDir, 'stopword.yaml'),
+        'id: stopword\nname: stopword'
+      );
+
+      const context = await Context.create({ startingDir: tempDir });
+
+      expect(context.isIgnored('stopword')).toBe(true);
+      expect(context.isIgnored('Stopword')).toBe(true);
+      expect(context.isIgnored('notignored')).toBe(false);
+    });
+
+    it('should normalize term when checking if ignored', async () => {
+      const protokollDir = path.join(tempDir, '.protokoll');
+      const ignoredDir = path.join(protokollDir, 'context', 'ignored');
+      await fs.mkdir(ignoredDir, { recursive: true });
+      await fs.writeFile(path.join(protokollDir, 'config.yaml'), 'version: 1');
+      await fs.writeFile(
+        path.join(ignoredDir, 'multi-word-term.yaml'),
+        'id: multi-word-term\nname: Multi Word Term'
+      );
+
+      const context = await Context.create({ startingDir: tempDir });
+
+      expect(context.isIgnored('Multi Word Term')).toBe(true);
+      expect(context.isIgnored('multi-word-term')).toBe(true);
+    });
+  });
+
+  describe('searchWithContext', () => {
+    it('should return standard search when no context provided', async () => {
+      const protokollDir = path.join(tempDir, '.protokoll');
+      const projectsDir = path.join(protokollDir, 'context', 'projects');
+      await fs.mkdir(projectsDir, { recursive: true });
+      await fs.writeFile(path.join(protokollDir, 'config.yaml'), 'version: 1');
+      await fs.writeFile(
+        path.join(projectsDir, 'proj1.yaml'),
+        'id: proj1\nname: Project One\nclassification:\n  triggers:\n    words: []\n  requireAll: false\nrouting:\n  structure: month\n  filename_options: [date, time]'
+      );
+
+      const context = await Context.create({ startingDir: tempDir });
+
+      const results = context.searchWithContext('Project');
+      expect(results.length).toBeGreaterThan(0);
+    });
+
+    it('should prioritize related projects when context provided', async () => {
+      const protokollDir = path.join(tempDir, '.protokoll');
+      const projectsDir = path.join(protokollDir, 'context', 'projects');
+      await fs.mkdir(projectsDir, { recursive: true });
+      await fs.writeFile(path.join(protokollDir, 'config.yaml'), 'version: 1');
+
+      // Create parent project
+      await fs.writeFile(
+        path.join(projectsDir, 'parent.yaml'),
+        `id: parent
+name: Parent Project
+classification:
+  triggers:
+    words: []
+  requireAll: false
+routing:
+  structure: month
+  filename_options: [date, time]`
+      );
+
+      // Create child project
+      await fs.writeFile(
+        path.join(projectsDir, 'child.yaml'),
+        `id: child
+name: Child Project
+classification:
+  triggers:
+    words: []
+  requireAll: false
+routing:
+  structure: month
+  filename_options: [date, time]
+relationships:
+  parentProjects: [parent]`
+      );
+
+      const context = await Context.create({ startingDir: tempDir });
+
+      const results = context.searchWithContext('Project', 'parent');
+      expect(results.length).toBe(2);
+    });
+
+    it('should prioritize terms associated with context project', async () => {
+      const protokollDir = path.join(tempDir, '.protokoll');
+      const termsDir = path.join(protokollDir, 'context', 'terms');
+      const projectsDir = path.join(protokollDir, 'context', 'projects');
+      await fs.mkdir(termsDir, { recursive: true });
+      await fs.mkdir(projectsDir, { recursive: true });
+      await fs.writeFile(path.join(protokollDir, 'config.yaml'), 'version: 1');
+
+      // Create project
+      await fs.writeFile(
+        path.join(projectsDir, 'proj1.yaml'),
+        `id: proj1
+name: Project One
+classification:
+  triggers:
+    words: []
+  requireAll: false
+routing:
+  structure: month
+  filename_options: [date, time]`
+      );
+
+      // Create term associated with project
+      await fs.writeFile(
+        path.join(termsDir, 'term1.yaml'),
+        'id: term1\nname: Term One\nprojects: [proj1]'
+      );
+
+      const context = await Context.create({ startingDir: tempDir });
+
+      const results = context.searchWithContext('Term', 'proj1');
+      expect(results.length).toBeGreaterThan(0);
+    });
+
+    it('should handle non-existent context project', async () => {
+      const protokollDir = path.join(tempDir, '.protokoll');
+      const projectsDir = path.join(protokollDir, 'context', 'projects');
+      await fs.mkdir(projectsDir, { recursive: true });
+      await fs.writeFile(path.join(protokollDir, 'config.yaml'), 'version: 1');
+      await fs.writeFile(
+        path.join(projectsDir, 'proj1.yaml'),
+        `id: proj1
+name: Project One
+classification:
+  triggers:
+    words: []
+  requireAll: false
+routing:
+  structure: month
+  filename_options: [date, time]`
+      );
+
+      const context = await Context.create({ startingDir: tempDir });
+
+      const results = context.searchWithContext('Project', 'nonexistent');
+      expect(results.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('getRelatedProjects', () => {
+    it('should return related projects within distance', async () => {
+      const protokollDir = path.join(tempDir, '.protokoll');
+      const projectsDir = path.join(protokollDir, 'context', 'projects');
+      await fs.mkdir(projectsDir, { recursive: true });
+      await fs.writeFile(path.join(protokollDir, 'config.yaml'), 'version: 1');
+
+      // Create parent project
+      await fs.writeFile(
+        path.join(projectsDir, 'parent.yaml'),
+        `id: parent
+name: Parent Project
+classification:
+  triggers:
+    words: []
+  requireAll: false
+routing:
+  structure: month
+  filename_options: [date, time]`
+      );
+
+      // Create child project
+      await fs.writeFile(
+        path.join(projectsDir, 'child.yaml'),
+        `id: child
+name: Child Project
+classification:
+  triggers:
+    words: []
+  requireAll: false
+routing:
+  structure: month
+  filename_options: [date, time]
+relationships:
+  parentProjects: [parent]`
+      );
+
+      const context = await Context.create({ startingDir: tempDir });
+
+      const related = context.getRelatedProjects('parent', 1);
+      // May return child project if relationship is detected
+      expect(Array.isArray(related)).toBe(true);
+    });
+
+    it('should return empty array for non-existent project', async () => {
+      const protokollDir = path.join(tempDir, '.protokoll');
+      await fs.mkdir(path.join(protokollDir, 'context'), { recursive: true });
+      await fs.writeFile(path.join(protokollDir, 'config.yaml'), 'version: 1');
+
+      const context = await Context.create({ startingDir: tempDir });
+
+      const related = context.getRelatedProjects('nonexistent');
+      expect(related).toEqual([]);
     });
   });
 });

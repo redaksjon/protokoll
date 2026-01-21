@@ -328,7 +328,7 @@ export const listTranscripts = async (options: ListTranscriptsOptions): Promise<
         let content: string;
         try {
             content = await fs.readFile(filePath, 'utf-8');
-        } catch (error) {
+        } catch {
             // Skip files we can't read (permissions, encoding issues, etc.)
             continue;
         }

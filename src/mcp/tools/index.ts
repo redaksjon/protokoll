@@ -1,0 +1,146 @@
+/* eslint-disable import/extensions */
+/**
+ * MCP Tools - Exports all tool definitions and handlers
+ */
+ 
+import type { Tool } from '@modelcontextprotocol/sdk/types.js';
+ 
+import * as DiscoveryTools from './discoveryTools.js';
+ 
+import * as AudioTools from './audioTools.js';
+ 
+import * as ContextTools from './contextTools.js';
+ 
+import * as EntityTools from './entityTools.js';
+ 
+import * as AssistTools from './assistTools.js';
+ 
+import * as TranscriptTools from './transcriptTools.js';
+
+// ============================================================================
+// All Tools
+// ============================================================================
+
+export const tools: Tool[] = [
+    // Discovery & Configuration
+    DiscoveryTools.discoverConfigTool,
+    DiscoveryTools.suggestProjectTool,
+
+    // Audio Processing
+    AudioTools.processAudioTool,
+    AudioTools.batchProcessTool,
+
+    // Context Management
+    ContextTools.contextStatusTool,
+    ContextTools.listProjectsTool,
+    ContextTools.listPeopleTool,
+    ContextTools.listTermsTool,
+    ContextTools.listCompaniesTool,
+    ContextTools.searchContextTool,
+    ContextTools.getEntityTool,
+
+    // Entity CRUD
+    EntityTools.addPersonTool,
+    EntityTools.editPersonTool,
+    EntityTools.addProjectTool,
+    EntityTools.editProjectTool,
+    EntityTools.updateProjectTool,
+    EntityTools.addTermTool,
+    EntityTools.editTermTool,
+    EntityTools.updateTermTool,
+    EntityTools.mergeTermsTool,
+    EntityTools.addCompanyTool,
+    EntityTools.deleteEntityTool,
+
+    // Smart Assistance
+    AssistTools.suggestProjectMetadataTool,
+    AssistTools.suggestTermMetadataTool,
+
+    // Transcript Operations
+    TranscriptTools.readTranscriptTool,
+    TranscriptTools.listTranscriptsTool,
+    TranscriptTools.editTranscriptTool,
+    TranscriptTools.combineTranscriptsTool,
+    TranscriptTools.provideFeedbackTool,
+];
+
+// ============================================================================
+// Tool Handler Router
+// ============================================================================
+
+export async function handleToolCall(name: string, args: unknown): Promise<unknown> {
+    switch (name) {
+        // Discovery & Configuration
+        case 'protokoll_discover_config':
+            return DiscoveryTools.handleDiscoverConfig(args as Parameters<typeof DiscoveryTools.handleDiscoverConfig>[0]);
+        case 'protokoll_suggest_project':
+            return DiscoveryTools.handleSuggestProject(args as Parameters<typeof DiscoveryTools.handleSuggestProject>[0]);
+
+        // Audio Processing
+        case 'protokoll_process_audio':
+            return AudioTools.handleProcessAudio(args as Parameters<typeof AudioTools.handleProcessAudio>[0]);
+        case 'protokoll_batch_process':
+            return AudioTools.handleBatchProcess(args as Parameters<typeof AudioTools.handleBatchProcess>[0]);
+
+        // Context Management
+        case 'protokoll_context_status':
+            return ContextTools.handleContextStatus(args as Parameters<typeof ContextTools.handleContextStatus>[0]);
+        case 'protokoll_list_projects':
+            return ContextTools.handleListProjects(args as Parameters<typeof ContextTools.handleListProjects>[0]);
+        case 'protokoll_list_people':
+            return ContextTools.handleListPeople(args as Parameters<typeof ContextTools.handleListPeople>[0]);
+        case 'protokoll_list_terms':
+            return ContextTools.handleListTerms(args as Parameters<typeof ContextTools.handleListTerms>[0]);
+        case 'protokoll_list_companies':
+            return ContextTools.handleListCompanies(args as Parameters<typeof ContextTools.handleListCompanies>[0]);
+        case 'protokoll_search_context':
+            return ContextTools.handleSearchContext(args as Parameters<typeof ContextTools.handleSearchContext>[0]);
+        case 'protokoll_get_entity':
+            return ContextTools.handleGetEntity(args as Parameters<typeof ContextTools.handleGetEntity>[0]);
+
+        // Entity CRUD
+        case 'protokoll_add_person':
+            return EntityTools.handleAddPerson(args as Parameters<typeof EntityTools.handleAddPerson>[0]);
+        case 'protokoll_edit_person':
+            return EntityTools.handleEditPerson(args as Parameters<typeof EntityTools.handleEditPerson>[0]);
+        case 'protokoll_add_project':
+            return EntityTools.handleAddProject(args as Parameters<typeof EntityTools.handleAddProject>[0]);
+        case 'protokoll_edit_project':
+            return EntityTools.handleEditProject(args as Parameters<typeof EntityTools.handleEditProject>[0]);
+        case 'protokoll_update_project':
+            return EntityTools.handleUpdateProject(args as Parameters<typeof EntityTools.handleUpdateProject>[0]);
+        case 'protokoll_add_term':
+            return EntityTools.handleAddTerm(args as Parameters<typeof EntityTools.handleAddTerm>[0]);
+        case 'protokoll_edit_term':
+            return EntityTools.handleEditTerm(args as Parameters<typeof EntityTools.handleEditTerm>[0]);
+        case 'protokoll_update_term':
+            return EntityTools.handleUpdateTerm(args as Parameters<typeof EntityTools.handleUpdateTerm>[0]);
+        case 'protokoll_merge_terms':
+            return EntityTools.handleMergeTerms(args as Parameters<typeof EntityTools.handleMergeTerms>[0]);
+        case 'protokoll_add_company':
+            return EntityTools.handleAddCompany(args as Parameters<typeof EntityTools.handleAddCompany>[0]);
+        case 'protokoll_delete_entity':
+            return EntityTools.handleDeleteEntity(args as Parameters<typeof EntityTools.handleDeleteEntity>[0]);
+
+        // Smart Assistance
+        case 'protokoll_suggest_project_metadata':
+            return AssistTools.handleSuggestProjectMetadata(args as Parameters<typeof AssistTools.handleSuggestProjectMetadata>[0]);
+        case 'protokoll_suggest_term_metadata':
+            return AssistTools.handleSuggestTermMetadata(args as Parameters<typeof AssistTools.handleSuggestTermMetadata>[0]);
+
+        // Transcript Operations
+        case 'protokoll_read_transcript':
+            return TranscriptTools.handleReadTranscript(args as Parameters<typeof TranscriptTools.handleReadTranscript>[0]);
+        case 'protokoll_list_transcripts':
+            return TranscriptTools.handleListTranscripts(args as Parameters<typeof TranscriptTools.handleListTranscripts>[0]);
+        case 'protokoll_edit_transcript':
+            return TranscriptTools.handleEditTranscript(args as Parameters<typeof TranscriptTools.handleEditTranscript>[0]);
+        case 'protokoll_combine_transcripts':
+            return TranscriptTools.handleCombineTranscripts(args as Parameters<typeof TranscriptTools.handleCombineTranscripts>[0]);
+        case 'protokoll_provide_feedback':
+            return TranscriptTools.handleProvideFeedback(args as Parameters<typeof TranscriptTools.handleProvideFeedback>[0]);
+
+        default:
+            throw new Error(`Unknown tool: ${name}`);
+    }
+}

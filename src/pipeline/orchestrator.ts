@@ -58,14 +58,14 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
         .map(project => ({
             projectId: project.id,
             destination: {
-                path: project.routing.destination || defaultPath,
-                structure: project.routing.structure,
-                filename_options: project.routing.filename_options,
+                path: project.routing?.destination || defaultPath,
+                structure: project.routing?.structure || defaultStructure,
+                filename_options: project.routing?.filename_options || defaultFilenameOptions,
                 createDirectories: true,
             },
             classification: project.classification,
             active: project.active,
-            auto_tags: project.routing.auto_tags,
+            auto_tags: project.routing?.auto_tags,
         }));
     
     logger.debug('Loaded %d projects from context for routing', routingProjects.length);
