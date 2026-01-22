@@ -4,6 +4,25 @@ node_modules/
 dist/tests/
 tests/
 .DS_Store
+
+# Development output directories
+output/
+input/
+processed/
+.kodrdriv*
+.maloomscan/
+
+# Build artifacts
+*.tsbuildinfo
+tsconfig (1).tsbuildinfo
+package.json~
+outdiff
+outlog
+*~
+
+# Development tools
+nodemon.json
+.cursor/
 .eslintrc.json
 babel.config.js
 cloudbuild.yaml
