@@ -19,7 +19,13 @@ import type {
     DiscoveredContextDir,
     HierarchicalContextResult,
     SmartAssistanceConfig,
-} from '../src/context/types';
+} from '../../src/context/types';
+import {
+    isTermAssociatedWithProject,
+    addProjectToTerm,
+    removeProjectFromTerm,
+    isParentProject,
+} from '../../src/context/types';
 
 describe('Context Types', () => {
     describe('EntityType', () => {
@@ -443,6 +449,162 @@ describe('Context Types', () => {
             };
 
             expect(store.projects.get('proj')?.classification.associated_people).toContain('person-1');
+        });
+    });
+
+    describe('Helper Functions', () => {
+        describe('isTermAssociatedWithProject', () => {
+            it('should return true when term is associated with project', () => {
+                const term: Term = {
+                    id: 'term1',
+                    name: 'Term 1',
+                    type: 'term',
+                    projects: ['proj1', 'proj2'],
+                };
+
+                expect(isTermAssociatedWithProject(term, 'proj1')).toBe(true);
+            });
+
+            it('should return false when term is not associated with project', () => {
+                const term: Term = {
+                    id: 'term1',
+                    name: 'Term 1',
+                    type: 'term',
+                    projects: ['proj1'],
+                };
+
+                expect(isTermAssociatedWithProject(term, 'proj2')).toBe(false);
+            });
+
+            it('should return false when term has no projects', () => {
+                const term: Term = {
+                    id: 'term1',
+                    name: 'Term 1',
+                    type: 'term',
+                };
+
+                expect(isTermAssociatedWithProject(term, 'proj1')).toBe(false);
+            });
+        });
+
+        describe('addProjectToTerm', () => {
+            it('should add project to term projects array', () => {
+                const term: Term = {
+                    id: 'term1',
+                    name: 'Term 1',
+                    type: 'term',
+                    projects: ['proj1'],
+                };
+
+                const updated = addProjectToTerm(term, 'proj2');
+                expect(updated.projects).toEqual(['proj1', 'proj2']);
+                expect(updated.updatedAt).toBeDefined();
+            });
+
+            it('should not add duplicate project', () => {
+                const term: Term = {
+                    id: 'term1',
+                    name: 'Term 1',
+                    type: 'term',
+                    projects: ['proj1'],
+                };
+
+                const updated = addProjectToTerm(term, 'proj1');
+                expect(updated.projects).toEqual(['proj1']);
+            });
+
+            it('should handle term with no projects', () => {
+                const term: Term = {
+                    id: 'term1',
+                    name: 'Term 1',
+                    type: 'term',
+                };
+
+                const updated = addProjectToTerm(term, 'proj1');
+                expect(updated.projects).toEqual(['proj1']);
+            });
+        });
+
+        describe('removeProjectFromTerm', () => {
+            it('should remove project from term projects array', () => {
+                const term: Term = {
+                    id: 'term1',
+                    name: 'Term 1',
+                    type: 'term',
+                    projects: ['proj1', 'proj2'],
+                };
+
+                const updated = removeProjectFromTerm(term, 'proj1');
+                expect(updated.projects).toEqual(['proj2']);
+                expect(updated.updatedAt).toBeDefined();
+            });
+
+            it('should handle removing non-existent project', () => {
+                const term: Term = {
+                    id: 'term1',
+                    name: 'Term 1',
+                    type: 'term',
+                    projects: ['proj1'],
+                };
+
+                const updated = removeProjectFromTerm(term, 'proj2');
+                expect(updated.projects).toEqual(['proj1']);
+            });
+
+            it('should handle term with no projects', () => {
+                const term: Term = {
+                    id: 'term1',
+                    name: 'Term 1',
+                    type: 'term',
+                };
+
+                const updated = removeProjectFromTerm(term, 'proj1');
+                expect(updated.projects).toEqual([]);
+            });
+        });
+
+        describe('isParentProject', () => {
+            it('should return true when projectA is parent of projectB', () => {
+                const projectA: Project = {
+                    id: 'parent',
+                    name: 'Parent',
+                    type: 'project',
+                    classification: { triggers: { words: [] }, requireAll: false },
+                    routing: { structure: 'month', filename_options: [] },
+                };
+
+                const projectB: Project = {
+                    id: 'child',
+                    name: 'Child',
+                    type: 'project',
+                    classification: { triggers: { words: [] }, requireAll: false },
+                    routing: { structure: 'month', filename_options: [] },
+                    relationships: { parent: 'parent' },
+                };
+
+                expect(isParentProject(projectA, projectB)).toBe(true);
+            });
+
+            it('should return false when projectA is not parent of projectB', () => {
+                const projectA: Project = {
+                    id: 'other',
+                    name: 'Other',
+                    type: 'project',
+                    classification: { triggers: { words: [] }, requireAll: false },
+                    routing: { structure: 'month', filename_options: [] },
+                };
+
+                const projectB: Project = {
+                    id: 'child',
+                    name: 'Child',
+                    type: 'project',
+                    classification: { triggers: { words: [] }, requireAll: false },
+                    routing: { structure: 'month', filename_options: [] },
+                    relationships: { parent: 'parent' },
+                };
+
+                expect(isParentProject(projectA, projectB)).toBe(false);
+            });
         });
     });
 });

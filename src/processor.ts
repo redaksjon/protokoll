@@ -1,5 +1,6 @@
 import * as Logging from '@/logging';
 import * as TranscribePhase from '@/phases/transcribe';
+import * as SimpleReplacePhase from '@/phases/simple-replace';
 import * as LocatePhase from '@/phases/locate';
 import * as Dreadcabinet from '@theunwalked/dreadcabinet';
 import { Config } from '@/protokoll';
@@ -129,6 +130,7 @@ export const create = (config: Config, operator: Dreadcabinet.Operator): Instanc
     const currentWorkingDir = globalThis.process.cwd();
 
     const locatePhase: LocatePhase.Instance = LocatePhase.create(config, operator);
+    const simpleReplacePhase: SimpleReplacePhase.Instance = SimpleReplacePhase.create(config, operator);
 
     // Initialize interactive system if enabled
     let interactive: Interactive.InteractiveInstance | null = null;
@@ -221,21 +223,47 @@ export const create = (config: Config, operator: Dreadcabinet.Operator): Instanc
 
         // Transcribe the audio
         logger.debug('Transcribing file %s', audioFile);
-        const transcription = await transcribePhase.transcribe(creationTime, outputPath, contextPath, interimPath, transcriptionFilename, hash, audioFile);
+        let transcription = await transcribePhase.transcribe(creationTime, outputPath, contextPath, interimPath, transcriptionFilename, hash, audioFile);
 
         // ISSUE #2: Check routing confidence and ask for confirmation if low
         let routeDecision: Routing.RouteDecision | null = null;
         if (routing && context && config.interactive && interactive) {
             logger.info('Determining routing and checking confidence...');
-            
+
             const routingContext: Routing.RoutingContext = {
                 transcriptText: transcription.text,
                 audioDate: creationTime,
                 sourceFile: audioFile,
                 hash,
             };
-            
+
             routeDecision = routing.route(routingContext);
+
+            // Apply simple-replace phase if we have a project classification
+            if (routeDecision.projectId) {
+                logger.debug('Applying simple-replace for project %s', routeDecision.projectId);
+                const simpleReplaceResult = await simpleReplacePhase.replace(
+                    transcription.text,
+                    {
+                        project: routeDecision.projectId,
+                        confidence: routeDecision.confidence,
+                    },
+                    interimPath,
+                    hash
+                );
+
+                // Update transcription text with corrected entities
+                transcription = {
+                    ...transcription,
+                    text: simpleReplaceResult.text,
+                };
+
+                logger.info(
+                    `Simple-replace applied: ${simpleReplaceResult.stats.totalReplacements} ` +
+                    `replacements (Tier 1: ${simpleReplaceResult.stats.tier1Replacements}, ` +
+                    `Tier 2: ${simpleReplaceResult.stats.tier2Replacements})`
+                );
+            }
             
             // If confidence is low, ask user to confirm routing
             if (routeDecision.confidence < 0.7) {

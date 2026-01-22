@@ -1,0 +1,174 @@
+ 
+/**
+ * Shared types, constants, and utilities for MCP tools
+ */
+import { stat } from 'node:fs/promises';
+import * as Media from '@/util/media';
+import * as Storage from '@/util/storage';
+import { getLogger } from '@/logging';
+import type { Person, Project, Term, Company, IgnoredTerm, Entity } from '@/context/types';
+
+// ============================================================================
+// Shared Utilities
+// ============================================================================
+
+export const logger = getLogger();
+export const media = Media.create(logger);
+export const storage = Storage.create({ log: logger.debug.bind(logger) });
+
+// ============================================================================
+// Types
+// ============================================================================
+
+export interface ProcessingResult {
+    outputPath: string;
+    enhancedText: string;
+    rawTranscript: string;
+    routedProject?: string;
+    routingConfidence: number;
+    processingTime: number;
+    toolsUsed: string[];
+    correctionsApplied: number;
+}
+
+export interface DiscoveredConfig {
+    path: string;
+    projectCount: number;
+    peopleCount: number;
+    termsCount: number;
+    companiesCount: number;
+    outputDirectory?: string;
+    model?: string;
+}
+
+export interface ProjectSuggestion {
+    projectId: string;
+    projectName: string;
+    confidence: number;
+    reason: string;
+    destination?: string;
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/**
+ * Helper for async file existence check
+ */
+export async function fileExists(path: string): Promise<boolean> {
+    try {
+        await stat(path);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Slugify text for IDs and filenames
+ */
+export function slugify(text: string): string {
+    return text
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/--+/g, '-')
+        .replace(/^-|-$/g, '');
+}
+
+/**
+ * Get audio file metadata (creation time and hash)
+ */
+export async function getAudioMetadata(audioFile: string): Promise<{ creationTime: Date; hash: string }> {
+    // Get creation time from audio file
+    let creationTime = await media.getAudioCreationTime(audioFile);
+    if (!creationTime) {
+        creationTime = new Date();
+    }
+
+    // Calculate hash of the file
+    const hash = (await storage.hashFile(audioFile, 100)).substring(0, 8);
+
+    return { creationTime, hash };
+}
+
+/**
+ * Format entity for response
+ */
+export function formatEntity(entity: Entity): Record<string, unknown> {
+    const result: Record<string, unknown> = {
+        id: entity.id,
+        name: entity.name,
+        type: entity.type,
+    };
+
+    if (entity.type === 'person') {
+        const person = entity as Person;
+        if (person.firstName) result.firstName = person.firstName;
+        if (person.lastName) result.lastName = person.lastName;
+        if (person.company) result.company = person.company;
+        if (person.role) result.role = person.role;
+        if (person.sounds_like) result.sounds_like = person.sounds_like;
+        if (person.context) result.context = person.context;
+    } else if (entity.type === 'project') {
+        const project = entity as Project;
+        if (project.description) result.description = project.description;
+        if (project.classification) result.classification = project.classification;
+        if (project.routing) result.routing = project.routing;
+        if (project.sounds_like) result.sounds_like = project.sounds_like;
+        result.active = project.active !== false;
+    } else if (entity.type === 'term') {
+        const term = entity as Term;
+        if (term.expansion) result.expansion = term.expansion;
+        if (term.domain) result.domain = term.domain;
+        if (term.description) result.description = term.description;
+        if (term.sounds_like) result.sounds_like = term.sounds_like;
+        if (term.topics) result.topics = term.topics;
+        if (term.projects) result.projects = term.projects;
+    } else if (entity.type === 'company') {
+        const company = entity as Company;
+        if (company.fullName) result.fullName = company.fullName;
+        if (company.industry) result.industry = company.industry;
+        if (company.sounds_like) result.sounds_like = company.sounds_like;
+    } else if (entity.type === 'ignored') {
+        const ignored = entity as IgnoredTerm;
+        if (ignored.reason) result.reason = ignored.reason;
+        if (ignored.ignoredAt) result.ignoredAt = ignored.ignoredAt;
+    }
+
+    return result;
+}
+
+/**
+ * Helper to merge arrays: handles replace, add, and remove operations
+ */
+export function mergeArray(
+    existing: string[] | undefined,
+    replace: string[] | undefined,
+    add: string[] | undefined,
+    remove: string[] | undefined
+): string[] | undefined {
+    // If replace is provided, use it as the base
+    if (replace !== undefined) {
+        let result = [...replace];
+        if (add) {
+            result = [...result, ...add.filter(v => !result.includes(v))];
+        }
+        if (remove) {
+            result = result.filter(v => !remove.includes(v));
+        }
+        return result.length > 0 ? result : undefined;
+    }
+
+    // Otherwise work with existing
+    let result = existing ? [...existing] : [];
+    if (add) {
+        result = [...result, ...add.filter(v => !result.includes(v))];
+    }
+    if (remove) {
+        result = result.filter(v => !remove.includes(v));
+    }
+
+    // Return undefined if empty (to remove the field from YAML)
+    return result.length > 0 ? result : (existing ? undefined : existing);
+}

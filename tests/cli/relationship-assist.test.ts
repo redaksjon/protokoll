@@ -168,5 +168,119 @@ describe('RelationshipAssist', () => {
             expect(suggestions.siblings).toBeUndefined();
             expect(suggestions.relatedTerms).toBeUndefined();
         });
+
+        it('should suggest parent based on destination subdirectory', () => {
+            const mockContext = {
+                getAllProjects: () => [
+                    {
+                        id: 'parent-project',
+                        name: 'Parent Project',
+                        type: 'project',
+                        classification: { context_type: 'work' },
+                        routing: {
+                            structure: 'month',
+                            filename_options: [],
+                            destination: '/parent/path'
+                        }
+                    } as Project
+                ],
+                getAllTerms: () => [],
+            } as Context.ContextInstance;
+
+            const suggestions = RelationshipAssist.suggestRelationships(mockContext, {
+                projectName: 'Child Project',
+                projectId: 'child-project',
+                topics: [],
+                destination: '/parent/path/child',
+            });
+
+            expect(suggestions.parent).toBeDefined();
+            expect(suggestions.parent?.id).toBe('parent-project');
+            expect(suggestions.parent?.confidence).toBe('high');
+            expect(suggestions.parent?.reason).toContain('subdirectory');
+        });
+
+        it('should suggest parent based on description mention', () => {
+            const mockContext = {
+                getAllProjects: () => [
+                    {
+                        id: 'redaksjon',
+                        name: 'Redaksjon',
+                        type: 'project',
+                        classification: { context_type: 'work' },
+                        routing: { structure: 'month', filename_options: [] }
+                    } as Project
+                ],
+                getAllTerms: () => [],
+            } as Context.ContextInstance;
+
+            const suggestions = RelationshipAssist.suggestRelationships(mockContext, {
+                projectName: 'New Tool',
+                projectId: 'new-tool',
+                topics: [],
+                description: 'A new tool for Redaksjon workflows',
+            });
+
+            expect(suggestions.parent).toBeDefined();
+            expect(suggestions.parent?.id).toBe('redaksjon');
+            expect(suggestions.parent?.reason).toContain('description');
+        });
+
+        it('should combine multiple signals for higher confidence', () => {
+            const mockContext = {
+                getAllProjects: () => [
+                    {
+                        id: 'redaksjon',
+                        name: 'Redaksjon',
+                        type: 'project',
+                        classification: {
+                            context_type: 'work',
+                            topics: ['audio', 'transcription']
+                        },
+                        routing: {
+                            structure: 'month',
+                            filename_options: [],
+                            destination: '/redaksjon'
+                        }
+                    } as Project
+                ],
+                getAllTerms: () => [],
+            } as Context.ContextInstance;
+
+            const suggestions = RelationshipAssist.suggestRelationships(mockContext, {
+                projectName: 'Redaksjon Audio Tool',
+                projectId: 'redaksjon-audio',
+                topics: ['audio', 'transcription', 'redaksjon-subproject'],
+                destination: '/redaksjon/audio',
+                description: 'Audio processing for Redaksjon',
+            });
+
+            expect(suggestions.parent).toBeDefined();
+            expect(suggestions.parent?.id).toBe('redaksjon');
+            expect(suggestions.parent?.confidence).toBe('high');
+        });
+
+        it('should suggest terms when term name appears in description', () => {
+            const mockContext = {
+                getAllProjects: () => [],
+                getAllTerms: () => [
+                    {
+                        id: 'typescript',
+                        name: 'TypeScript',
+                        type: 'term',
+                    } as Term
+                ],
+            } as Context.ContextInstance;
+
+            const suggestions = RelationshipAssist.suggestRelationships(mockContext, {
+                projectName: 'Build Tool',
+                projectId: 'build-tool',
+                topics: [],
+                description: 'A TypeScript build system',
+            });
+
+            expect(suggestions.relatedTerms).toBeDefined();
+            expect(suggestions.relatedTerms?.map(t => t.id)).toContain('typescript');
+        });
     });
 });
