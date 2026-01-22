@@ -43,4 +43,3 @@ tsconfig.json
 *.log
 .env
 .env.*
-README.md
