@@ -2,6 +2,8 @@
 
 > **Transform voice memos into perfectly organized, context-aware notes—without the transcription chaos.**
 
+<!-- Test publish 2026-01-22 -->
+
 ## The Problem
 
 You record voice memos constantly. Quick thoughts, meeting notes, ideas to remember. But the reality:
