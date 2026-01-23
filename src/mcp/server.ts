@@ -28,6 +28,7 @@ import {
 // eslint-disable-next-line import/extensions
 } from '@modelcontextprotocol/sdk/types.js';
 import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 import * as Resources from './resources';
 import * as Prompts from './prompts';
 import { tools, handleToolCall } from './tools';
@@ -134,8 +135,10 @@ async function main() {
 }
 
 // ES module equivalent of CommonJS `require.main === module`
+// Use resolve() to normalize both paths before comparison to handle
+// relative paths, symlinks, and path resolution differences
 const isMainModule = import.meta.url.startsWith('file:') &&
-    process.argv[1] === fileURLToPath(import.meta.url);
+    resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 
 if (isMainModule) {
     main().catch((error) => {
