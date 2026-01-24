@@ -1,0 +1,42 @@
+# Weekly Summary Configuration
+# Generates weekly summaries from activity files
+
+model: gpt-4o-mini
+temperature: 0.7
+maxCompletionTokens: 4000
+
+parameters:
+  year:
+    type: number
+    description: Year for the summary
+    required: true
+  month:
+    type: number
+    description: Month number (1-12) - used as week identifier for weekly summaries
+    required: true
+
+context: {}
+
+content:
+  activity:
+    type: activity
+    name: Weekly Activity
+    directory: ''
+    pattern: '*.md'
+
+output:
+  summary:
+    type: summary
+    format: markdown
+    name: Weekly Summary
+    pattern: 'summary.md'
+
+  completion:
+    type: metadata
+    format: json
+    pattern: 'completion.json'
+
+  inputs:
+    type: metadata
+    format: json
+    pattern: 'inputs.json'
