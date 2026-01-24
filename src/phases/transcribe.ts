@@ -71,8 +71,12 @@ export const create = (config: Config, operator: Dreadcabinet.Operator, deps?: T
         const baseDebugFilename = path.parse(transcriptOutputFilename).name;
         const transcriptionDebugFile = config.debug ? path.join(interimPath, `${baseDebugFilename}.transcription.raw.response.json`) : undefined;
 
+        // Convert audio file to a supported format if necessary
+        const convertedAudioFile = await media.convertToSupportedFormat(audioFile, interimPath);
+        logger.debug(`Using audio file for transcription: ${convertedAudioFile}`);
+
         // Check if audio file exceeds the size limit
-        const fileSize = await media.getFileSize(audioFile);
+        const fileSize = await media.getFileSize(convertedAudioFile);
         const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(1);
         logger.info('Step 1/2: Transcribing audio (%s MB)...', fileSizeMB);
         logger.debug(`Audio file size: ${fileSize} bytes, max size: ${config.maxAudioSize} bytes`);
@@ -87,8 +91,8 @@ export const create = (config: Config, operator: Dreadcabinet.Operator, deps?: T
             await storage.createDirectory(tempDir);
 
             try {
-                // Split the audio file into chunks
-                const audioChunks = await media.splitAudioFile(audioFile, tempDir, config.maxAudioSize);
+                // Split the audio file into chunks (use converted file)
+                const audioChunks = await media.splitAudioFile(convertedAudioFile, tempDir, config.maxAudioSize);
                 logger.info(`Split audio file into ${audioChunks.length} chunks`);
 
                 // Transcribe each chunk
@@ -136,8 +140,8 @@ export const create = (config: Config, operator: Dreadcabinet.Operator, deps?: T
                 throw new Error(`Failed to process split audio files: ${error}`);
             }
         } else {
-            // If file size is within the limit, transcribe normally
-            transcription = await OpenAI.transcribeAudio(audioFile, {
+            // If file size is within the limit, transcribe normally (use converted file)
+            transcription = await OpenAI.transcribeAudio(convertedAudioFile, {
                 model: config.transcriptionModel,
                 debug: config.debug,
                 debugFile: transcriptionDebugFile

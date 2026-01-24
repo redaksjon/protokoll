@@ -7,6 +7,7 @@ export interface Media {
     getAudioCreationTime: (filePath: string) => Promise<Date | null>;
     getFileSize: (filePath: string) => Promise<number>;
     splitAudioFile: (filePath: string, outputDir: string, maxSizeBytes: number) => Promise<string[]>;
+    convertToSupportedFormat: (filePath: string, outputDir: string) => Promise<string>;
 }
 
 const ffprobeAsync = (filePath: string): Promise<any> => {
@@ -119,9 +120,60 @@ export const create = (logger: Logger): Media => {
         }
     };
 
+    // Convert audio file to a format supported by OpenAI Whisper API
+    // Supported formats: flac, m4a, mp3, mp4, mpeg, mpga, oga, ogg, wav, webm
+    const convertToSupportedFormat = async (filePath: string, outputDir: string): Promise<string> => {
+        try {
+            const fileExt = path.extname(filePath).toLowerCase();
+
+            // List of formats that OpenAI supports
+            const supportedFormats = ['.flac', '.m4a', '.mp3', '.mp4', '.mpeg', '.mpga', '.oga', '.ogg', '.wav', '.webm'];
+
+            // If already in a supported format, return as-is
+            if (supportedFormats.includes(fileExt)) {
+                logger.debug(`File ${filePath} is already in a supported format: ${fileExt}`);
+                return filePath;
+            }
+
+            // Otherwise, convert to mp3 (widely supported and good compression)
+            logger.info(`Converting ${fileExt} file to mp3 for transcription...`);
+            const fileName = path.basename(filePath, fileExt);
+            const outputPath = path.join(outputDir, `${fileName}.mp3`);
+
+            // Check if converted file already exists
+            if (await storage.exists(outputPath)) {
+                logger.debug(`Converted file already exists: ${outputPath}`);
+                return outputPath;
+            }
+
+            // Create output directory if it doesn't exist
+            await storage.createDirectory(outputDir);
+
+            return new Promise<string>((resolve, reject) => {
+                ffmpeg(filePath)
+                    .toFormat('mp3')
+                    .audioBitrate('128k')
+                    .output(outputPath)
+                    .on('end', () => {
+                        logger.info(`Successfully converted to: ${outputPath}`);
+                        resolve(outputPath);
+                    })
+                    .on('error', (err) => {
+                        logger.error(`Error converting audio file: ${err}`);
+                        reject(new Error(`Failed to convert ${filePath} to mp3: ${err.message}`));
+                    })
+                    .run();
+            });
+        } catch (error) {
+            logger.error('Error in convertToSupportedFormat: %s', error);
+            throw new Error(`Failed to convert audio file ${filePath}: ${error}`);
+        }
+    };
+
     return {
         getAudioCreationTime,
         getFileSize,
         splitAudioFile,
+        convertToSupportedFormat,
     }
 }
