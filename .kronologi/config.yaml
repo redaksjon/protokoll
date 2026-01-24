@@ -1,0 +1,10 @@
+# Kronologi Configuration
+# Root configuration file for default settings
+
+# Default model (can be overridden per job)
+model: gpt-4o-mini
+
+# Default directories
+activityDirectory: activity
+summaryDirectory: summary
+contextDirectory: context

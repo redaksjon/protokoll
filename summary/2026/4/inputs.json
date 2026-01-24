@@ -1,0 +1,60 @@
+{
+  "config": {
+    "model": "gpt-4o-mini",
+    "temperature": 0.7,
+    "maxCompletionTokens": 4000,
+    "parameters": {
+      "year": {
+        "type": "number",
+        "description": "Year for the summary",
+        "required": true
+      },
+      "month": {
+        "type": "number",
+        "description": "Month number (1-12) - used as week identifier for weekly summaries",
+        "required": true
+      }
+    },
+    "context": {},
+    "content": {
+      "activity": {
+        "type": "activity",
+        "name": "Weekly Activity",
+        "directory": "",
+        "pattern": "*.md"
+      }
+    },
+    "output": {
+      "summary": {
+        "type": "summary",
+        "format": "markdown",
+        "name": "Weekly Summary",
+        "pattern": "summary.md"
+      },
+      "completion": {
+        "type": "metadata",
+        "format": "json",
+        "pattern": "completion.json"
+      },
+      "inputs": {
+        "type": "metadata",
+        "format": "json",
+        "pattern": "inputs.json"
+      }
+    },
+    "name": "weekly-summary"
+  },
+  "request": {
+    "model": "gpt-4o-mini",
+    "messages": [
+      {
+        "role": "system",
+        "content": "<Weekly Summary Persona>\nYou are a professional technical writer who creates concise, informative weekly summaries.\n\nYour summaries:\n\n- Highlight key accomplishments and progress\n- Identify important decisions and changes\n- Note blockers or challenges\n- Are written in clear, professional language\n- Focus on what matters most to stakeholders\n</Weekly Summary Persona>"
+      },
+      {
+        "role": "user",
+        "content": "<Context>\n\n</Context>\n\n<Weekly Summary Instructions>\nCreate a comprehensive weekly summary based on the provided activity files.\n\n<Structure>\n- **Overview**: Brief summary of the week's focus and major themes\n- **Key Accomplishments**: What was completed or achieved\n- **Progress**: Work that advanced significantly\n- **Decisions**: Important decisions made\n- **Challenges**: Blockers or issues encountered\n- **Next Steps**: Planned work for the coming week\n</Structure>\n\n<Guidelines>\n- Be concise but informative\n- Use bullet points for easy scanning\n- Highlight the most important items\n- Include relevant context for decisions\n- Note any risks or concerns\n- Keep the tone professional and factual\n</Guidelines>\n</Weekly Summary Instructions>\n\n<Content>\n<Weekly Activity Content>\n<activity/2026/4/test-activity.md>\n# Test Activity for Week 4, 2026\n\n## Completed Tasks\n- Fixed model default configuration bug in kronologi\n- Added executable permissions to built files\n- Updated documentation for configuration hierarchy\n\n## In Progress\n- Testing weekly summary functionality\n- Verifying build process improvements\n\n</activity/2026/4/test-activity.md>\n</Weekly Activity Content>\n</Content>"
+      }
+    ]
+  }
+}

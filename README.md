@@ -2,6 +2,8 @@
 
 > **Transform voice memos into perfectly organized, context-aware notes—without the transcription chaos.**
 
+<!-- Test publish 2026-01-22 -->
+
 ## The Problem
 
 You record voice memos constantly. Quick thoughts, meeting notes, ideas to remember. But the reality:
@@ -199,6 +201,10 @@ You're drowning in voice memos but can't use them because they're disorganized. 
 
 - **Node.js**: Version 18 or higher
 - **npm**: Version 8 or higher
+- **ffmpeg**: Required for audio format conversion and processing
+  - macOS: `brew install ffmpeg`
+  - Ubuntu/Debian: `apt-get install ffmpeg`
+  - Windows: Download from [ffmpeg.org](https://ffmpeg.org/download.html)
 - **API Key**: OpenAI API key (required for transcription and reasoning)
   - Optionally: Anthropic API key for Claude models
 
@@ -206,6 +212,15 @@ You're drowning in voice memos but can't use them because they're disorganized. 
 
 1. **OpenAI**: Sign up at [platform.openai.com](https://platform.openai.com) and create an API key
 2. **Anthropic** (optional): Sign up at [console.anthropic.com](https://console.anthropic.com) for Claude models
+
+### Why ffmpeg?
+
+Protokoll uses ffmpeg to:
+- **Convert audio formats**: Automatically converts unsupported formats (like .qta, .aif, .aiff) to formats compatible with OpenAI's Whisper API
+- **Split large files**: Breaks audio files larger than 25MB into chunks for processing
+- **Extract metadata**: Reads creation timestamps and duration from audio files
+
+The conversion happens transparently—just point Protokoll at any audio file and it will handle the rest.
 
 ## Installation
 
@@ -1824,6 +1839,29 @@ export OPENAI_API_KEY='sk-your-key'
 echo "OPENAI_API_KEY=sk-your-key" > .env
 ```
 
+#### "Invalid file format" or "Unsupported audio format"
+
+Protokoll automatically converts unsupported audio formats to MP3. If you see this error:
+
+1. **Install ffmpeg** (required for audio conversion):
+   ```bash
+   # macOS
+   brew install ffmpeg
+
+   # Ubuntu/Debian
+   sudo apt-get install ffmpeg
+
+   # Windows: download from ffmpeg.org
+   ```
+
+2. **Supported formats** (native to OpenAI Whisper):
+   - `.flac`, `.m4a`, `.mp3`, `.mp4`, `.mpeg`, `.mpga`, `.oga`, `.ogg`, `.wav`, `.webm`
+
+3. **Auto-converted formats** (requires ffmpeg):
+   - `.qta` (QuickTime Audio), `.aif`, `.aiff`, `.wma`, and most other audio formats
+
+The conversion happens automatically and the converted file is cached in the interim directory for faster reprocessing.
+
 #### "Audio file too large"
 
 Files over 25MB are automatically split. If splitting fails:
@@ -2229,3 +2267,4 @@ Apache-2.0
 ## Author
 
 Tim O'Brien <tobrien@discursive.com>
+TEST

@@ -190,6 +190,12 @@ export OPENAI_API_KEY="sk-..."
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
+### System Requirements
+
+- **Node.js 18+** and **npm 9+**
+- **ffmpeg** for audio format conversion (install with `brew install ffmpeg`, `apt-get install ffmpeg`, or from [ffmpeg.org](https://ffmpeg.org))
+- **OpenAI API key** (required for transcription)
+
 ## For AI Assistants
 
 If you're an AI helping someone use Protokoll:

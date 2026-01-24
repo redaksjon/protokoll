@@ -791,19 +791,26 @@ sounds_like:
                         <div className="step">
                             <div className="step-number">1</div>
                             <div className="step-content">
-                                <h4>Install</h4>
-                                <code>npm install -g @redaksjon/protokoll</code>
+                                <h4>Install ffmpeg</h4>
+                                <code>brew install ffmpeg</code>
                             </div>
                         </div>
                         <div className="step">
                             <div className="step-number">2</div>
+                            <div className="step-content">
+                                <h4>Install Protokoll</h4>
+                                <code>npm install -g @redaksjon/protokoll</code>
+                            </div>
+                        </div>
+                        <div className="step">
+                            <div className="step-number">3</div>
                             <div className="step-content">
                                 <h4>Set API Key</h4>
                                 <code>export OPENAI_API_KEY='sk-...'</code>
                             </div>
                         </div>
                         <div className="step">
-                            <div className="step-number">3</div>
+                            <div className="step-number">4</div>
                             <div className="step-content">
                                 <h4>Transcribe</h4>
                                 <code>protokoll --input-directory ~/recordings</code>
@@ -826,6 +833,20 @@ sounds_like:
                             <div className="code-line"><span className="code-comment"># Debug mode with verbose output</span></div>
                             <div className="code-line">protokoll --input-directory ~/recordings --debug --verbose</div>
                         </div>
+                    </div>
+
+                    <div className="quickstart-note">
+                        <h3>Supported Audio Formats</h3>
+                        <p>
+                            <strong>Native formats:</strong> .mp3, .m4a, .wav, .webm, .mp4, .mpeg, .mpga, .flac, .oga, .ogg
+                        </p>
+                        <p>
+                            <strong>Auto-converted formats:</strong> .qta (QuickTime Audio), .aif, .aiff, .wma, and most other audio formats
+                        </p>
+                        <p className="quickstart-note-detail">
+                            Protokoll uses ffmpeg to automatically convert unsupported formats to MP3 for transcription.
+                            The conversion happens transparently and converted files are cached for faster reprocessing.
+                        </p>
                     </div>
                 </div>
             </section>

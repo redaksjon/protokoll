@@ -1,0 +1,40 @@
+# Monthly Summary Configuration
+# Generates monthly summaries from activity files
+
+model: gpt-4o-mini
+temperature: 0.7
+maxCompletionTokens: 4000
+
+parameters:
+  year:
+    type: number
+    description: Year for the summary
+    required: true
+  month:
+    type: number
+    description: Month for the summary (1-12)
+    required: true
+
+content:
+  activity:
+    type: activity
+    name: Monthly Activity
+    directory: ''
+    pattern: '*.md'
+
+output:
+  summary:
+    type: summary
+    format: markdown
+    name: Monthly Summary
+    pattern: 'summary.md'
+
+  completion:
+    type: metadata
+    format: json
+    pattern: 'completion.json'
+
+  inputs:
+    type: metadata
+    format: json
+    pattern: 'inputs.json'

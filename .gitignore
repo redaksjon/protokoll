@@ -17,3 +17,5 @@ package-lock.json
 tsconfig.tsbuildinfo
 tsconfig (1).tsbuildinfo
 *~
+package-lock.json
+.kodrdriv*

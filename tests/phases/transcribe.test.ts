@@ -20,6 +20,7 @@ const mockStorage = {
 const mockMedia = {
     getFileSize: vi.fn(),
     splitAudioFile: vi.fn(),
+    convertToSupportedFormat: vi.fn(),
 };
 
 const mockOpenAI = {
@@ -137,7 +138,11 @@ describe('Transcribe Phase Tests', () => {
         vi.clearAllMocks();
         // @ts-ignore
         mockOperator.constructFilename.mockResolvedValue('transcript_abc123.json');
-        
+
+        // Setup default media mock - convertToSupportedFormat returns the file as-is by default
+        // @ts-ignore
+        mockMedia.convertToSupportedFormat.mockImplementation((filePath) => Promise.resolve(filePath));
+
         // Setup default reasoning mock response
         // @ts-ignore
         mockReasoningInstance.complete.mockResolvedValue({
@@ -145,8 +150,8 @@ describe('Transcribe Phase Tests', () => {
             model: 'gpt-4',
             duration: 1000,
         });
-        
-        // Setup default agentic mock response  
+
+        // Setup default agentic mock response
         // @ts-ignore
         mockAgentic.process.mockResolvedValue({
             enhancedText: '# Formatted Transcript\n\nTranscribed text',
