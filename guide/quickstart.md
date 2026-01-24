@@ -6,9 +6,25 @@ Get Protokoll working in 5 minutes.
 
 - Node.js 18+
 - npm 9+
+- ffmpeg (for audio format conversion)
 - OpenAI API key
 
 ## Installation
+
+### 1. Install ffmpeg
+
+```bash
+# macOS
+brew install ffmpeg
+
+# Ubuntu/Debian
+sudo apt-get install ffmpeg
+
+# Windows
+# Download from https://ffmpeg.org/download.html
+```
+
+### 2. Install Protokoll
 
 ```bash
 npm install -g @redaksjon/protokoll
@@ -34,7 +50,16 @@ export OPENAI_API_KEY='sk-...'
 export ANTHROPIC_API_KEY='sk-ant-...'
 ```
 
-### 2. Create Config (optional)
+### 2. Verify ffmpeg Installation
+
+```bash
+ffmpeg -version
+# Should show version info
+```
+
+If you see "command not found", make sure ffmpeg is installed and in your PATH.
+
+### 3. Create Config (optional)
 
 ```bash
 mkdir -p ~/.protokoll
