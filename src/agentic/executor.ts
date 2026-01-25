@@ -2,13 +2,14 @@
  * Agentic Executor
  * 
  * Executes the agentic transcription loop with tool calls.
- * Maintains conversation history for multi-turn tool usage.
+ * Uses RiotPrompt's ConversationBuilder for conversation management.
  */
 
 import { ToolContext, TranscriptionState } from './types';
 import * as Registry from './registry';
 import * as Reasoning from '../reasoning';
 import * as Logging from '../logging';
+import { ConversationBuilder, ToolCall as RiotToolCall } from '@riotprompt/riotprompt';
 
 export interface ContextChangeRecord {
     entityType: 'person' | 'project' | 'company' | 'term' | 'ignored';
@@ -29,13 +30,19 @@ export interface ExecutorInstance {
     }>;
 }
 
-// Message types for conversation history
-interface ConversationMessage {
-    role: 'system' | 'user' | 'assistant' | 'tool';
-    content: string;
-    tool_call_id?: string;
-    tool_calls?: Array<{ id: string; name: string; arguments: Record<string, unknown> }>;
-}
+/**
+ * Convert internal tool call format to RiotPrompt's ToolCall format
+ */
+const toRiotToolCalls = (toolCalls: Array<{ id: string; name: string; arguments: Record<string, unknown> }>): RiotToolCall[] => {
+    return toolCalls.map(tc => ({
+        id: tc.id,
+        type: 'function' as const,
+        function: {
+            name: tc.name,
+            arguments: JSON.stringify(tc.arguments),
+        },
+    }));
+};
 
 /**
  * Clean response content by removing any leaked internal processing information
@@ -139,8 +146,16 @@ export const create = (
         let totalTokens = 0;
         const maxIterations = 15;
     
-        // Conversation history for multi-turn
-        const conversationHistory: ConversationMessage[] = [];
+        // Use ConversationBuilder for conversation management with token budget
+        const conversation = ConversationBuilder.create({ model: 'gpt-4o' })
+            .withTokenBudget({
+                max: 100000,                    // 100k token context window
+                reserveForResponse: 4000,       // Reserve 4k tokens for response
+                strategy: 'summarize',          // Summarize old messages if budget exceeded
+                onBudgetExceeded: 'compress',   // Automatically compress when exceeded
+                preserveSystem: true,           // Always keep system messages
+                preserveRecent: 5               // Keep last 5 messages
+            });
     
         // Build the system prompt
         const systemPrompt = `You are an intelligent transcription assistant. Your job is to:
@@ -172,8 +187,8 @@ Available tools:
 - route_note: Determine where to file this note
 - store_context: Remember new information for future use`;
 
-        // Add system message to history
-        conversationHistory.push({ role: 'system', content: systemPrompt });
+        // Add system message using ConversationBuilder
+        conversation.addSystemMessage(systemPrompt);
         
         // Add the initial user message with transcript
         const initialPrompt = `Here is the raw transcript to process:
@@ -191,7 +206,7 @@ Please:
 CRITICAL: Your response must contain ONLY the transcript text - no commentary, no explanations, no tool information.
 Remember: preserve ALL content, only fix transcription errors.`;
 
-        conversationHistory.push({ role: 'user', content: initialPrompt });
+        conversation.addUserMessage(initialPrompt);
 
         try {
             // Initial reasoning call
@@ -208,16 +223,15 @@ Remember: preserve ALL content, only fix transcription errors.`;
                 totalTokens += response.usage.totalTokens;
             }
             
-            // Add assistant response to history
-            conversationHistory.push({ 
-                role: 'assistant', 
-                content: response.content,
-                tool_calls: response.toolCalls?.map(tc => ({
-                    id: tc.id,
-                    name: tc.name,
-                    arguments: tc.arguments,
-                })),
-            });
+            // Add assistant response to conversation
+            if (response.toolCalls && response.toolCalls.length > 0) {
+                conversation.addAssistantWithToolCalls(
+                    response.content,
+                    toRiotToolCalls(response.toolCalls)
+                );
+            } else {
+                conversation.addAssistantMessage(response.content);
+            }
     
             // Iterative tool use loop
             while (response.toolCalls && response.toolCalls.length > 0 && iterations < maxIterations) {
@@ -859,13 +873,9 @@ Remember: preserve ALL content, only fix transcription errors.`;
                     }
                 }
                 
-                // Add tool results to history
+                // Add tool results to conversation
                 for (const tr of toolResults) {
-                    conversationHistory.push({
-                        role: 'tool',
-                        tool_call_id: tr.id,
-                        content: tr.result,
-                    });
+                    conversation.addToolResult(tr.id, tr.result, tr.name);
                 }
       
                 // Build continuation prompt with full context
@@ -884,7 +894,7 @@ Do NOT summarize - include ALL original content with corrections applied.
 
 CRITICAL REMINDER: Your response must contain ONLY the transcript text. Do NOT include any commentary, explanations, or processing notes - those will leak into the user-facing document.`;
 
-                conversationHistory.push({ role: 'user', content: continuationPrompt });
+                conversation.addUserMessage(continuationPrompt);
       
                 // Continue conversation with full context
                 response = await reasoning.complete({
@@ -898,15 +908,15 @@ CRITICAL REMINDER: Your response must contain ONLY the transcript text. Do NOT i
                     totalTokens += response.usage.totalTokens;
                 }
                 
-                conversationHistory.push({ 
-                    role: 'assistant', 
-                    content: response.content,
-                    tool_calls: response.toolCalls?.map(tc => ({
-                        id: tc.id,
-                        name: tc.name,
-                        arguments: tc.arguments,
-                    })),
-                });
+                // Add assistant response to conversation
+                if (response.toolCalls && response.toolCalls.length > 0) {
+                    conversation.addAssistantWithToolCalls(
+                        response.content,
+                        toRiotToolCalls(response.toolCalls)
+                    );
+                } else {
+                    conversation.addAssistantMessage(response.content);
+                }
             }
     
             // Extract final corrected text
