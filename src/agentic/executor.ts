@@ -46,13 +46,32 @@ const cleanResponseContent = (content: string): string => {
     // Pattern 1: "Using tools to..." type commentary
     let cleaned = content.replace(/^(?:Using tools?|Let me|I'll|I will|Now I'll|First,?\s*I(?:'ll| will)).*?[\r\n]+/gim, '');
     
-    // Pattern 2: JSON tool call artifacts like {"tool":"...","input":{...}}
-    cleaned = cleaned.replace(/\{"tool":\s*"[^"]+",\s*"input":\s*\{[^}]*\}\}/g, '');
+    // Pattern 2: JSON tool call artifacts - match complete JSON objects with "tool" key
+    // Matches: {"tool":"...","args":{...}}, {"tool":"...","input":{...}}, etc.
+    // Use a more careful pattern that matches balanced braces
+    cleaned = cleaned.replace(/\{"tool":\s*"[^"]+",\s*"(?:args|input)":\s*\{[^}]*\}\}/g, '');
     
     // Pattern 3: Tool call references in the format tool_name({...})
     cleaned = cleaned.replace(/\b\w+_\w+\(\{[^}]*\}\)/g, '');
     
-    // Pattern 4: Lines that are purely reasoning/commentary before the actual content
+    // Pattern 4: Remove lines with "to=" patterns (internal routing artifacts)
+    // Matches: "Այ to=lookup_project.commentary", "undefined to=route_note.commentary"
+    // Do this BEFORE Unicode filtering to catch mixed corruption
+    cleaned = cleaned.replace(/^.*\s+to=\w+\.\w+.*$/gm, '');
+    
+    // Pattern 5: Remove lines that look like spam/SEO (Chinese gambling sites, etc.)
+    // Matches lines with Chinese characters followed by "app", "官网", etc.
+    // This is more specific than general Unicode filtering
+    const spamPattern = /^.*[\u4E00-\u9FFF].*(app|官网|彩票|中彩票).*$/gm;
+    cleaned = cleaned.replace(spamPattern, '');
+    
+    // Pattern 6: Remove lines with suspicious Unicode at the START (corruption indicators)
+    // Only remove lines that START with non-Latin scripts (not legitimate content)
+    // This catches corruption like "Այ to=..." or "สามสิบเอ็ด" at line start
+    const corruptionStartPattern = /^[\u0530-\u058F\u0E00-\u0E7F\u0A80-\u0AFF\u0C00-\u0C7F].*$/gm;
+    cleaned = cleaned.replace(corruptionStartPattern, '');
+    
+    // Pattern 7: Lines that are purely reasoning/commentary before the actual content
     // Look for lines like "I'll verify...", "Checking...", etc.
     const lines = cleaned.split('\n');
     let startIndex = 0;
@@ -68,7 +87,8 @@ const cleanResponseContent = (content: string): string => {
         const isCommentary = /^(checking|verifying|looking|searching|analyzing|processing|determining|using|calling|executing|I'm|I am|Let me)/i.test(line)
             || line.includes('tool')
             || line.includes('{"')
-            || line.includes('reasoning');
+            || line.includes('reasoning')
+            || line.includes('undefined');
         
         if (!isCommentary) {
             // This looks like actual content - start from here
@@ -81,6 +101,9 @@ const cleanResponseContent = (content: string): string => {
     if (startIndex > 0) {
         cleaned = lines.slice(startIndex).join('\n');
     }
+    
+    // Final cleanup: remove multiple consecutive blank lines
+    cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
     
     return cleaned.trim();
 };
@@ -892,8 +915,20 @@ CRITICAL REMINDER: Your response must contain ONLY the transcript text. Do NOT i
                 const cleanedContent = cleanResponseContent(response.content);
                 
                 if (cleanedContent !== response.content) {
-                    logger.warn('Removed leaked internal processing from response (%d -> %d chars)',
-                        response.content.length, cleanedContent.length);
+                    const removedChars = response.content.length - cleanedContent.length;
+                    logger.warn('Removed leaked internal processing from response (%d -> %d chars, removed %d chars)',
+                        response.content.length, cleanedContent.length, removedChars);
+                    
+                    // Detect severe corruption (>10% of content removed or suspicious patterns)
+                    const corruptionRatio = removedChars / response.content.length;
+                    const hasSuspiciousUnicode = /[\u0530-\u058F\u0E00-\u0E7F\u4E00-\u9FFF\u0A80-\u0AFF\u0C00-\u0C7F]/.test(response.content);
+                    
+                    if (corruptionRatio > 0.1 || hasSuspiciousUnicode) {
+                        logger.error('SEVERE CORRUPTION DETECTED in LLM response (%.1f%% removed, suspicious unicode: %s)',
+                            corruptionRatio * 100, hasSuspiciousUnicode);
+                        logger.error('Raw response preview (first 500 chars): %s', 
+                            response.content.substring(0, 500).replace(/\n/g, '\\n'));
+                    }
                 }
                 
                 state.correctedText = cleanedContent;
@@ -929,8 +964,20 @@ CRITICAL: Your response must contain ONLY the corrected transcript text - absolu
                 const cleanedFinalContent = cleanResponseContent(finalResponse.content || transcriptText);
                 
                 if (cleanedFinalContent !== finalResponse.content) {
-                    logger.warn('Removed leaked internal processing from final response (%d -> %d chars)',
-                        finalResponse.content?.length || 0, cleanedFinalContent.length);
+                    const removedChars = (finalResponse.content?.length || 0) - cleanedFinalContent.length;
+                    logger.warn('Removed leaked internal processing from final response (%d -> %d chars, removed %d chars)',
+                        finalResponse.content?.length || 0, cleanedFinalContent.length, removedChars);
+                    
+                    // Detect severe corruption
+                    const corruptionRatio = removedChars / (finalResponse.content?.length || 1);
+                    const hasSuspiciousUnicode = /[\u0530-\u058F\u0E00-\u0E7F\u4E00-\u9FFF\u0A80-\u0AFF\u0C00-\u0C7F]/.test(finalResponse.content || '');
+                    
+                    if (corruptionRatio > 0.1 || hasSuspiciousUnicode) {
+                        logger.error('SEVERE CORRUPTION DETECTED in final LLM response (%.1f%% removed, suspicious unicode: %s)',
+                            corruptionRatio * 100, hasSuspiciousUnicode);
+                        logger.error('Raw response preview (first 500 chars): %s', 
+                            (finalResponse.content || '').substring(0, 500).replace(/\n/g, '\\n'));
+                    }
                 }
                 
                 state.correctedText = cleanedFinalContent;
