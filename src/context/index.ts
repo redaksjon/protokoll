@@ -5,8 +5,7 @@
  * to create context instances that can discover, load, and manage
  * entity data from hierarchical .protokoll directories.
  * 
- * Design Note: This module is designed to be self-contained and may be
- * extracted for use in other tools (kronologi, observasjon) in the future.
+ * This module now uses overcontext under the hood for storage and discovery.
  */
 
 import { 
@@ -20,10 +19,9 @@ import {
     DiscoveredContextDir,
     HierarchicalContextResult,
     SmartAssistanceConfig,
-    getProjectRelationshipDistance
 } from './types';
-import * as Storage from './storage';
-import * as Discovery from './discovery';
+import * as Overcontext from '../overcontext';
+import { getProjectRelationshipDistance } from '../overcontext/helpers';
 import {
     DEFAULT_PHONETIC_MODEL,
     DEFAULT_ANALYSIS_MODEL,
@@ -40,55 +38,55 @@ import {
 } from '../constants';
 
 export interface ContextInstance {
-  // Initialization
-  load(): Promise<void>;
-  reload(): Promise<void>;
+    // Initialization
+    load(): Promise<void>;
+    reload(): Promise<void>;
   
-  // Discovery info
-  getDiscoveredDirs(): DiscoveredContextDir[];
-  getConfig(): Record<string, unknown>;
-  getContextDirs(): string[];
+    // Discovery info
+    getDiscoveredDirs(): DiscoveredContextDir[];
+    getConfig(): Record<string, unknown>;
+    getContextDirs(): string[];
   
-  // Smart Assistance config
-  getSmartAssistanceConfig(): SmartAssistanceConfig;
+    // Smart Assistance config
+    getSmartAssistanceConfig(): SmartAssistanceConfig;
   
-  // Entity access
-  getPerson(id: string): Person | undefined;
-  getProject(id: string): Project | undefined;
-  getCompany(id: string): Company | undefined;
-  getTerm(id: string): Term | undefined;
-  getIgnored(id: string): IgnoredTerm | undefined;
+    // Entity access
+    getPerson(id: string): Person | undefined;
+    getProject(id: string): Project | undefined;
+    getCompany(id: string): Company | undefined;
+    getTerm(id: string): Term | undefined;
+    getIgnored(id: string): IgnoredTerm | undefined;
   
-  getAllPeople(): Person[];
-  getAllProjects(): Project[];
-  getAllCompanies(): Company[];
-  getAllTerms(): Term[];
-  getAllIgnored(): IgnoredTerm[];
+    getAllPeople(): Person[];
+    getAllProjects(): Project[];
+    getAllCompanies(): Company[];
+    getAllTerms(): Term[];
+    getAllIgnored(): IgnoredTerm[];
   
-  // Check if a term is ignored
-  isIgnored(term: string): boolean;
+    // Check if a term is ignored
+    isIgnored(term: string): boolean;
   
-  // Search
-  search(query: string): Entity[];
-  findBySoundsLike(phonetic: string): Entity | undefined;
+    // Search
+    search(query: string): Entity[];
+    findBySoundsLike(phonetic: string): Entity | undefined;
   
-  // Advanced search with context awareness (prefers entities related to context project)
-  searchWithContext(query: string, contextProjectId?: string): Entity[];
-  getRelatedProjects(projectId: string, maxDistance?: number): Project[];
+    // Advanced search with context awareness
+    searchWithContext(query: string, contextProjectId?: string): Entity[];
+    getRelatedProjects(projectId: string, maxDistance?: number): Project[];
   
-  // Modification (for self-update mode)
-  saveEntity(entity: Entity): Promise<void>;
-  deleteEntity(entity: Entity): Promise<boolean>;
-  getEntityFilePath(entity: Entity): string | undefined;
+    // Modification
+    saveEntity(entity: Entity): Promise<void>;
+    deleteEntity(entity: Entity): Promise<boolean>;
+    getEntityFilePath(entity: Entity): string | undefined;
   
-  // Check if context is available
-  hasContext(): boolean;
+    // Check if context is available
+    hasContext(): boolean;
 }
 
 export interface CreateOptions {
-  startingDir?: string;
-  configDirName?: string;
-  configFileName?: string;
+    startingDir?: string;
+    configDirName?: string;
+    configFileName?: string;
 }
 
 /**
@@ -119,7 +117,7 @@ const getSmartAssistanceConfig = (config: Record<string, unknown>): SmartAssista
 };
 
 /**
- * Create a new context instance
+ * Create a new context instance using overcontext
  */
 export const create = async (options: CreateOptions = {}): Promise<ContextInstance> => {
     const discoveryOptions: ContextDiscoveryOptions = {
@@ -128,7 +126,7 @@ export const create = async (options: CreateOptions = {}): Promise<ContextInstan
         startingDir: options.startingDir,
     };
 
-    const storage = Storage.create();
+    const storage = Overcontext.create();
     let discoveryResult: HierarchicalContextResult = {
         config: {},
         discoveredDirs: [],
@@ -136,7 +134,7 @@ export const create = async (options: CreateOptions = {}): Promise<ContextInstan
     };
 
     const loadContext = async (): Promise<void> => {
-        discoveryResult = await Discovery.loadHierarchicalConfig(discoveryOptions);
+        discoveryResult = await Overcontext.loadHierarchicalConfig(discoveryOptions);
         storage.clear();
         await storage.load(discoveryResult.contextDirs);
     };
@@ -182,39 +180,28 @@ export const create = async (options: CreateOptions = {}): Promise<ContextInstan
         search: (query) => storage.search(query),
         findBySoundsLike: (phonetic) => storage.findBySoundsLike(phonetic),
         
-        /**
-         * Context-aware search that prefers entities related to context project.
-         * Still returns standard search results if no context provided.
-         */
         searchWithContext: (query, contextProjectId) => {
-            // First, do a standard search
             const results = storage.search(query);
             
-            // If no context project specified, return standard results
             if (!contextProjectId) {
                 return results;
             }
             
-            // Get the context project
             const contextProject = storage.get<Project>('project', contextProjectId);
             if (!contextProject) {
                 return results;
             }
             
-            // Score and sort results based on context relationships
             const scoredResults = results.map(entity => {
                 let score = 0;
                 
-                // For projects, consider relationship distance
                 if (entity.type === 'project') {
                     const distance = getProjectRelationshipDistance(contextProject, entity as Project);
                     if (distance >= 0) {
-                        // Closer relationships get higher scores
-                        score += (3 - distance) * 50; // 150 for same, 100 for parent/child, 50 for sibling
+                        score += (3 - distance) * 50;
                     }
                 }
                 
-                // For terms, check if associated with context project
                 if (entity.type === 'term') {
                     const term = entity as Term;
                     if (term.projects?.includes(contextProjectId)) {
@@ -225,16 +212,11 @@ export const create = async (options: CreateOptions = {}): Promise<ContextInstan
                 return { entity, score };
             });
             
-            // Sort by score (highest first) and return entities
             return scoredResults
                 .sort((a, b) => b.score - a.score)
                 .map(r => r.entity);
         },
         
-        /**
-         * Get all projects related to a given project within maxDistance
-         * Distance: 0 = same, 1 = parent/child, 2 = siblings/cousins
-         */
         getRelatedProjects: (projectId, maxDistance = 2) => {
             const project = storage.get<Project>('project', projectId);
             if (!project) return [];
@@ -251,14 +233,12 @@ export const create = async (options: CreateOptions = {}): Promise<ContextInstan
                 }
             }
             
-            // Sort by distance (closest first)
             return related
                 .sort((a, b) => a.distance - b.distance)
                 .map(r => r.project);
         },
     
         saveEntity: async (entity) => {
-            // Save to the closest .protokoll directory
             const closestDir = discoveryResult.discoveredDirs
                 .sort((a, b) => a.level - b.level)[0];
       
@@ -270,13 +250,11 @@ export const create = async (options: CreateOptions = {}): Promise<ContextInstan
         },
         
         deleteEntity: async (entity) => {
-            // Delete from the closest .protokoll directory that contains it
             const filePath = storage.getEntityFilePath(entity.type, entity.id, discoveryResult.contextDirs);
             if (!filePath) {
                 return false;
             }
             
-            // Extract the context directory from the file path
             const contextDir = discoveryResult.contextDirs.find(dir => filePath.startsWith(dir));
             if (!contextDir) {
                 return false;
@@ -293,9 +271,11 @@ export const create = async (options: CreateOptions = {}): Promise<ContextInstan
     };
 };
 
-// Re-export types
+// Re-export types (includes helper functions)
 export * from './types';
 
-// Re-export discovery utilities for direct use if needed
-export { discoverConfigDirectories, loadHierarchicalConfig, deepMerge } from './discovery';
+// Re-export discovery utilities
+export { discoverConfigDirectories, loadHierarchicalConfig } from '../overcontext';
 
+// Re-export deepMerge from old discovery for backwards compatibility
+export { deepMerge } from './discovery';

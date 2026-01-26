@@ -91,10 +91,10 @@ describe('MCP Server', () => {
         tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mcp-test-'));
         protokollDir = path.join(tempDir, '.protokoll');
         await fs.mkdir(protokollDir, { recursive: true });
-        await fs.mkdir(path.join(protokollDir, 'people'), { recursive: true });
-        await fs.mkdir(path.join(protokollDir, 'projects'), { recursive: true });
-        await fs.mkdir(path.join(protokollDir, 'terms'), { recursive: true });
-        await fs.mkdir(path.join(protokollDir, 'companies'), { recursive: true });
+        await fs.mkdir(path.join(protokollDir, 'context', 'people'), { recursive: true });
+        await fs.mkdir(path.join(protokollDir, 'context', 'projects'), { recursive: true });
+        await fs.mkdir(path.join(protokollDir, 'context', 'terms'), { recursive: true });
+        await fs.mkdir(path.join(protokollDir, 'context', 'companies'), { recursive: true });
     });
 
     afterEach(async () => {
@@ -204,7 +204,7 @@ describe('MCP Server', () => {
         it('should find config and suggest projects', async () => {
             // Create a project with routing
             await fs.writeFile(
-                path.join(protokollDir, 'projects', 'test-project.yaml'),
+                path.join(protokollDir, 'context', 'projects', 'test-project.yaml'),
                 `id: test-project
 name: Test Project
 active: true
@@ -231,7 +231,7 @@ classification:
             await fs.mkdir(projectDest, { recursive: true });
 
             await fs.writeFile(
-                path.join(protokollDir, 'projects', 'matched-project.yaml'),
+                path.join(protokollDir, 'context', 'projects', 'matched-project.yaml'),
                 `id: matched-project
 name: Matched Project
 active: true
@@ -359,7 +359,7 @@ routing:
             });
             // Create inactive project by writing file directly (can't set inactive via handler)
             await fs.writeFile(
-                path.join(protokollDir, 'projects', 'inactive-filter-test.yaml'),
+                path.join(protokollDir, 'context', 'projects', 'inactive-filter-test.yaml'),
                 'id: inactive-filter-test\nname: Inactive Project\nactive: false\ntype: project'
             );
 
