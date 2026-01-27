@@ -11,6 +11,7 @@ import * as ContextTools from './contextTools';
 import * as EntityTools from './entityTools';
 import * as AssistTools from './assistTools';
 import * as TranscriptTools from './transcriptTools';
+import * as SystemTools from './systemTools';
 
 // Re-export all handlers for testing
 export * from './discoveryTools';
@@ -19,6 +20,7 @@ export * from './contextTools';
 export * from './entityTools';
 export * from './assistTools';
 export * from './transcriptTools';
+export * from './systemTools';
 export * from './shared';
 
 // ============================================================================
@@ -26,6 +28,9 @@ export * from './shared';
 // ============================================================================
 
 export const tools: Tool[] = [
+    // System Information
+    SystemTools.getVersionTool,
+
     // Discovery & Configuration
     DiscoveryTools.discoverConfigTool,
     DiscoveryTools.suggestProjectTool,
@@ -74,6 +79,10 @@ export const tools: Tool[] = [
 
 export async function handleToolCall(name: string, args: unknown): Promise<unknown> {
     switch (name) {
+        // System Information
+        case 'protokoll_get_version':
+            return SystemTools.handleGetVersion();
+
         // Discovery & Configuration
         case 'protokoll_discover_config':
             return DiscoveryTools.handleDiscoverConfig(args as Parameters<typeof DiscoveryTools.handleDiscoverConfig>[0]);

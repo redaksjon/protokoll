@@ -1217,6 +1217,9 @@ Content from part 2.
         it('should have all expected tools defined', () => {
             const toolNames = tools.map(t => t.name);
 
+            // System tools
+            expect(toolNames).toContain('protokoll_get_version');
+
             // Discovery tools
             expect(toolNames).toContain('protokoll_discover_config');
             expect(toolNames).toContain('protokoll_suggest_project');
