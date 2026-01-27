@@ -14,8 +14,9 @@ import {
     RedaksjonEntityType,
 } from '@redaksjon/context';
 import { protokollDiscoveryOptions } from './config';
-import { existsSync, statSync } from 'fs';
-import * as path from 'path';
+// eslint-disable-next-line no-restricted-imports
+import { existsSync, statSync } from 'node:fs';
+import * as path from 'node:path';
 
 // Re-export types for backwards compatibility
 export type { Person, Project, Company, Term, IgnoredTerm, RedaksjonEntity };

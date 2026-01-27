@@ -100,7 +100,8 @@ export function getPrompts(): McpPrompt[] {
         {
             name: 'review_transcript',
             description: 'Analyze a transcript and suggest corrections based on context. ' +
-                'Identifies potential name/term errors and offers to apply fixes.',
+                'Identifies potential name/term errors and offers to apply fixes. ' +
+                'IMPORTANT: This prompt instructs the AI to use ONLY Protokoll MCP tools, never direct file editing.',
             arguments: [
                 {
                     name: 'transcriptPath',
@@ -109,7 +110,7 @@ export function getPrompts(): McpPrompt[] {
                 },
                 {
                     name: 'focusArea',
-                    description: 'What to focus on: names, terms, technical, or all',
+                    description: 'What to focus on: names, terms, technical, or all (defaults to "all")',
                     required: false,
                 },
             ],
