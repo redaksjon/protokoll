@@ -454,7 +454,7 @@ sounds_like:
       await fs.writeFile(path.join(protokollDir, 'config.yaml'), 'version: 1');
       await fs.writeFile(
         path.join(projectsDir, 'proj1.yaml'),
-        'id: proj1\nname: Project One\ntype: project\nclassification:\n  triggers:\n    words: []\n  requireAll: false\nrouting:\n  structure: month\n  filename_options: [date, time]'
+        'id: proj1\nname: Project One\ntype: project\nclassification:\n  context_type: work\nrouting:\n  structure: month\n  filename_options: [date, time]'
       );
 
       const context = await Context.create({ startingDir: tempDir });
@@ -476,9 +476,7 @@ sounds_like:
 name: Parent Project
 type: project
 classification:
-  triggers:
-    words: []
-  requireAll: false
+  context_type: work
 routing:
   structure: month
   filename_options: [date, time]`
@@ -491,14 +489,12 @@ routing:
 name: Child Project
 type: project
 classification:
-  triggers:
-    words: []
-  requireAll: false
+  context_type: work
 routing:
   structure: month
   filename_options: [date, time]
 relationships:
-  parentProjects: [parent]`
+  parent: parent`
       );
 
       const context = await Context.create({ startingDir: tempDir });
@@ -520,10 +516,9 @@ relationships:
         path.join(projectsDir, 'proj1.yaml'),
         `id: proj1
 name: Project One
+type: project
 classification:
-  triggers:
-    words: []
-  requireAll: false
+  context_type: work
 routing:
   structure: month
   filename_options: [date, time]`
@@ -532,7 +527,7 @@ routing:
       // Create term associated with project
       await fs.writeFile(
         path.join(termsDir, 'term1.yaml'),
-        'id: term1\nname: Term One\nprojects: [proj1]'
+        'id: term1\nname: Term One\ntype: term\nprojects: [proj1]'
       );
 
       const context = await Context.create({ startingDir: tempDir });
@@ -552,9 +547,7 @@ routing:
 name: Project One
 type: project
 classification:
-  triggers:
-    words: []
-  requireAll: false
+  context_type: work
 routing:
   structure: month
   filename_options: [date, time]`
