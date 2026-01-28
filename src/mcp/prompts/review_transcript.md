@@ -7,6 +7,17 @@ I'll help you review "${transcriptPath}".
 **Focus areas:**
 - ${focusArea}
 
+## User Input Expected
+
+**This prompt is typically invoked with additional freeform feedback from the user.** The user may provide instructions like:
+- "Change the title to 'XYZ' and the project to '123'"
+- "Fix the speaker names"
+- "Update the timestamp to 2pm"
+- "Correct technical terms related to [topic]"
+- Any other specific changes or improvements they want to make
+
+**Use the user's feedback to guide which tools to call and what changes to make.** The instructions below explain how to make those changes properly.
+
 ## CRITICAL: Use ONLY Protokoll MCP Tools to Alter Transcripts
 
 **YOU MUST use Protokoll MCP tools to make ANY changes to the transcript. NEVER directly edit transcript files.**
