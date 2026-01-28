@@ -257,7 +257,7 @@ sounds_like:
       await fs.writeFile(path.join(protokollDir, 'config.yaml'), 'version: 1');
       await fs.writeFile(
         path.join(ignoredDir, 'common-term.yaml'),
-        'id: common-term\nname: Common Term\nignoredAt: 2026-01-15'
+        'id: common-term\nname: Common Term\ntype: ignored'
       );
       
       const context = await Context.create({ startingDir: tempDir });
@@ -273,7 +273,7 @@ sounds_like:
       await fs.writeFile(path.join(protokollDir, 'config.yaml'), 'version: 1');
       await fs.writeFile(
         path.join(ignoredDir, 'test-term.yaml'),
-        'id: test-term\nname: Test Term'
+        'id: test-term\nname: Test Term\ntype: ignored'
       );
       
       const context = await Context.create({ startingDir: tempDir });
@@ -289,7 +289,7 @@ sounds_like:
       await fs.writeFile(path.join(protokollDir, 'config.yaml'), 'version: 1');
       await fs.writeFile(
         path.join(ignoredDir, 'my-term.yaml'),
-        'id: my-term\nname: My Special Term'
+        'id: my-term\nname: My Special Term\ntype: ignored'
       );
       
       const context = await Context.create({ startingDir: tempDir });
@@ -419,7 +419,7 @@ sounds_like:
       await fs.writeFile(path.join(protokollDir, 'config.yaml'), 'version: 1');
       await fs.writeFile(
         path.join(ignoredDir, 'stopword.yaml'),
-        'id: stopword\nname: stopword'
+        'id: stopword\nname: stopword\ntype: ignored'
       );
 
       const context = await Context.create({ startingDir: tempDir });
@@ -436,7 +436,7 @@ sounds_like:
       await fs.writeFile(path.join(protokollDir, 'config.yaml'), 'version: 1');
       await fs.writeFile(
         path.join(ignoredDir, 'multi-word-term.yaml'),
-        'id: multi-word-term\nname: Multi Word Term'
+        'id: multi-word-term\nname: Multi Word Term\ntype: ignored'
       );
 
       const context = await Context.create({ startingDir: tempDir });
@@ -454,7 +454,7 @@ sounds_like:
       await fs.writeFile(path.join(protokollDir, 'config.yaml'), 'version: 1');
       await fs.writeFile(
         path.join(projectsDir, 'proj1.yaml'),
-        'id: proj1\nname: Project One\nclassification:\n  triggers:\n    words: []\n  requireAll: false\nrouting:\n  structure: month\n  filename_options: [date, time]'
+        'id: proj1\nname: Project One\ntype: project\nclassification:\n  context_type: work\nrouting:\n  structure: month\n  filename_options: [date, time]'
       );
 
       const context = await Context.create({ startingDir: tempDir });
@@ -474,10 +474,9 @@ sounds_like:
         path.join(projectsDir, 'parent.yaml'),
         `id: parent
 name: Parent Project
+type: project
 classification:
-  triggers:
-    words: []
-  requireAll: false
+  context_type: work
 routing:
   structure: month
   filename_options: [date, time]`
@@ -488,15 +487,14 @@ routing:
         path.join(projectsDir, 'child.yaml'),
         `id: child
 name: Child Project
+type: project
 classification:
-  triggers:
-    words: []
-  requireAll: false
+  context_type: work
 routing:
   structure: month
   filename_options: [date, time]
 relationships:
-  parentProjects: [parent]`
+  parent: parent`
       );
 
       const context = await Context.create({ startingDir: tempDir });
@@ -518,10 +516,9 @@ relationships:
         path.join(projectsDir, 'proj1.yaml'),
         `id: proj1
 name: Project One
+type: project
 classification:
-  triggers:
-    words: []
-  requireAll: false
+  context_type: work
 routing:
   structure: month
   filename_options: [date, time]`
@@ -530,7 +527,7 @@ routing:
       // Create term associated with project
       await fs.writeFile(
         path.join(termsDir, 'term1.yaml'),
-        'id: term1\nname: Term One\nprojects: [proj1]'
+        'id: term1\nname: Term One\ntype: term\nprojects: [proj1]'
       );
 
       const context = await Context.create({ startingDir: tempDir });
@@ -548,10 +545,9 @@ routing:
         path.join(projectsDir, 'proj1.yaml'),
         `id: proj1
 name: Project One
+type: project
 classification:
-  triggers:
-    words: []
-  requireAll: false
+  context_type: work
 routing:
   structure: month
   filename_options: [date, time]`

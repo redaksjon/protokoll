@@ -25,8 +25,8 @@ function getPromptsDir(): string {
                       __filename.includes('dist/mcp-server.js') || __filename.includes('dist\\mcp-server.js');
 
     if (isBundled) {
-        const promptsDir = resolve(__dirname, 'mcp/prompts');
-        return promptsDir;
+        // When bundled, __dirname is already at dist/mcp/prompts
+        return __dirname;
     }
     return __dirname;
 }
@@ -40,7 +40,17 @@ function loadTemplate(name: string): string {
     try {
         return readFileSync(path, 'utf-8').trim();
     } catch (error) {
-        throw new Error(`Failed to load prompt template "${name}" from ${path}: ${error}`);
+        const isBundled = __dirname.includes('/dist');
+        const debugInfo = [
+            `Failed to load prompt template "${name}"`,
+            `Attempted path: ${path}`,
+            `Prompts directory: ${promptsDir}`,
+            `Current __dirname: ${__dirname}`,
+            `Current __filename: ${__filename}`,
+            `Environment: ${isBundled ? 'bundled (dist)' : 'source (src)'}`,
+            `Error: ${error}`,
+        ].join('\n  ');
+        throw new Error(debugInfo);
     }
 }
 
@@ -100,7 +110,8 @@ export function getPrompts(): McpPrompt[] {
         {
             name: 'review_transcript',
             description: 'Analyze a transcript and suggest corrections based on context. ' +
-                'Identifies potential name/term errors and offers to apply fixes.',
+                'Identifies potential name/term errors and offers to apply fixes. ' +
+                'IMPORTANT: This prompt instructs the AI to use ONLY Protokoll MCP tools, never direct file editing.',
             arguments: [
                 {
                     name: 'transcriptPath',
@@ -109,7 +120,7 @@ export function getPrompts(): McpPrompt[] {
                 },
                 {
                     name: 'focusArea',
-                    description: 'What to focus on: names, terms, technical, or all',
+                    description: 'What to focus on: names, terms, technical, or all (defaults to "all")',
                     required: false,
                 },
             ],
