@@ -25,9 +25,10 @@ function getPromptsDir(): string {
                       __filename.includes('dist/mcp-server.js') || __filename.includes('dist\\mcp-server.js');
 
     if (isBundled) {
-        // When bundled, __dirname is already at dist/mcp/prompts
-        return __dirname;
+        // When bundled, __dirname points to dist/mcp, prompts are in dist/mcp/prompts
+        return resolve(__dirname, 'prompts');
     }
+    // In source, __dirname already points to src/mcp/prompts
     return __dirname;
 }
 
