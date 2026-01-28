@@ -49,7 +49,7 @@
     "@riotprompt/riotprompt": "^0.0.21",
     "@theunwalked/cardigantime": "^0.0.22",
     "@theunwalked/dreadcabinet": "^0.0.15",
-    "@theunwalked/overcontext": "^0.0.1",
+    "@theunwalked/overcontext": "^0.0.4",
     "@types/fluent-ffmpeg": "^2.1.28",
     "cli-table3": "^0.6.5",
     "commander": "^14.0.2",
