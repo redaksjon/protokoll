@@ -18,6 +18,8 @@ import type {
     ConfigUri,
     TranscriptsListUri,
     EntitiesListUri,
+    AudioInboundUri,
+    AudioProcessedUri,
     ResourceType,
 } from './types';
 
@@ -55,6 +57,8 @@ export function parseUri(uri: string): ParsedResourceUri {
         case 'entities':
         case 'entities-list':
             return parseEntitiesListUri(uri, segments, params);
+        case 'audio':
+            return parseAudioUri(uri, segments, params);
         default:
             throw new Error(`Unknown resource type: ${firstSegment}`);
     }
@@ -180,6 +184,36 @@ function parseEntitiesListUri(
     };
 }
 
+function parseAudioUri(
+    uri: string,
+    segments: string[],
+    params: Record<string, string>
+): AudioInboundUri | AudioProcessedUri {
+    // protokoll://audio/inbound?directory={dir}
+    // protokoll://audio/processed?directory={dir}
+    const audioType = segments[1];
+    
+    if (audioType === 'inbound') {
+        return {
+            scheme: SCHEME,
+            resourceType: 'audio-inbound',
+            path: 'audio/inbound',
+            params,
+            directory: params.directory,
+        };
+    } else if (audioType === 'processed') {
+        return {
+            scheme: SCHEME,
+            resourceType: 'audio-processed',
+            path: 'audio/processed',
+            params,
+            directory: params.directory,
+        };
+    }
+    
+    throw new Error(`Invalid audio URI: ${uri}. Expected protokoll://audio/inbound or protokoll://audio/processed`);
+}
+
 // ============================================================================
 // URI Builders
 // ============================================================================
@@ -242,6 +276,26 @@ export function buildEntitiesListUri(
 }
 
 /**
+ * Build an inbound audio list URI
+ */
+export function buildAudioInboundUri(directory?: string): string {
+    if (directory) {
+        return `${SCHEME}://audio/inbound?directory=${encodeURIComponent(directory)}`;
+    }
+    return `${SCHEME}://audio/inbound`;
+}
+
+/**
+ * Build a processed audio list URI
+ */
+export function buildAudioProcessedUri(directory?: string): string {
+    if (directory) {
+        return `${SCHEME}://audio/processed?directory=${encodeURIComponent(directory)}`;
+    }
+    return `${SCHEME}://audio/processed`;
+}
+
+/**
  * Check if a string is a valid Protokoll URI
  */
 export function isProtokolUri(uri: string): boolean {
@@ -255,10 +309,16 @@ export function getResourceType(uri: string): ResourceType | null {
     if (!isProtokolUri(uri)) return null;
     
     const withoutScheme = uri.substring(`${SCHEME}://`.length);
-    const firstSegment = withoutScheme.split('/')[0].split('?')[0];
+    const segments = withoutScheme.split('/');
+    const firstSegment = segments[0].split('?')[0];
     
     if (firstSegment === 'transcripts') return 'transcripts-list';
     if (firstSegment === 'entities') return 'entities-list';
+    if (firstSegment === 'audio') {
+        const secondSegment = segments[1]?.split('?')[0];
+        if (secondSegment === 'inbound') return 'audio-inbound';
+        if (secondSegment === 'processed') return 'audio-processed';
+    }
     
     return firstSegment as ResourceType;
 }

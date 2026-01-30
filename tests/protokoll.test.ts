@@ -105,7 +105,7 @@ const mockDreadcabinetInstance = {
     operate: vi.fn().mockResolvedValue(mockOperator)
 };
 
-vi.mock('@theunwalked/dreadcabinet', () => ({
+vi.mock('@utilarium/dreadcabinet', () => ({
     create: vi.fn().mockReturnValue(mockDreadcabinetInstance),
     DEFAULT_FEATURES: ['input', 'output', 'structured-output', 'extensions']
 }));
@@ -116,7 +116,7 @@ const mockCardigantimeInstance = {
     validate: vi.fn()
 };
 
-vi.mock('@theunwalked/cardigantime', () => ({
+vi.mock('@utilarium/cardigantime', () => ({
     create: vi.fn().mockReturnValue(mockCardigantimeInstance)
 }));
 
@@ -229,7 +229,7 @@ describe('protokoll main', () => {
 
     describe('Dreadcabinet configuration', () => {
         test('should create Dreadcabinet instance with correct options', async () => {
-            const dreadcabinetModule = await import('@theunwalked/dreadcabinet');
+            const dreadcabinetModule = await import('@utilarium/dreadcabinet');
 
             await protokoll.main();
 
@@ -624,7 +624,7 @@ describe('protokoll main', () => {
 
     describe('Cardigantime integration', () => {
         test('should create Cardigantime with correct defaults', async () => {
-            const cardigantimeModule = await import('@theunwalked/cardigantime');
+            const cardigantimeModule = await import('@utilarium/cardigantime');
 
             await protokoll.main();
 

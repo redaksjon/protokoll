@@ -988,7 +988,7 @@ routing:
         it('should throw error for non-existent file', async () => {
             const fakePath = path.join(tempDir, 'nonexistent.md');
             await expect(handleReadTranscript({ transcriptPath: fakePath }))
-                .rejects.toThrow('Transcript not found');
+                .rejects.toThrow('No transcript found matching');
         });
     });
 
@@ -1127,7 +1127,7 @@ Content from part 2.
             await expect(handleCombineTranscripts({
                 transcriptPaths: [transcript1, transcript2],
                 contextDirectory: protokollDir
-            })).rejects.toThrow('Transcript not found');
+            })).rejects.toThrow('No transcript found matching');
         });
     });
 

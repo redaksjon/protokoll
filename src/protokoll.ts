@@ -5,8 +5,8 @@ import { ALLOWED_AUDIO_EXTENSIONS, ALLOWED_OUTPUT_FILENAME_OPTIONS, ALLOWED_OUTP
 import { getLogger, setLogLevel } from '@/logging';
 import * as Pipeline from './pipeline';
 import * as LocatePhase from './phases/locate';
-import * as Dreadcabinet from '@theunwalked/dreadcabinet';
-import * as Cardigantime from '@theunwalked/cardigantime';
+import * as Dreadcabinet from '@utilarium/dreadcabinet';
+import * as Cardigantime from '@utilarium/cardigantime';
 import { z } from 'zod';
 import { glob } from 'glob';
 

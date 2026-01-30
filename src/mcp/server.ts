@@ -25,6 +25,7 @@ import {
     ReadResourceRequestSchema,
     ListPromptsRequestSchema,
     GetPromptRequestSchema,
+    ListRootsRequestSchema,
 // eslint-disable-next-line import/extensions
 } from '@modelcontextprotocol/sdk/types.js';
 import { fileURLToPath } from 'node:url';
@@ -32,6 +33,9 @@ import { resolve } from 'node:path';
 import * as Resources from './resources';
 import * as Prompts from './prompts';
 import { tools, handleToolCall } from './tools';
+import * as ServerConfig from './serverConfig';
+import * as Roots from './roots';
+import type { McpRoot } from './types';
 
 // ============================================================================
 // Server Setup
@@ -62,6 +66,12 @@ async function main() {
             },
         }
     );
+
+    // Request roots from client and initialize configuration
+    server.setRequestHandler(ListRootsRequestSchema, async () => {
+        const roots = Roots.getCachedRoots() || [];
+        return { roots };
+    });
 
     // List available tools
     server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -125,6 +135,17 @@ async function main() {
     // Start server
     const transport = new StdioServerTransport();
     await server.connect(transport);
+
+    // Initialize configuration from workspace
+    // Try to get roots from environment or use cwd as fallback
+    const workspaceRoot = process.env.WORKSPACE_ROOT || process.cwd();
+    const initialRoots: McpRoot[] = [{
+        uri: `file://${workspaceRoot}`,
+        name: 'Workspace',
+    }];
+    
+    Roots.setRoots(initialRoots);
+    await ServerConfig.initializeServerConfig(initialRoots);
 
     // Keep the process alive - MCP servers should run indefinitely
     // The StdioServerTransport will handle stdin/stdout until the connection closes

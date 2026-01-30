@@ -1,5 +1,5 @@
 import { describe, expect, test, beforeEach, vi, afterEach } from 'vitest';
-import * as Dreadcabinet from '@theunwalked/dreadcabinet';
+import * as Dreadcabinet from '@utilarium/dreadcabinet';
 import path from 'node:path';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';

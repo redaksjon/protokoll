@@ -1,9 +1,10 @@
 import { 
     discoverOvercontext, 
     OvercontextAPI,
-} from '@theunwalked/overcontext';
+} from '@utilarium/overcontext';
 import {
     redaksjonSchemas,
+    redaksjonPluralNames,
     Person,
     Project,
     Company,
@@ -78,19 +79,25 @@ export const create = (): StorageInstance => {
             }
       
             try {
-                // contextDirs are paths like /path/to/.protokoll/context
-                // We need to start discovery from the parent of .protokoll
-                // Take the last (most specific) context dir and go up two levels
+                // contextDirs are already resolved paths (e.g., /path/to/context or /path/to/.protokoll/context)
+                // We need to determine the parent directory to start overcontext discovery from
+                // The context directory could be at different levels depending on configuration
+                
+                // Take the last (most specific) context dir
                 const lastContextDir = contextDirs[contextDirs.length - 1];
-                const protokollDir = lastContextDir.replace(/\/context$/, '');
-                const startDir = protokollDir.replace(/\/\.protokoll$/, '');
+                
+                // Get the parent directory of the context directory
+                // This will be the directory containing the context/ folder
+                const startDir = path.dirname(lastContextDir);
                 
                 // Create overcontext API with hierarchical discovery
+                // Note: We use 'context' as contextDirName since we're starting from the parent
                 api = await discoverOvercontext({
                     schemas: redaksjonSchemas,
-                    pluralNames: protokollPluralNames,
+                    pluralNames: redaksjonPluralNames, // Use standard names without context/ prefix
                     startDir,
-                    ...protokollDiscoveryOptions,
+                    contextDirName: path.basename(lastContextDir), // Use actual context dir name
+                    maxLevels: 10,
                 });
       
                 // Load all entities into cache
@@ -166,7 +173,7 @@ export const create = (): StorageInstance => {
           
                     // Check sounds_like
                     const sounds = (entity as Entity & { sounds_like?: string[] }).sounds_like;
-                    if (sounds?.some(s => s.toLowerCase().includes(normalizedQuery))) {
+                    if (sounds?.some((s: string) => s.toLowerCase().includes(normalizedQuery))) {
                         results.push(entity);
                         seen.add(entity.id);
                     }
@@ -182,7 +189,7 @@ export const create = (): StorageInstance => {
             for (const entityMap of cache.values()) {
                 for (const entity of entityMap.values()) {
                     const sounds = (entity as Entity & { sounds_like?: string[] }).sounds_like;
-                    if (sounds?.some(s => s.toLowerCase() === normalized)) {
+                    if (sounds?.some((s: string) => s.toLowerCase() === normalized)) {
                         return entity;
                     }
                 }

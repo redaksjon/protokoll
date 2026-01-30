@@ -1,5 +1,5 @@
-import * as Dreadcabinet from "@theunwalked/dreadcabinet";
-import * as Cardigantime from '@theunwalked/cardigantime';
+import * as Dreadcabinet from "@utilarium/dreadcabinet";
+import * as Cardigantime from '@utilarium/cardigantime';
 import { Command } from "commander";
 import {
     PROTOKOLL_DEFAULTS,

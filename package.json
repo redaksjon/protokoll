@@ -47,9 +47,9 @@
     "@modelcontextprotocol/sdk": "^1.25.2",
     "@redaksjon/context": "^0.0.4",
     "@riotprompt/riotprompt": "^0.0.21",
-    "@theunwalked/cardigantime": "^0.0.22",
-    "@theunwalked/dreadcabinet": "^0.0.15",
-    "@theunwalked/overcontext": "^0.0.3",
+    "@utilarium/cardigantime": "^0.0.24",
+    "@utilarium/dreadcabinet": "^0.0.16",
+    "@utilarium/overcontext": "^0.0.4",
     "@types/fluent-ffmpeg": "^2.1.28",
     "cli-table3": "^0.6.5",
     "commander": "^14.0.2",
@@ -63,7 +63,7 @@
     "moment-timezone": "^0.6.0",
     "openai": "^6.9.0",
     "winston": "^3.18.3",
-    "zod": "^4.1.12"
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.1",

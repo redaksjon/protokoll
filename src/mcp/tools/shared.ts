@@ -3,6 +3,7 @@
  * Shared types, constants, and utilities for MCP tools
  */
 import { stat } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import * as Media from '@/util/media';
 import * as Storage from '@/util/storage';
 import { getLogger } from '@/logging';
@@ -62,6 +63,27 @@ export async function fileExists(path: string): Promise<boolean> {
         return true;
     } catch {
         return false;
+    }
+}
+
+/**
+ * Get a configured directory from server configuration
+ * Uses workspace-level configuration instead of navigating up the directory tree
+ */
+export async function getConfiguredDirectory(
+    key: 'inputDirectory' | 'outputDirectory' | 'processedDirectory',
+    _contextDirectory?: string  // Kept for backward compatibility but not used
+): Promise<string> {
+    // Import here to avoid circular dependencies
+    const ServerConfig = await import('../serverConfig');
+    
+    switch (key) {
+        case 'inputDirectory':
+            return ServerConfig.getInputDirectory();
+        case 'outputDirectory':
+            return ServerConfig.getOutputDirectory();
+        case 'processedDirectory':
+            return ServerConfig.getProcessedDirectory() || resolve(process.cwd(), './processed');
     }
 }
 

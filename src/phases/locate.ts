@@ -1,7 +1,7 @@
 import * as Logging from '@/logging';
 import * as Media from '@/util/media';
 import * as Storage from '@/util/storage';
-import * as Dreadcabinet from '@theunwalked/dreadcabinet';
+import * as Dreadcabinet from '@utilarium/dreadcabinet';
 import * as Dates from '@/util/dates';
 import { Config } from '@/protokoll';
 import { DEFAULT_INTERMEDIATE_DIRECTORY } from '@/constants';

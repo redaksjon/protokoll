@@ -6,6 +6,8 @@ import {
     buildConfigUri,
     buildTranscriptsListUri,
     buildEntitiesListUri,
+    buildAudioInboundUri,
+    buildAudioProcessedUri,
     isProtokolUri,
     getResourceType,
 } from '../../src/mcp/uri';
@@ -104,6 +106,36 @@ describe('URI Parser', () => {
             });
         });
 
+        describe('audio URIs', () => {
+            it('should parse audio inbound URI with directory', () => {
+                const result = parseUri('protokoll://audio/inbound?directory=/path/to/recordings');
+                expect(result.resourceType).toBe('audio-inbound');
+                expect(result.directory).toBe('/path/to/recordings');
+            });
+
+            it('should parse audio inbound URI without directory', () => {
+                const result = parseUri('protokoll://audio/inbound');
+                expect(result.resourceType).toBe('audio-inbound');
+                expect(result.directory).toBeUndefined();
+            });
+
+            it('should parse audio processed URI with directory', () => {
+                const result = parseUri('protokoll://audio/processed?directory=/path/to/processed');
+                expect(result.resourceType).toBe('audio-processed');
+                expect(result.directory).toBe('/path/to/processed');
+            });
+
+            it('should parse audio processed URI without directory', () => {
+                const result = parseUri('protokoll://audio/processed');
+                expect(result.resourceType).toBe('audio-processed');
+                expect(result.directory).toBeUndefined();
+            });
+
+            it('should throw on invalid audio type', () => {
+                expect(() => parseUri('protokoll://audio/invalid')).toThrow();
+            });
+        });
+
         describe('invalid URIs', () => {
             it('should throw on non-protokoll scheme', () => {
                 expect(() => parseUri('http://example.com')).toThrow();
@@ -173,6 +205,28 @@ describe('URI Parser', () => {
                     .toBe('protokoll://entities/person');
             });
         });
+
+        describe('buildAudioInboundUri', () => {
+            it('should build audio inbound URI with directory', () => {
+                const uri = buildAudioInboundUri('/path/to/recordings');
+                expect(uri).toBe('protokoll://audio/inbound?directory=%2Fpath%2Fto%2Frecordings');
+            });
+
+            it('should build audio inbound URI without directory', () => {
+                expect(buildAudioInboundUri()).toBe('protokoll://audio/inbound');
+            });
+        });
+
+        describe('buildAudioProcessedUri', () => {
+            it('should build audio processed URI with directory', () => {
+                const uri = buildAudioProcessedUri('/path/to/processed');
+                expect(uri).toBe('protokoll://audio/processed?directory=%2Fpath%2Fto%2Fprocessed');
+            });
+
+            it('should build audio processed URI without directory', () => {
+                expect(buildAudioProcessedUri()).toBe('protokoll://audio/processed');
+            });
+        });
     });
 
     describe('Utility Functions', () => {
@@ -195,6 +249,8 @@ describe('URI Parser', () => {
                 expect(getResourceType('protokoll://entity/person/x')).toBe('entity');
                 expect(getResourceType('protokoll://transcripts?dir=x')).toBe('transcripts-list');
                 expect(getResourceType('protokoll://entities/person')).toBe('entities-list');
+                expect(getResourceType('protokoll://audio/inbound')).toBe('audio-inbound');
+                expect(getResourceType('protokoll://audio/processed?dir=x')).toBe('audio-processed');
             });
 
             it('should return null for non-protokoll URIs', () => {

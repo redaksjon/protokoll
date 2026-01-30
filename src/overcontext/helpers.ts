@@ -29,7 +29,7 @@ export const removeProjectFromTerm = (term: Term, projectId: string): Term => {
     const projects = term.projects || [];
     return {
         ...term,
-        projects: projects.filter(id => id !== projectId),
+        projects: projects.filter((id: string) => id !== projectId),
         updatedAt: new Date(),
     };
 };

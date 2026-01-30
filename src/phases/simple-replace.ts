@@ -8,7 +8,7 @@
  * Part of the simple-replace optimization (Phase 2).
  */
 
-import * as Dreadcabinet from '@theunwalked/dreadcabinet';
+import * as Dreadcabinet from '@utilarium/dreadcabinet';
 import { Config } from '@/protokoll';
 import * as Logging from '@/logging';
 import * as Storage from '@/util/storage';
