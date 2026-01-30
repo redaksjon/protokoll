@@ -1,6 +1,6 @@
 import os from 'node:os';
-import { FilenameOption } from '@theunwalked/dreadcabinet';
-import { FilesystemStructure } from '@theunwalked/dreadcabinet';
+import { FilenameOption } from '@utilarium/dreadcabinet';
+import { FilesystemStructure } from '@utilarium/dreadcabinet';
 
 export const VERSION = '__VERSION__ (__GIT_BRANCH__/__GIT_COMMIT__ __GIT_TAGS__ __GIT_COMMIT_DATE__) __SYSTEM_INFO__';
 export const PROGRAM_NAME = 'protokoll';
@@ -47,6 +47,7 @@ export const DEFAULT_PROCESSED_DIR = './processed';
 
 // Context System Constants
 export const DEFAULT_CONTEXT_DIR_NAME = '.protokoll';
+export const DEFAULT_CONTEXT_NAMESPACE = 'redaksjon';
 export const DEFAULT_CONTEXT_CONFIG_FILE_NAME = 'config.yaml';
 export const DEFAULT_MAX_DISCOVERY_LEVELS = 10;
 

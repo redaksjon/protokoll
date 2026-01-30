@@ -1,7 +1,7 @@
 import { 
     discoverOvercontext, 
     OvercontextAPI,
-} from '@theunwalked/overcontext';
+} from '@utilarium/overcontext';
 import {
     redaksjonSchemas,
     redaksjonPluralNames,
@@ -13,7 +13,7 @@ import {
     RedaksjonEntity,
     RedaksjonEntityType,
 } from '@redaksjon/context';
-import { protokollDiscoveryOptions } from './config';
+import { protokollDiscoveryOptions, protokollPluralNames } from './config';
 // eslint-disable-next-line no-restricted-imports
 import { existsSync, statSync } from 'node:fs';
 import * as path from 'node:path';
@@ -28,7 +28,7 @@ export type Entity = RedaksjonEntity;
  */
 export interface StorageInstance {
   load(contextDirs: string[]): Promise<void>;
-  save(entity: Entity, targetDir: string): Promise<void>;
+  save(entity: Entity, targetDir: string, allowUpdate?: boolean): Promise<void>;
   delete(type: EntityType, id: string, targetDir: string): Promise<boolean>;
   get<T extends Entity>(type: EntityType, id: string): T | undefined;
   getAll<T extends Entity>(type: EntityType): T[];
@@ -79,19 +79,29 @@ export const create = (): StorageInstance => {
             }
       
             try {
-                // contextDirs are paths like /path/to/.protokoll/context
-                // We need to start discovery from the parent of .protokoll
-                // Take the last (most specific) context dir and go up two levels
+                // contextDirs are already resolved paths (e.g., /path/to/context or /path/to/.protokoll/context)
+                // We need to determine the parent directory to start overcontext discovery from
+                // The context directory could be at different levels depending on configuration
+                
+                // Take the last (most specific) context dir
                 const lastContextDir = contextDirs[contextDirs.length - 1];
-                const protokollDir = lastContextDir.replace(/\/context$/, '');
-                const startDir = protokollDir.replace(/\/\.protokoll$/, '');
+                
+                // Get the parent directory of the context directory
+                // This will be the directory containing the context/ folder
+                const startDir = path.dirname(lastContextDir);
                 
                 // Create overcontext API with hierarchical discovery
+                // Note: We use 'context' as contextDirName since we're starting from the parent
+                // Use maxLevels: 1 to limit discovery - we've already done hierarchical discovery
+                // in loadHierarchicalConfig and are passing the specific contextDirs we want.
+                // maxLevels: 1 prevents walking too far up the tree in CI environments where
+                // parent directories might contain unrelated context data.
                 api = await discoverOvercontext({
                     schemas: redaksjonSchemas,
-                    pluralNames: redaksjonPluralNames,
+                    pluralNames: redaksjonPluralNames, // Use standard names without context/ prefix
                     startDir,
-                    ...protokollDiscoveryOptions,
+                    contextDirName: path.basename(lastContextDir), // Use actual context dir name
+                    maxLevels: 1, // Limit discovery to prevent finding unrelated parent contexts
                 });
       
                 // Load all entities into cache
@@ -111,19 +121,20 @@ export const create = (): StorageInstance => {
             }
         },
     
-        async save(entity: Entity, _targetDir: string): Promise<void> {
+        async save(entity: Entity, _targetDir: string, allowUpdate = false): Promise<void> {
+            // Check if entity already exists (for duplicate detection)
+            const existing = cache.get(entity.type)?.get(entity.id);
+            if (existing && !allowUpdate) {
+                throw new Error(`Entity with id "${entity.id}" already exists`);
+            }
+
             // If no API (empty context), just update cache (in-memory only)
             if (!api) {
-                // Check if entity already exists (for duplicate detection)
-                const existing = cache.get(entity.type)?.get(entity.id);
-                if (existing) {
-                    throw new Error(`Entity with id "${entity.id}" already exists`);
-                }
                 cache.get(entity.type)?.set(entity.id, entity);
                 return;
             }
       
-            // Save via overcontext
+            // Save via overcontext (upsert will create or update)
             const saved = await api.upsert(entity.type, entity);
       
             // Update cache
@@ -166,7 +177,7 @@ export const create = (): StorageInstance => {
           
                     // Check sounds_like
                     const sounds = (entity as Entity & { sounds_like?: string[] }).sounds_like;
-                    if (sounds?.some(s => s.toLowerCase().includes(normalizedQuery))) {
+                    if (sounds?.some((s: string) => s.toLowerCase().includes(normalizedQuery))) {
                         results.push(entity);
                         seen.add(entity.id);
                     }
@@ -182,7 +193,7 @@ export const create = (): StorageInstance => {
             for (const entityMap of cache.values()) {
                 for (const entity of entityMap.values()) {
                     const sounds = (entity as Entity & { sounds_like?: string[] }).sounds_like;
-                    if (sounds?.some(s => s.toLowerCase() === normalized)) {
+                    if (sounds?.some((s: string) => s.toLowerCase() === normalized)) {
                         return entity;
                     }
                 }

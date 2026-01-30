@@ -208,8 +208,8 @@ interface PipelineInstance {
 
 | Package | Purpose |
 |---------|---------|
-| `@theunwalked/dreadcabinet` | Filesystem structure patterns |
-| `@theunwalked/cardigantime` | Hierarchical config discovery |
+| `@utilarium/dreadcabinet` | Filesystem structure patterns |
+| `@utilarium/cardigantime` | Hierarchical config discovery |
 | `@riotprompt/riotprompt` | Prompt building and agentic execution |
 | `openai` | Whisper and GPT APIs |
 | `@anthropic-ai/sdk` | Claude API |

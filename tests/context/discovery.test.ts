@@ -124,7 +124,7 @@ describe('Hierarchical Discovery', () => {
       expect(result.contextDirs).toEqual([]);
     });
     
-    it('should collect context directories', async () => {
+    it('should collect context directories (legacy .protokoll/context/)', async () => {
       // Create structure with context subdirectories
       const childDir = path.join(tempDir, 'child');
       await fs.mkdir(childDir, { recursive: true });
@@ -150,6 +150,102 @@ describe('Hierarchical Discovery', () => {
       });
       
       expect(result.contextDirs.length).toBe(2);
+    });
+    
+    it('should prefer ./context/ at repository root over .protokoll/context/', async () => {
+      // Create structure with both context locations
+      await fs.mkdir(path.join(tempDir, '.protokoll'), { recursive: true });
+      await fs.mkdir(path.join(tempDir, '.protokoll', 'context'), { recursive: true });
+      await fs.mkdir(path.join(tempDir, 'context'), { recursive: true });
+      await fs.writeFile(
+        path.join(tempDir, '.protokoll', 'config.yaml'),
+        'version: 1'
+      );
+      
+      const result = await Discovery.loadHierarchicalConfig({
+        configDirName: '.protokoll',
+        configFileName: 'config.yaml',
+        startingDir: tempDir,
+      });
+      
+      expect(result.contextDirs.length).toBe(1);
+      expect(result.contextDirs[0]).toBe(path.join(tempDir, 'context'));
+    });
+    
+    it('should use explicit contextDirectory from config.yaml', async () => {
+      // Create custom context location
+      const customContextDir = path.join(tempDir, 'my-custom-context');
+      await fs.mkdir(path.join(tempDir, '.protokoll'), { recursive: true });
+      await fs.mkdir(customContextDir, { recursive: true });
+      await fs.writeFile(
+        path.join(tempDir, '.protokoll', 'config.yaml'),
+        'contextDirectory: ./my-custom-context'
+      );
+      
+      const result = await Discovery.loadHierarchicalConfig({
+        configDirName: '.protokoll',
+        configFileName: 'config.yaml',
+        startingDir: tempDir,
+      });
+      
+      expect(result.contextDirs.length).toBe(1);
+      expect(result.contextDirs[0]).toBe(customContextDir);
+    });
+    
+    it('should handle absolute contextDirectory path in config.yaml', async () => {
+      // Create custom context location
+      const customContextDir = path.join(tempDir, 'absolute-context');
+      await fs.mkdir(path.join(tempDir, '.protokoll'), { recursive: true });
+      await fs.mkdir(customContextDir, { recursive: true });
+      await fs.writeFile(
+        path.join(tempDir, '.protokoll', 'config.yaml'),
+        `contextDirectory: ${customContextDir}`
+      );
+      
+      const result = await Discovery.loadHierarchicalConfig({
+        configDirName: '.protokoll',
+        configFileName: 'config.yaml',
+        startingDir: tempDir,
+      });
+      
+      expect(result.contextDirs.length).toBe(1);
+      expect(result.contextDirs[0]).toBe(customContextDir);
+    });
+    
+    it('should fall back to default when explicit contextDirectory does not exist', async () => {
+      // Create only ./context/ at root
+      await fs.mkdir(path.join(tempDir, '.protokoll'), { recursive: true });
+      await fs.mkdir(path.join(tempDir, 'context'), { recursive: true });
+      await fs.writeFile(
+        path.join(tempDir, '.protokoll', 'config.yaml'),
+        'contextDirectory: ./nonexistent-context'
+      );
+      
+      const result = await Discovery.loadHierarchicalConfig({
+        configDirName: '.protokoll',
+        configFileName: 'config.yaml',
+        startingDir: tempDir,
+      });
+      
+      expect(result.contextDirs.length).toBe(1);
+      expect(result.contextDirs[0]).toBe(path.join(tempDir, 'context'));
+    });
+    
+    it('should handle no context directory found', async () => {
+      // Create .protokoll but no context directory anywhere
+      await fs.mkdir(path.join(tempDir, '.protokoll'), { recursive: true });
+      await fs.writeFile(
+        path.join(tempDir, '.protokoll', 'config.yaml'),
+        'version: 1'
+      );
+      
+      const result = await Discovery.loadHierarchicalConfig({
+        configDirName: '.protokoll',
+        configFileName: 'config.yaml',
+        startingDir: tempDir,
+      });
+      
+      expect(result.contextDirs.length).toBe(0);
     });
     
     it('should handle missing config files gracefully', async () => {

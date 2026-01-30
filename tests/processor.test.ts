@@ -104,7 +104,7 @@ const mockOperator = {
     constructFilename: vi.fn().mockResolvedValue('test-filename')
 };
 
-vi.mock('@theunwalked/dreadcabinet', () => ({
+vi.mock('@utilarium/dreadcabinet', () => ({
     // Add any dreadcabinet mocks if needed
 }));
 

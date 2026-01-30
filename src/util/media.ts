@@ -7,7 +7,7 @@ export interface Media {
     getAudioCreationTime: (filePath: string) => Promise<Date | null>;
     getFileSize: (filePath: string) => Promise<number>;
     splitAudioFile: (filePath: string, outputDir: string, maxSizeBytes: number) => Promise<string[]>;
-    convertToSupportedFormat: (filePath: string, outputDir: string) => Promise<string>;
+    convertToSupportedFormat: (filePath: string, outputDir: string, forceConversion?: boolean) => Promise<string>;
 }
 
 const ffprobeAsync = (filePath: string): Promise<any> => {
@@ -122,16 +122,22 @@ export const create = (logger: Logger): Media => {
 
     // Convert audio file to a format supported by OpenAI Whisper API
     // Supported formats: flac, m4a, mp3, mp4, mpeg, mpga, oga, ogg, wav, webm
-    const convertToSupportedFormat = async (filePath: string, outputDir: string): Promise<string> => {
+    const convertToSupportedFormat = async (filePath: string, outputDir: string, forceConversion = false): Promise<string> => {
         try {
             const fileExt = path.extname(filePath).toLowerCase();
 
             // List of formats that OpenAI supports
             const supportedFormats = ['.flac', '.m4a', '.mp3', '.mp4', '.mpeg', '.mpga', '.oga', '.ogg', '.wav', '.webm'];
 
-            // If already in a supported format, return as-is
-            if (supportedFormats.includes(fileExt)) {
+            // If already in a supported format and not forcing conversion, return as-is
+            if (supportedFormats.includes(fileExt) && !forceConversion) {
                 logger.debug(`File ${filePath} is already in a supported format: ${fileExt}`);
+                return filePath;
+            }
+
+            // If forcing conversion and already MP3, return as-is (MP3 is already compressed)
+            if (forceConversion && fileExt === '.mp3') {
+                logger.debug(`File ${filePath} is already MP3 (compressed format)`);
                 return filePath;
             }
 

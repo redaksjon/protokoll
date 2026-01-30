@@ -3,12 +3,12 @@
  */
 // eslint-disable-next-line import/extensions
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
-import { resolve, dirname } from 'node:path';
+import { resolve, join, basename } from 'node:path';
+import { readdir } from 'node:fs/promises';
 import { glob } from 'glob';
-import * as Context from '@/context';
 import * as Pipeline from '@/pipeline';
 import {
-    DEFAULT_OUTPUT_DIRECTORY,
+    DEFAULT_AUDIO_EXTENSIONS,
     DEFAULT_OUTPUT_STRUCTURE,
     DEFAULT_OUTPUT_FILENAME_OPTIONS,
     DEFAULT_MAX_AUDIO_SIZE,
@@ -18,7 +18,66 @@ import {
     DEFAULT_REASONING_LEVEL,
     DEFAULT_TEMP_DIRECTORY,
 } from '@/constants';
-import { fileExists, getAudioMetadata, type ProcessingResult } from './shared';
+import { fileExists, getAudioMetadata, getConfiguredDirectory, type ProcessingResult } from './shared';
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/**
+ * Find an audio file by filename or partial filename
+ * Searches in the workspace's configured input directory
+ */
+async function findAudioFile(
+    filenameOrPath: string
+): Promise<string> {
+    // If it's already an absolute path that exists, use it
+    if (filenameOrPath.startsWith('/') && await fileExists(filenameOrPath)) {
+        return filenameOrPath;
+    }
+
+    // Get the input directory from workspace config
+    const inputDirectory = await getConfiguredDirectory('inputDirectory');
+    
+    // Search for the audio file
+    const entries = await readdir(inputDirectory, { withFileTypes: true });
+    const matches: string[] = [];
+    
+    for (const entry of entries) {
+        if (entry.isFile()) {
+            const filename = entry.name;
+            const ext = filename.split('.').pop()?.toLowerCase();
+            
+            // Check if it's an audio file
+            if (ext && DEFAULT_AUDIO_EXTENSIONS.includes(ext)) {
+                // Check if filename matches
+                if (filename === filenameOrPath || 
+                    filename.includes(filenameOrPath) ||
+                    basename(filename, `.${ext}`) === filenameOrPath) {
+                    matches.push(join(inputDirectory, filename));
+                }
+            }
+        }
+    }
+
+    if (matches.length === 0) {
+        throw new Error(
+            `No audio file found matching "${filenameOrPath}" in ${inputDirectory}. ` +
+            `Try using the protokoll://audio/inbound resource to see available audio files.`
+        );
+    }
+
+    if (matches.length === 1) {
+        return matches[0];
+    }
+
+    // Multiple matches
+    const matchNames = matches.map(m => basename(m)).join(', ');
+    throw new Error(
+        `Multiple audio files match "${filenameOrPath}": ${matchNames}. ` +
+        `Please be more specific.`
+    );
+}
 
 // ============================================================================
 // Tool Definitions
@@ -28,22 +87,20 @@ export const processAudioTool: Tool = {
     name: 'protokoll_process_audio',
     description:
         'Process an audio file through Protokoll\'s intelligent transcription pipeline. ' +
-        'IMPORTANT: Before calling this, use protokoll_discover_config or protokoll_suggest_project ' +
-        'to understand which configuration/project should be used. ' +
-        'This tool transcribes audio using Whisper, then enhances it with context-aware processing ' +
+        'You can provide either an absolute path OR just a filename/partial filename. ' +
+        'If you provide a filename, it will search in the workspace\'s configured input directory. ' +
+        'This tool uses workspace-level configuration automatically - no need to specify directories. ' +
+        'Transcribes audio using Whisper, then enhances it with context-aware processing ' +
         'that corrects names, terms, and routes the output to the appropriate project folder. ' +
-        'If no contextDirectory is specified, the tool walks up from the audio file to find .protokoll. ' +
         'Returns the enhanced transcript text and output file path.',
     inputSchema: {
         type: 'object',
         properties: {
             audioFile: {
                 type: 'string',
-                description: 'Absolute path to the audio file to process (m4a, mp3, wav, webm, etc.)',
-            },
-            contextDirectory: {
-                type: 'string',
-                description: 'Path to the .protokoll context directory. If not specified, walks up from the audio file location to find one.',
+                description: 
+                    'Filename, partial filename, or absolute path to the audio file. ' +
+                    'Examples: "recording.m4a", "2026-01-29", "/full/path/to/audio.m4a"',
             },
             projectId: {
                 type: 'string',
@@ -51,7 +108,7 @@ export const processAudioTool: Tool = {
             },
             outputDirectory: {
                 type: 'string',
-                description: 'Override the default output directory',
+                description: 'Override the workspace output directory',
             },
             model: {
                 type: 'string',
@@ -70,6 +127,8 @@ export const batchProcessTool: Tool = {
     name: 'protokoll_batch_process',
     description:
         'Process multiple audio files in a directory. ' +
+        'If no directory is specified, uses the workspace\'s configured input directory. ' +
+        'This tool uses workspace-level configuration automatically - no need to specify directories. ' +
         'Finds all audio files matching the configured extensions and processes them sequentially. ' +
         'Returns a summary of all processed files with their output paths.',
     inputSchema: {
@@ -77,23 +136,21 @@ export const batchProcessTool: Tool = {
         properties: {
             inputDirectory: {
                 type: 'string',
-                description: 'Absolute path to directory containing audio files',
+                description: 
+                    'Optional: Directory containing audio files. ' +
+                    'If not specified, uses the workspace input directory.',
             },
             extensions: {
                 type: 'array',
                 items: { type: 'string' },
                 description: 'Audio file extensions to process (default: [".m4a", ".mp3", ".wav", ".webm"])',
             },
-            contextDirectory: {
-                type: 'string',
-                description: 'Path to the .protokoll context directory',
-            },
             outputDirectory: {
                 type: 'string',
-                description: 'Override the default output directory',
+                description: 'Override the workspace output directory',
             },
         },
-        required: ['inputDirectory'],
+        required: [],
     },
 };
 
@@ -103,29 +160,31 @@ export const batchProcessTool: Tool = {
 
 export async function handleProcessAudio(args: {
     audioFile: string;
-    contextDirectory?: string;
     projectId?: string;
     outputDirectory?: string;
     model?: string;
     transcriptionModel?: string;
 }): Promise<ProcessingResult> {
-    const audioFile = resolve(args.audioFile);
+    // Import server config
+    const ServerConfig = await import('../serverConfig');
+    
+    // Find the audio file (handles both paths and filenames)
+    const audioFile = await findAudioFile(args.audioFile);
 
-    if (!await fileExists(audioFile)) {
-        throw new Error(`Audio file not found: ${audioFile}`);
+    // Get workspace configuration
+    const config = ServerConfig.getServerConfig();
+    const context = config.context;
+    
+    if (!context) {
+        throw new Error('Protokoll context not available. Ensure .protokoll directory exists in workspace.');
     }
 
-    // Initialize context
-    const context = await Context.create({
-        startingDir: args.contextDirectory || dirname(audioFile),
-    });
-
     // Get configuration from context
-    const config = context.getConfig();
-    const outputDirectory = args.outputDirectory || (config.outputDirectory as string) || DEFAULT_OUTPUT_DIRECTORY;
-    const outputStructure = (config.outputStructure as string) || DEFAULT_OUTPUT_STRUCTURE;
-    const outputFilenameOptions = (config.outputFilenameOptions as string[]) || DEFAULT_OUTPUT_FILENAME_OPTIONS;
-    const processedDirectory = (config.processedDirectory as string) || undefined;
+    const contextConfig = context.getConfig();
+    const outputDirectory = args.outputDirectory || config.outputDirectory;
+    const outputStructure = (contextConfig.outputStructure as string) || DEFAULT_OUTPUT_STRUCTURE;
+    const outputFilenameOptions = (contextConfig.outputFilenameOptions as string[]) || DEFAULT_OUTPUT_FILENAME_OPTIONS;
+    const processedDirectory = config.processedDirectory ?? undefined;
 
     // Get audio file metadata (creation time and hash)
     const { creationTime, hash } = await getAudioMetadata(audioFile);
@@ -140,13 +199,13 @@ export async function handleProcessAudio(args: {
         silent: true,
         debug: false,
         dryRun: false,
-        contextDirectory: args.contextDirectory,
+        contextDirectory: config.workspaceRoot || undefined,
         intermediateDir: DEFAULT_INTERMEDIATE_DIRECTORY,
         keepIntermediates: false,
         outputDirectory,
         outputStructure,
         outputFilenameOptions,
-        processedDirectory,
+        processedDirectory: processedDirectory || undefined,
         maxAudioSize: DEFAULT_MAX_AUDIO_SIZE,
         tempDirectory: DEFAULT_TEMP_DIRECTORY,
     });
@@ -171,12 +230,15 @@ export async function handleProcessAudio(args: {
 }
 
 export async function handleBatchProcess(args: {
-    inputDirectory: string;
+    inputDirectory?: string;
     extensions?: string[];
-    contextDirectory?: string;
     outputDirectory?: string;
 }): Promise<{ processed: ProcessingResult[]; errors: { file: string; error: string }[] }> {
-    const inputDir = resolve(args.inputDirectory);
+    // Get directory from args or workspace config
+    const inputDir = args.inputDirectory 
+        ? resolve(args.inputDirectory)
+        : await getConfiguredDirectory('inputDirectory');
+    
     const extensions = args.extensions || ['.m4a', '.mp3', '.wav', '.webm'];
 
     if (!await fileExists(inputDir)) {
@@ -197,7 +259,6 @@ export async function handleBatchProcess(args: {
         try {
             const result = await handleProcessAudio({
                 audioFile: file,
-                contextDirectory: args.contextDirectory,
                 outputDirectory: args.outputDirectory,
             });
             processed.push(result);

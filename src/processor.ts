@@ -2,7 +2,7 @@ import * as Logging from '@/logging';
 import * as TranscribePhase from '@/phases/transcribe';
 import * as SimpleReplacePhase from '@/phases/simple-replace';
 import * as LocatePhase from '@/phases/locate';
-import * as Dreadcabinet from '@theunwalked/dreadcabinet';
+import * as Dreadcabinet from '@utilarium/dreadcabinet';
 import { Config } from '@/protokoll';
 import * as Interactive from '@/interactive';
 import * as Context from '@/context';

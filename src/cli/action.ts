@@ -282,6 +282,7 @@ export const combineTranscripts = async (
         title?: string;
         dryRun?: boolean;
         verbose?: boolean;
+        contextDirectory?: string;
     } = {}
 ): Promise<{ outputPath: string; content: string }> => {
     if (filePaths.length === 0) {
@@ -311,7 +312,10 @@ export const combineTranscripts = async (
     const baseMetadata = { ...firstTranscript.metadata };
     
     // Load context to get project information if needed
-    const context = await Context.create();
+    // Use contextDirectory if provided, otherwise discover from first transcript location
+    const context = await Context.create({
+        startingDir: options.contextDirectory || path.dirname(firstTranscript.filePath),
+    });
     let targetProject: Project | undefined;
     
     if (options.projectId) {
@@ -584,13 +588,17 @@ export const editTranscript = async (
         projectId?: string;
         dryRun?: boolean;
         verbose?: boolean;
+        contextDirectory?: string;
     }
 ): Promise<{ outputPath: string; content: string }> => {
     // Parse the existing transcript
     const transcript = await parseTranscript(filePath);
     
     // Load context if we need project info
-    const context = await Context.create();
+    // Use contextDirectory if provided, otherwise discover from transcript location
+    const context = await Context.create({
+        startingDir: options.contextDirectory || path.dirname(filePath),
+    });
     let targetProject: Project | undefined;
     
     if (options.projectId) {

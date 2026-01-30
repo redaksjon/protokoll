@@ -13,7 +13,63 @@ import { listTranscripts } from '@/cli/transcript';
 import { processFeedback, applyChanges, type FeedbackContext } from '@/cli/feedback';
 import { DEFAULT_MODEL } from '@/constants';
  
-import { fileExists } from './shared.js';
+import { fileExists, getConfiguredDirectory } from './shared.js';
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/**
+ * Find a transcript by filename or partial filename
+ * Searches in the configured output directory
+ */
+async function findTranscript(
+    filenameOrPath: string,
+    contextDirectory?: string
+): Promise<string> {
+    // If it's already an absolute path that exists, use it
+    if (filenameOrPath.startsWith('/') && await fileExists(filenameOrPath)) {
+        return filenameOrPath;
+    }
+
+    // Get the output directory from config
+    const outputDirectory = await getConfiguredDirectory('outputDirectory', contextDirectory);
+    
+    // Search for the transcript
+    const result = await listTranscripts({
+        directory: outputDirectory,
+        search: filenameOrPath,
+        limit: 10,
+    });
+
+    if (result.transcripts.length === 0) {
+        throw new Error(
+            `No transcript found matching "${filenameOrPath}" in ${outputDirectory}. ` +
+            `Try using protokoll_list_transcripts to see available transcripts.`
+        );
+    }
+
+    if (result.transcripts.length === 1) {
+        return result.transcripts[0].path;
+    }
+
+    // Multiple matches - try exact filename match first
+    const exactMatch = result.transcripts.find(t => 
+        t.filename === filenameOrPath || 
+        t.filename.includes(filenameOrPath)
+    );
+    
+    if (exactMatch) {
+        return exactMatch.path;
+    }
+
+    // Multiple matches and no exact match
+    const matches = result.transcripts.map(t => t.filename).join(', ');
+    throw new Error(
+        `Multiple transcripts match "${filenameOrPath}": ${matches}. ` +
+        `Please be more specific.`
+    );
+}
 
 // ============================================================================
 // Tool Definitions
@@ -23,13 +79,21 @@ export const readTranscriptTool: Tool = {
     name: 'protokoll_read_transcript',
     description:
         'Read a transcript file and parse its metadata and content. ' +
+        'You can provide either an absolute path OR just a filename/partial filename. ' +
+        'If you provide a filename, it will search in the configured output directory. ' +
         'Returns structured data including title, metadata, routing info, and content.',
     inputSchema: {
         type: 'object',
         properties: {
             transcriptPath: {
                 type: 'string',
-                description: 'Absolute path to the transcript file',
+                description: 
+                    'Filename, partial filename, or absolute path to the transcript. ' +
+                    'Examples: "meeting-notes.md", "2026-01-29", "/full/path/to/transcript.md"',
+            },
+            contextDirectory: {
+                type: 'string',
+                description: 'Optional: Path to the .protokoll context directory',
             },
         },
         required: ['transcriptPath'],
@@ -39,7 +103,8 @@ export const readTranscriptTool: Tool = {
 export const listTranscriptsTool: Tool = {
     name: 'protokoll_list_transcripts',
     description:
-        'List transcripts in a directory with pagination, filtering, and search. ' +
+        'List transcripts with pagination, filtering, and search. ' +
+        'If no directory is specified, uses the configured output directory. ' +
         'Returns transcript metadata including date, time, title, and file path. ' +
         'Supports sorting by date (default), filename, or title. ' +
         'Can filter by date range and search within transcript content.',
@@ -48,7 +113,9 @@ export const listTranscriptsTool: Tool = {
         properties: {
             directory: {
                 type: 'string',
-                description: 'Directory to search for transcripts (searches recursively)',
+                description: 
+                    'Optional: Directory to search for transcripts (searches recursively). ' +
+                    'If not specified, uses the configured output directory.',
             },
             limit: {
                 type: 'number',
@@ -78,8 +145,12 @@ export const listTranscriptsTool: Tool = {
                 type: 'string',
                 description: 'Search for transcripts containing this text (searches filename and content)',
             },
+            contextDirectory: {
+                type: 'string',
+                description: 'Optional: Path to the .protokoll context directory',
+            },
         },
-        required: ['directory'],
+        required: [],
     },
 };
 
@@ -87,6 +158,7 @@ export const editTranscriptTool: Tool = {
     name: 'protokoll_edit_transcript',
     description:
         'Edit an existing transcript\'s title and/or project assignment. ' +
+        'You can provide either an absolute path OR just a filename/partial filename. ' +
         'IMPORTANT: When you change the title, this tool RENAMES THE FILE to match the new title (slugified). ' +
         'Always use this tool instead of directly editing transcript files when changing titles. ' +
         'Changing the project will update metadata and may move the file to a new location ' +
@@ -96,7 +168,9 @@ export const editTranscriptTool: Tool = {
         properties: {
             transcriptPath: {
                 type: 'string',
-                description: 'Absolute path to the transcript file',
+                description: 
+                    'Filename, partial filename, or absolute path to the transcript. ' +
+                    'Examples: "meeting-notes.md", "2026-01-29", "/full/path/to/transcript.md"',
             },
             title: {
                 type: 'string',
@@ -108,7 +182,7 @@ export const editTranscriptTool: Tool = {
             },
             contextDirectory: {
                 type: 'string',
-                description: 'Path to the .protokoll context directory',
+                description: 'Optional: Path to the .protokoll context directory',
             },
         },
         required: ['transcriptPath'],
@@ -119,6 +193,7 @@ export const combineTranscriptsTool: Tool = {
     name: 'protokoll_combine_transcripts',
     description:
         'Combine multiple transcripts into a single document. ' +
+        'You can provide absolute paths OR filenames/partial filenames. ' +
         'Source files are automatically deleted after combining. ' +
         'Metadata from the first transcript is preserved, and content is organized into sections.',
     inputSchema: {
@@ -127,7 +202,9 @@ export const combineTranscriptsTool: Tool = {
             transcriptPaths: {
                 type: 'array',
                 items: { type: 'string' },
-                description: 'Array of transcript file paths to combine',
+                description: 
+                    'Array of filenames, partial filenames, or absolute paths. ' +
+                    'Examples: ["meeting-1.md", "meeting-2.md"] or ["2026-01-29", "2026-01-30"]',
             },
             title: {
                 type: 'string',
@@ -139,7 +216,7 @@ export const combineTranscriptsTool: Tool = {
             },
             contextDirectory: {
                 type: 'string',
-                description: 'Path to the .protokoll context directory',
+                description: 'Optional: Path to the .protokoll context directory',
             },
         },
         required: ['transcriptPaths'],
@@ -150,6 +227,7 @@ export const provideFeedbackTool: Tool = {
     name: 'protokoll_provide_feedback',
     description:
         'Provide natural language feedback to correct a transcript. ' +
+        'You can provide either an absolute path OR just a filename/partial filename. ' +
         'The feedback is processed by an agentic model that can: ' +
         '- Fix spelling and term errors ' +
         '- Add new terms, people, or companies to context ' +
@@ -161,7 +239,9 @@ export const provideFeedbackTool: Tool = {
         properties: {
             transcriptPath: {
                 type: 'string',
-                description: 'Absolute path to the transcript file',
+                description: 
+                    'Filename, partial filename, or absolute path to the transcript. ' +
+                    'Examples: "meeting-notes.md", "2026-01-29", "/full/path/to/transcript.md"',
             },
             feedback: {
                 type: 'string',
@@ -173,7 +253,7 @@ export const provideFeedbackTool: Tool = {
             },
             contextDirectory: {
                 type: 'string',
-                description: 'Path to the .protokoll context directory',
+                description: 'Optional: Path to the .protokoll context directory',
             },
         },
         required: ['transcriptPath', 'feedback'],
@@ -184,12 +264,12 @@ export const provideFeedbackTool: Tool = {
 // Tool Handlers
 // ============================================================================
 
-export async function handleReadTranscript(args: { transcriptPath: string }) {
-    const transcriptPath = resolve(args.transcriptPath);
-
-    if (!await fileExists(transcriptPath)) {
-        throw new Error(`Transcript not found: ${transcriptPath}`);
-    }
+export async function handleReadTranscript(args: { 
+    transcriptPath: string;
+    contextDirectory?: string;
+}) {
+    // Find the transcript (handles both paths and filenames)
+    const transcriptPath = await findTranscript(args.transcriptPath, args.contextDirectory);
 
     const parsed = await parseTranscript(transcriptPath);
 
@@ -203,15 +283,19 @@ export async function handleReadTranscript(args: { transcriptPath: string }) {
 }
 
 export async function handleListTranscripts(args: {
-    directory: string;
+    directory?: string;
     limit?: number;
     offset?: number;
     sortBy?: 'date' | 'filename' | 'title';
     startDate?: string;
     endDate?: string;
     search?: string;
+    contextDirectory?: string;
 }) {
-    const directory = resolve(args.directory);
+    // Get directory from args or config
+    const directory = args.directory 
+        ? resolve(args.directory)
+        : await getConfiguredDirectory('outputDirectory', args.contextDirectory);
 
     if (!await fileExists(directory)) {
         throw new Error(`Directory not found: ${directory}`);
@@ -259,11 +343,8 @@ export async function handleEditTranscript(args: {
     projectId?: string;
     contextDirectory?: string;
 }) {
-    const transcriptPath = resolve(args.transcriptPath);
-
-    if (!await fileExists(transcriptPath)) {
-        throw new Error(`Transcript not found: ${transcriptPath}`);
-    }
+    // Find the transcript (handles both paths and filenames)
+    const transcriptPath = await findTranscript(args.transcriptPath, args.contextDirectory);
 
     if (!args.title && !args.projectId) {
         throw new Error('Must specify title and/or projectId');
@@ -272,6 +353,7 @@ export async function handleEditTranscript(args: {
     const result = await editTranscript(transcriptPath, {
         title: args.title,
         projectId: args.projectId,
+        contextDirectory: args.contextDirectory,
     });
 
     // Write the updated content
@@ -304,19 +386,17 @@ export async function handleCombineTranscripts(args: {
         throw new Error('At least 2 transcript files are required');
     }
 
-    // Validate all files exist
+    // Find all transcripts (handles both paths and filenames)
+    const resolvedPaths: string[] = [];
     for (const path of args.transcriptPaths) {
-        const resolved = resolve(path);
-        if (!await fileExists(resolved)) {
-            throw new Error(`Transcript not found: ${resolved}`);
-        }
+        const resolved = await findTranscript(path, args.contextDirectory);
+        resolvedPaths.push(resolved);
     }
-
-    const resolvedPaths = args.transcriptPaths.map(p => resolve(p));
 
     const result = await combineTranscripts(resolvedPaths, {
         title: args.title,
         projectId: args.projectId,
+        contextDirectory: args.contextDirectory,
     });
 
     // Write the combined transcript
@@ -349,11 +429,8 @@ export async function handleProvideFeedback(args: {
     model?: string;
     contextDirectory?: string;
 }) {
-    const transcriptPath = resolve(args.transcriptPath);
-
-    if (!await fileExists(transcriptPath)) {
-        throw new Error(`Transcript not found: ${transcriptPath}`);
-    }
+    // Find the transcript (handles both paths and filenames)
+    const transcriptPath = await findTranscript(args.transcriptPath, args.contextDirectory);
 
     const transcriptContent = await readFile(transcriptPath, 'utf-8');
     const context = await Context.create({

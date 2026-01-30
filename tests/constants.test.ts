@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 import * as Constants from '../src/constants';
-import { FilesystemStructure } from '@theunwalked/dreadcabinet';
+import { FilesystemStructure } from '@utilarium/dreadcabinet';
 
 describe('Constants', () => {
     describe('Version Info', () => {

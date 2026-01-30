@@ -65,6 +65,66 @@ export const discoverConfigDirectories = async (
 };
 
 /**
+ * Resolve context directory path based on configuration.
+ * Priority:
+ * 1. Explicit contextDirectory in config.yaml
+ * 2. ./context/ at repository root (sibling to .protokoll/)
+ * 3. .protokoll/context/ (backward compatibility)
+ * 
+ * @param protokollDirPath - Path to the .protokoll directory
+ * @param config - Parsed config.yaml content (if exists)
+ */
+const resolveContextDirectory = async (
+    protokollDirPath: string,
+    config: Record<string, unknown> | null
+): Promise<string | null> => {
+    // Get repository root (parent of .protokoll/)
+    const repoRoot = path.dirname(protokollDirPath);
+    
+    // If config specifies a contextDirectory, use it
+    if (config && typeof config.contextDirectory === 'string') {
+        const explicitPath = path.isAbsolute(config.contextDirectory)
+            ? config.contextDirectory
+            : path.resolve(repoRoot, config.contextDirectory);
+        
+        try {
+            const stat = await fs.stat(explicitPath);
+            if (stat.isDirectory()) {
+                return explicitPath;
+            }
+        } catch {
+            // Explicit path doesn't exist, continue to defaults
+        }
+    }
+    
+    // Default: Look for ./context/ at repository root (sibling to .protokoll/)
+    const rootContextDir = path.join(repoRoot, 'context');
+    
+    try {
+        const stat = await fs.stat(rootContextDir);
+        if (stat.isDirectory()) {
+            return rootContextDir;
+        }
+    } catch {
+        // Root context doesn't exist, try fallback
+    }
+    
+    // Fallback: .protokoll/context/ (backward compatibility)
+    const legacyContextDir = path.join(protokollDirPath, 'context');
+    
+    try {
+        const stat = await fs.stat(legacyContextDir);
+        if (stat.isDirectory()) {
+            return legacyContextDir;
+        }
+    } catch {
+        // No context directory found
+    }
+    
+    return null;
+};
+
+/**
  * Load and merge hierarchical configuration
  */
 export const loadHierarchicalConfig = async (
@@ -88,26 +148,23 @@ export const loadHierarchicalConfig = async (
   
     for (const dir of sortedDirs) {
         const configPath = path.join(dir.path, options.configFileName);
+        let parsedConfig: Record<string, unknown> | null = null;
     
         try {
             const content = await fs.readFile(configPath, 'utf-8');
             const parsed = yaml.load(content);
             if (parsed && typeof parsed === 'object') {
-                configs.push(parsed as Record<string, unknown>);
+                parsedConfig = parsed as Record<string, unknown>;
+                configs.push(parsedConfig);
             }
         } catch {
             // No config file in this directory
         }
     
-        // Add context directory
-        const contextDir = path.join(dir.path, 'context');
-        try {
-            const stat = await fs.stat(contextDir);
-            if (stat.isDirectory()) {
-                contextDirs.push(contextDir);
-            }
-        } catch {
-            // No context subdirectory
+        // Resolve context directory using new logic
+        const contextDir = await resolveContextDirectory(dir.path, parsedConfig);
+        if (contextDir) {
+            contextDirs.push(contextDir);
         }
     }
 

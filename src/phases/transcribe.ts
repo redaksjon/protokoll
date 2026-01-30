@@ -1,4 +1,4 @@
-import * as Dreadcabinet from '@theunwalked/dreadcabinet';
+import * as Dreadcabinet from '@utilarium/dreadcabinet';
 import { Config } from '@/protokoll';
 import * as Logging from '@/logging';
 import * as Storage from '@/util/storage';
@@ -71,11 +71,20 @@ export const create = (config: Config, operator: Dreadcabinet.Operator, deps?: T
         const baseDebugFilename = path.parse(transcriptOutputFilename).name;
         const transcriptionDebugFile = config.debug ? path.join(interimPath, `${baseDebugFilename}.transcription.raw.response.json`) : undefined;
 
+        // Check original file size first
+        const originalFileSize = await media.getFileSize(audioFile);
+        const originalFileSizeMB = (originalFileSize / (1024 * 1024)).toFixed(1);
+        logger.debug(`Original audio file size: ${originalFileSize} bytes (${originalFileSizeMB} MB)`);
+
         // Convert audio file to a supported format if necessary
-        const convertedAudioFile = await media.convertToSupportedFormat(audioFile, interimPath);
+        // Always convert if file is close to or over the size limit to ensure compression
+        const needsConversion = originalFileSize > (config.maxAudioSize * 0.95); // Convert if within 5% of limit
+        const convertedAudioFile = needsConversion 
+            ? await media.convertToSupportedFormat(audioFile, interimPath, true) // Force conversion
+            : await media.convertToSupportedFormat(audioFile, interimPath);
         logger.debug(`Using audio file for transcription: ${convertedAudioFile}`);
 
-        // Check if audio file exceeds the size limit
+        // Check if audio file exceeds the size limit after conversion
         const fileSize = await media.getFileSize(convertedAudioFile);
         const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(1);
         logger.info('Step 1/2: Transcribing audio (%s MB)...', fileSizeMB);

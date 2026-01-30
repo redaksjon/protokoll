@@ -124,5 +124,5 @@ If the bug reoccurs, consider:
 - `src/phases/locate.ts` - Where `creationTime` is determined
 - `src/phases/transcribe.ts` - Where files are created
 - `src/util/dates.ts` - Date utility functions
-- `node_modules/@theunwalked/dreadcabinet/dist/output.js` - Directory construction
-- `node_modules/@theunwalked/dreadcabinet/dist/util/dates.js` - Date formatting
+- `node_modules/@utilarium/dreadcabinet/dist/output.js` - Directory construction
+- `node_modules/@utilarium/dreadcabinet/dist/util/dates.js` - Date formatting

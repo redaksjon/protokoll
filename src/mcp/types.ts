@@ -34,7 +34,9 @@ export type ResourceType =
     | 'entity'
     | 'config'
     | 'transcripts-list'
-    | 'entities-list';
+    | 'entities-list'
+    | 'audio-inbound'
+    | 'audio-processed';
 
 // ============================================================================
 // Prompt Types
@@ -117,6 +119,16 @@ export interface TranscriptsListUri extends ParsedResourceUri {
 export interface EntitiesListUri extends ParsedResourceUri {
     resourceType: 'entities-list';
     entityType: 'person' | 'project' | 'term' | 'company' | 'ignored';
+}
+
+export interface AudioInboundUri extends ParsedResourceUri {
+    resourceType: 'audio-inbound';
+    directory?: string;
+}
+
+export interface AudioProcessedUri extends ParsedResourceUri {
+    resourceType: 'audio-processed';
+    directory?: string;
 }
 
 // ============================================================================

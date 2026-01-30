@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeEach, vi } from 'vitest';
-import { FilesystemStructure } from '@theunwalked/dreadcabinet';
-import { FilenameOption } from '@theunwalked/dreadcabinet';
+import { FilesystemStructure } from '@utilarium/dreadcabinet';
+import { FilenameOption } from '@utilarium/dreadcabinet';
 
 // Setup mock functions that will be used inside mock modules
 const mockLogger = {

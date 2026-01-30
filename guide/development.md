@@ -226,8 +226,8 @@ npm run lint:fix
 
 | Package | Purpose |
 |---------|---------|
-| `@theunwalked/dreadcabinet` | Filesystem patterns |
-| `@theunwalked/cardigantime` | Hierarchical config discovery |
+| `@utilarium/dreadcabinet` | Filesystem patterns |
+| `@utilarium/cardigantime` | Hierarchical config discovery |
 | `@riotprompt/riotprompt` | Prompt building and agentic execution |
 | `openai` | OpenAI API (Whisper and GPT) |
 | `@anthropic-ai/sdk` | Anthropic API (Claude) |

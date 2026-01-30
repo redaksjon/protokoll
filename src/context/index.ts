@@ -75,7 +75,7 @@ export interface ContextInstance {
     getRelatedProjects(projectId: string, maxDistance?: number): Project[];
   
     // Modification
-    saveEntity(entity: Entity): Promise<void>;
+    saveEntity(entity: Entity, allowUpdate?: boolean): Promise<void>;
     deleteEntity(entity: Entity): Promise<boolean>;
     getEntityFilePath(entity: Entity): string | undefined;
   
@@ -238,7 +238,7 @@ export const create = async (options: CreateOptions = {}): Promise<ContextInstan
                 .map(r => r.project);
         },
     
-        saveEntity: async (entity) => {
+        saveEntity: async (entity, allowUpdate = false) => {
             const closestDir = discoveryResult.discoveredDirs
                 .sort((a, b) => a.level - b.level)[0];
       
@@ -246,7 +246,7 @@ export const create = async (options: CreateOptions = {}): Promise<ContextInstan
                 throw new Error('No .protokoll directory found. Run with --init-config to create one.');
             }
       
-            await storage.save(entity, closestDir.path);
+            await storage.save(entity, closestDir.path, allowUpdate);
         },
         
         deleteEntity: async (entity) => {
