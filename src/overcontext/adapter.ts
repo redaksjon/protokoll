@@ -92,12 +92,16 @@ export const create = (): StorageInstance => {
                 
                 // Create overcontext API with hierarchical discovery
                 // Note: We use 'context' as contextDirName since we're starting from the parent
+                // Use maxLevels: 1 to limit discovery - we've already done hierarchical discovery
+                // in loadHierarchicalConfig and are passing the specific contextDirs we want.
+                // maxLevels: 1 prevents walking too far up the tree in CI environments where
+                // parent directories might contain unrelated context data.
                 api = await discoverOvercontext({
                     schemas: redaksjonSchemas,
                     pluralNames: redaksjonPluralNames, // Use standard names without context/ prefix
                     startDir,
                     contextDirName: path.basename(lastContextDir), // Use actual context dir name
-                    maxLevels: 10,
+                    maxLevels: 1, // Limit discovery to prevent finding unrelated parent contexts
                 });
       
                 // Load all entities into cache
