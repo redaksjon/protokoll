@@ -47,6 +47,7 @@ export const DEFAULT_PROCESSED_DIR = './processed';
 
 // Context System Constants
 export const DEFAULT_CONTEXT_DIR_NAME = '.protokoll';
+export const DEFAULT_CONTEXT_NAMESPACE = 'redaksjon';
 export const DEFAULT_CONTEXT_CONFIG_FILE_NAME = 'config.yaml';
 export const DEFAULT_MAX_DISCOVERY_LEVELS = 10;
 

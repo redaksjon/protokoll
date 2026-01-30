@@ -735,7 +735,7 @@ export async function handleEditPerson(args: {
         delete updatedPerson.sounds_like;
     }
 
-    await context.saveEntity(updatedPerson);
+    await context.saveEntity(updatedPerson, true);
 
     // Build summary of changes
     const changes: string[] = [];
@@ -1038,7 +1038,7 @@ export async function handleEditProject(args: {
         }
     }
 
-    await context.saveEntity(updatedProject);
+    await context.saveEntity(updatedProject, true);
 
     // Build summary of changes
     const changes: string[] = [];
@@ -1123,7 +1123,7 @@ export async function handleUpdateProject(args: {
         updatedAt: new Date(),
     };
 
-    await context.saveEntity(updatedProject);
+    await context.saveEntity(updatedProject, true);
 
     return {
         success: true,
@@ -1262,7 +1262,7 @@ export async function handleEditTerm(args: {
         delete updatedTerm.projects;
     }
 
-    await context.saveEntity(updatedTerm);
+    await context.saveEntity(updatedTerm, true);
 
     // Build summary of changes
     const changes: string[] = [];
@@ -1359,7 +1359,7 @@ export async function handleUpdateTerm(args: {
         suggestedProjects = projects.map(p => p.id);
     }
 
-    await context.saveEntity(updatedTerm);
+    await context.saveEntity(updatedTerm, true);
 
     return {
         success: true,

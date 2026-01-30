@@ -4,7 +4,6 @@ import {
 } from '@theunwalked/overcontext';
 import {
     redaksjonSchemas,
-    redaksjonPluralNames,
     Person,
     Project,
     Company,
@@ -13,7 +12,7 @@ import {
     RedaksjonEntity,
     RedaksjonEntityType,
 } from '@redaksjon/context';
-import { protokollDiscoveryOptions } from './config';
+import { protokollDiscoveryOptions, protokollPluralNames } from './config';
 // eslint-disable-next-line no-restricted-imports
 import { existsSync, statSync } from 'node:fs';
 import * as path from 'node:path';
@@ -28,7 +27,7 @@ export type Entity = RedaksjonEntity;
  */
 export interface StorageInstance {
   load(contextDirs: string[]): Promise<void>;
-  save(entity: Entity, targetDir: string): Promise<void>;
+  save(entity: Entity, targetDir: string, allowUpdate?: boolean): Promise<void>;
   delete(type: EntityType, id: string, targetDir: string): Promise<boolean>;
   get<T extends Entity>(type: EntityType, id: string): T | undefined;
   getAll<T extends Entity>(type: EntityType): T[];
@@ -89,7 +88,7 @@ export const create = (): StorageInstance => {
                 // Create overcontext API with hierarchical discovery
                 api = await discoverOvercontext({
                     schemas: redaksjonSchemas,
-                    pluralNames: redaksjonPluralNames,
+                    pluralNames: protokollPluralNames,
                     startDir,
                     ...protokollDiscoveryOptions,
                 });
@@ -111,19 +110,20 @@ export const create = (): StorageInstance => {
             }
         },
     
-        async save(entity: Entity, _targetDir: string): Promise<void> {
+        async save(entity: Entity, _targetDir: string, allowUpdate = false): Promise<void> {
+            // Check if entity already exists (for duplicate detection)
+            const existing = cache.get(entity.type)?.get(entity.id);
+            if (existing && !allowUpdate) {
+                throw new Error(`Entity with id "${entity.id}" already exists`);
+            }
+
             // If no API (empty context), just update cache (in-memory only)
             if (!api) {
-                // Check if entity already exists (for duplicate detection)
-                const existing = cache.get(entity.type)?.get(entity.id);
-                if (existing) {
-                    throw new Error(`Entity with id "${entity.id}" already exists`);
-                }
                 cache.get(entity.type)?.set(entity.id, entity);
                 return;
             }
       
-            // Save via overcontext
+            // Save via overcontext (upsert will create or update)
             const saved = await api.upsert(entity.type, entity);
       
             // Update cache
