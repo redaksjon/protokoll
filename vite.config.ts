@@ -61,7 +61,7 @@ export default defineConfig({
                 '@modelcontextprotocol/sdk/server/index.js',
                 '@modelcontextprotocol/sdk/server/stdio.js',
                 '@modelcontextprotocol/sdk/types.js',
-                '@riotprompt/riotprompt',
+                '@kjerneverk/riotprompt',
                 '@utilarium/cardigantime',
                 '@utilarium/dreadcabinet',
                 '@types/fluent-ffmpeg',

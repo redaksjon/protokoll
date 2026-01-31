@@ -9,7 +9,7 @@ import { ToolContext, TranscriptionState } from './types';
 import * as Registry from './registry';
 import * as Reasoning from '../reasoning';
 import * as Logging from '../logging';
-import { ConversationBuilder, ToolCall as RiotToolCall } from '@riotprompt/riotprompt';
+import { ConversationBuilder, ToolCall as RiotToolCall } from '@kjerneverk/riotprompt';
 
 export interface ContextChangeRecord {
     entityType: 'person' | 'project' | 'company' | 'term' | 'ignored';

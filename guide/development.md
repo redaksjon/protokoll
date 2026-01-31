@@ -228,7 +228,7 @@ npm run lint:fix
 |---------|---------|
 | `@utilarium/dreadcabinet` | Filesystem patterns |
 | `@utilarium/cardigantime` | Hierarchical config discovery |
-| `@riotprompt/riotprompt` | Prompt building and agentic execution |
+| `@kjerneverk/riotprompt` | Prompt building and agentic execution |
 | `openai` | OpenAI API (Whisper and GPT) |
 | `@anthropic-ai/sdk` | Anthropic API (Claude) |
 | `@google/generative-ai` | Google API (Gemini) |

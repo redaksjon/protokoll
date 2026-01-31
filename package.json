@@ -1,6 +1,6 @@
 {
   "name": "@redaksjon/protokoll",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Focused audio transcription with intelligent context integration",
   "main": "dist/main.js",
   "type": "module",
@@ -46,7 +46,7 @@
     "@google/generative-ai": "^0.24.1",
     "@modelcontextprotocol/sdk": "^1.25.2",
     "@redaksjon/context": "^0.0.4",
-    "@riotprompt/riotprompt": "^0.0.21",
+    "@kjerneverk/riotprompt": "^1.0.6",
     "@utilarium/cardigantime": "^0.0.24",
     "@utilarium/dreadcabinet": "^0.0.16",
     "@utilarium/overcontext": "^0.0.4",

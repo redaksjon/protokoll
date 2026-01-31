@@ -5,7 +5,7 @@
  * Uses riotprompt's IterationStrategyFactory for complex workflows.
  */
 
-import { IterationStrategy, IterationStrategyFactory } from '@riotprompt/riotprompt';
+import { IterationStrategy, IterationStrategyFactory } from '@kjerneverk/riotprompt';
 import { ReasoningLevel } from './types';
 
 export type TranscriptionStrategy = 

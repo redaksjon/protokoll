@@ -5,8 +5,8 @@
  * Uses RiotPrompt's template system for consistent prompt structure.
  */
 
-import { registerTemplates, getTemplates, clearTemplates } from '@riotprompt/riotprompt';
-import type { TemplateConfig } from '@riotprompt/riotprompt';
+import { registerTemplates, getTemplates, clearTemplates } from '@kjerneverk/riotprompt';
+import type { TemplateConfig } from '@kjerneverk/riotprompt';
 
 /**
  * Available transcription templates
