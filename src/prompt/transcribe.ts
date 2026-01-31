@@ -1,5 +1,5 @@
-import { cook } from "@riotprompt/riotprompt";
-import type { Prompt } from "@riotprompt/riotprompt";
+import { cook } from "@kjerneverk/riotprompt";
+import type { Prompt } from "@kjerneverk/riotprompt";
 import { DEFAULT_INSTRUCTIONS_TRANSCRIBE_FILE, DEFAULT_PERSONA_TRANSCRIBER_FILE } from '@/constants';
 import { Config } from '@/protokoll';
 import { fileURLToPath } from "node:url";

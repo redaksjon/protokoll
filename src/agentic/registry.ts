@@ -6,8 +6,8 @@
  * preserving protokoll's custom ToolResult interface.
  */
 
-import { ToolRegistry } from '@riotprompt/riotprompt';
-import type { Tool as RiotTool } from '@riotprompt/riotprompt';
+import { ToolRegistry } from '@kjerneverk/riotprompt';
+import type { Tool as RiotTool } from '@kjerneverk/riotprompt';
 import { TranscriptionTool, ToolContext, ToolResult } from './types';
 import * as LookupPerson from './tools/lookup-person';
 import * as LookupProject from './tools/lookup-project';
