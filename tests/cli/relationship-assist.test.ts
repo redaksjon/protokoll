@@ -75,7 +75,7 @@ describe('RelationshipAssist', () => {
                         type: 'project',
                         classification: { context_type: 'work' },
                         routing: { structure: 'month', filename_options: [] },
-                        relationships: { parent: 'redaksjon' }
+                        relationships: [{ uri: 'redaksjon://project/redaksjon', relationship: 'parent' }]
                     } as Project,
                     {
                         id: 'observasjon',
@@ -83,7 +83,7 @@ describe('RelationshipAssist', () => {
                         type: 'project',
                         classification: { context_type: 'work' },
                         routing: { structure: 'month', filename_options: [] },
-                        relationships: { parent: 'redaksjon' }
+                        relationships: [{ uri: 'redaksjon://project/redaksjon', relationship: 'parent' }]
                     } as Project
                 ],
                 getAllTerms: () => [],

@@ -579,7 +579,7 @@ describe('Context Types', () => {
                     type: 'project',
                     classification: { triggers: { words: [] }, requireAll: false },
                     routing: { structure: 'month', filename_options: [] },
-                    relationships: { parent: 'parent' },
+                    relationships: [{ uri: 'redaksjon://project/parent', relationship: 'parent' }],
                 };
 
                 expect(isParentProject(projectA, projectB)).toBe(true);
@@ -600,7 +600,7 @@ describe('Context Types', () => {
                     type: 'project',
                     classification: { triggers: { words: [] }, requireAll: false },
                     routing: { structure: 'month', filename_options: [] },
-                    relationships: { parent: 'parent' },
+                    relationships: [{ uri: 'redaksjon://project/parent', relationship: 'parent' }],
                 };
 
                 expect(isParentProject(projectA, projectB)).toBe(false);

@@ -22,9 +22,11 @@ describe('Project Relationships', () => {
         id: 'redaksjon',
         name: 'Redaksjon',
         type: 'project',
-        relationships: {
-            children: ['protokoll', 'kronologi', 'observasjon']
-        },
+        relationships: [
+            { uri: 'redaksjon://project/protokoll', relationship: 'child' },
+            { uri: 'redaksjon://project/kronologi', relationship: 'child' },
+            { uri: 'redaksjon://project/observasjon', relationship: 'child' }
+        ],
         classification: { context_type: 'work' },
         routing: { structure: 'month', filename_options: ['date'] }
     };
@@ -33,10 +35,11 @@ describe('Project Relationships', () => {
         id: 'protokoll',
         name: 'Protokoll',
         type: 'project',
-        relationships: {
-            parent: 'redaksjon',
-            siblings: ['kronologi', 'observasjon']
-        },
+        relationships: [
+            { uri: 'redaksjon://project/redaksjon', relationship: 'parent' },
+            { uri: 'redaksjon://project/kronologi', relationship: 'sibling' },
+            { uri: 'redaksjon://project/observasjon', relationship: 'sibling' }
+        ],
         classification: { context_type: 'work' },
         routing: { structure: 'month', filename_options: ['date'] }
     };
@@ -45,10 +48,11 @@ describe('Project Relationships', () => {
         id: 'kronologi',
         name: 'Kronologi',
         type: 'project',
-        relationships: {
-            parent: 'redaksjon',
-            siblings: ['protokoll', 'observasjon']
-        },
+        relationships: [
+            { uri: 'redaksjon://project/redaksjon', relationship: 'parent' },
+            { uri: 'redaksjon://project/protokoll', relationship: 'sibling' },
+            { uri: 'redaksjon://project/observasjon', relationship: 'sibling' }
+        ],
         classification: { context_type: 'work' },
         routing: { structure: 'month', filename_options: ['date'] }
     };

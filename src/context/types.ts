@@ -26,22 +26,38 @@ export interface Person extends BaseEntity {
   type: 'person';
   firstName?: string;
   lastName?: string;
-  company?: string;              // Company ID reference
+  company?: string;              // DEPRECATED: Use relationships instead
   role?: string;                 // e.g., "Manager", "Developer"
   sounds_like?: string[];        // Common mishearings: "a nil", "a nill"
   context?: string;              // How user knows them
+  relationships?: EntityRelationship[];  // Relationships to other entities
+  content?: EntityContentItem[];         // Attached content
 }
 
 /**
- * Project Relationship Configuration
- * Defines how projects relate to each other in the ecosystem
+ * Entity Relationship
+ * Represents a typed relationship between entities using URIs
  */
-export interface ProjectRelationships {
-  parent?: string;                      // Parent project ID (e.g., redaksjon for kronologi)
-  children?: string[];                  // Child project IDs
-  siblings?: string[];                  // Related peer projects
-  dependsOn?: string[];                 // Dependencies
-  relatedTerms?: string[];              // Terms strongly associated with this project
+export interface EntityRelationship {
+  uri: string;                          // redaksjon://{type}/{id}
+  relationship: string;                 // Relationship type (freeform)
+  notes?: string;                       // Optional notes
+  metadata?: Record<string, unknown>;   // Optional metadata
+}
+
+/**
+ * Entity Content Item
+ * Structured content attached to an entity
+ */
+export interface EntityContentItem {
+  type: string;                         // url, text, markdown, code, document, etc.
+  title?: string;                       // Title or label
+  content: string;                      // The actual content
+  mimeType?: string;                    // MIME type
+  source?: string;                      // Source or origin
+  timestamp?: string;                   // ISO 8601 datetime
+  notes?: string;                       // Optional notes
+  metadata?: Record<string, unknown>;   // Optional metadata
 }
 
 export interface ProjectClassification {
@@ -73,8 +89,11 @@ export interface Project extends BaseEntity {
   // Useful for non-English names (Norwegian, etc.) that may be transcribed differently
   sounds_like?: string[];
   
-  // Project relationship graph
-  relationships?: ProjectRelationships;
+  // Unified relationships to other entities
+  relationships?: EntityRelationship[];
+  
+  // Attached content
+  content?: EntityContentItem[];
   
   active?: boolean;
 }
@@ -84,6 +103,8 @@ export interface Company extends BaseEntity {
   fullName?: string;
   industry?: string;
   sounds_like?: string[];
+  relationships?: EntityRelationship[];  // Relationships to other entities
+  content?: EntityContentItem[];         // Attached content
 }
 
 export interface Term extends BaseEntity {
@@ -91,11 +112,15 @@ export interface Term extends BaseEntity {
   expansion?: string;     // Full form if it's an acronym
   domain?: string;        // E.g., "engineering", "finance", "devops"
   sounds_like?: string[];
-  projects?: string[];    // Associated project IDs - triggers routing to these projects
+  projects?: string[];    // DEPRECATED: Use relationships instead
   
   // Smart assistance fields
   description?: string;   // Clear explanation of what the term means
   topics?: string[];      // Thematic keywords related to this term
+  
+  // Unified relationships and content
+  relationships?: EntityRelationship[];  // Relationships to other entities
+  content?: EntityContentItem[];         // Attached content
 }
 
 /**
@@ -217,25 +242,61 @@ export const removeProjectFromTerm = (term: Term, projectId: string): Term => {
  */
 
 /**
+ * Get entity ID from a relationship URI
+ */
+const getIdFromUri = (uri: string): string | null => {
+    const match = uri.match(/^redaksjon:\/\/[^/]+\/(.+)$/);
+    return match ? match[1] : null;
+};
+
+/**
+ * Get relationships by type from an array
+ */
+const getRelationshipsByType = (relationships: EntityRelationship[] | undefined, relationshipType: string): EntityRelationship[] => {
+    if (!relationships) return [];
+    return relationships.filter(r => r.relationship === relationshipType);
+};
+
+/**
+ * Get entity IDs from relationships by type
+ */
+const getEntityIdsByRelationshipType = (relationships: EntityRelationship[] | undefined, relationshipType: string): string[] => {
+    return getRelationshipsByType(relationships, relationshipType)
+        .map(r => getIdFromUri(r.uri))
+        .filter((id): id is string => id !== null);
+};
+
+/**
+ * Get parent project ID from relationships
+ */
+const getParentId = (relationships: EntityRelationship[] | undefined): string | undefined => {
+    const parentRels = getRelationshipsByType(relationships, 'parent');
+    if (parentRels.length === 0) return undefined;
+    return getIdFromUri(parentRels[0].uri) || undefined;
+};
+
+/**
  * Check if projectA is a parent of projectB
  */
 export const isParentProject = (projectA: Project, projectB: Project): boolean => {
-    return projectB.relationships?.parent === projectA.id;
+    const parentId = getParentId(projectB.relationships);
+    return parentId === projectA.id;
 };
 
 /**
  * Check if projectA is a child of projectB
  */
 export const isChildProject = (projectA: Project, projectB: Project): boolean => {
-    return projectA.relationships?.parent === projectB.id;
+    const parentId = getParentId(projectA.relationships);
+    return parentId === projectB.id;
 };
 
 /**
  * Check if two projects are siblings
  */
 export const areSiblingProjects = (projectA: Project, projectB: Project): boolean => {
-    const aSiblings = projectA.relationships?.siblings || [];
-    const bSiblings = projectB.relationships?.siblings || [];
+    const aSiblings = getEntityIdsByRelationshipType(projectA.relationships, 'sibling');
+    const bSiblings = getEntityIdsByRelationshipType(projectB.relationships, 'sibling');
     return aSiblings.includes(projectB.id) || bSiblings.includes(projectA.id);
 };
 
@@ -249,8 +310,9 @@ export const getProjectRelationshipDistance = (projectA: Project, projectB: Proj
     if (areSiblingProjects(projectA, projectB)) return 2;
     
     // Check if they share a parent (cousins)
-    if (projectA.relationships?.parent && projectB.relationships?.parent &&
-        projectA.relationships.parent === projectB.relationships.parent) {
+    const aParent = getParentId(projectA.relationships);
+    const bParent = getParentId(projectB.relationships);
+    if (aParent && bParent && aParent === bParent) {
         return 2;
     }
     

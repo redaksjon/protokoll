@@ -6,7 +6,7 @@
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import * as Context from '@/context';
 import * as ProjectAssist from '@/cli/project-assist';
-import type { Person, Project, Term, Company, Entity } from '@/context/types';
+import type { Person, Project, Term, Company, Entity, EntityRelationship } from '@/context/types';
  
 import { formatEntity, slugify, mergeArray } from './shared.js';
 
@@ -947,24 +947,51 @@ export async function handleEditProject(args: {
     );
 
     // Handle relationships
-    const existingRelationships = existingProject.relationships || {};
+    // Helper functions for relationships
+    const createEntityUri = (type: string, id: string): string => `redaksjon://${type}/${id}`;
+    const getIdFromUri = (uri: string): string | null => {
+        const match = uri.match(/^redaksjon:\/\/[^/]+\/(.+)$/);
+        return match ? match[1] : null;
+    };
+    const getEntityIdsByRelationshipType = (relationships: EntityRelationship[] | undefined, relationshipType: string): string[] => {
+        if (!relationships) return [];
+        return relationships
+            .filter(r => r.relationship === relationshipType)
+            .map(r => getIdFromUri(r.uri))
+            .filter((id): id is string => id !== null);
+    };
+    const setRelationships = (relationships: EntityRelationship[] | undefined, type: string, entityType: string, entityIds: string[]): EntityRelationship[] => {
+        const rels = relationships || [];
+        const filtered = rels.filter(r => r.relationship !== type);
+        const newRels = entityIds.map(id => ({ uri: createEntityUri(entityType, id), relationship: type }));
+        return [...filtered, ...newRels];
+    };
+    const addRelationship = (relationships: EntityRelationship[] | undefined, type: string, entityType: string, entityId: string): EntityRelationship[] => {
+        const rels = relationships || [];
+        const uri = createEntityUri(entityType, entityId);
+        const filtered = rels.filter(r => !(r.relationship === type && r.uri === uri));
+        return [...filtered, { uri, relationship: type }];
+    };
 
+    const existingChildren = getEntityIdsByRelationshipType(existingProject.relationships, 'child');
     const updatedChildren = mergeArray(
-        existingRelationships.children,
+        existingChildren,
         undefined,
         args.add_children,
         args.remove_children
     );
 
+    const existingSiblings = getEntityIdsByRelationshipType(existingProject.relationships, 'sibling');
     const updatedSiblings = mergeArray(
-        existingRelationships.siblings,
+        existingSiblings,
         undefined,
         args.add_siblings,
         args.remove_siblings
     );
 
+    const existingRelatedTerms = getEntityIdsByRelationshipType(existingProject.relationships, 'related_term');
     const updatedRelatedTerms = mergeArray(
-        existingRelationships.relatedTerms,
+        existingRelatedTerms,
         undefined,
         args.add_related_terms,
         args.remove_related_terms
@@ -1021,21 +1048,26 @@ export async function handleEditProject(args: {
     }
 
     // Handle relationships
-    if (args.parent !== undefined || updatedChildren || updatedSiblings || updatedRelatedTerms) {
-        updatedProject.relationships = {
-            ...existingRelationships,
-            ...(args.parent !== undefined && { parent: args.parent }),
-        };
-
-        if (updatedChildren !== undefined) {
-            updatedProject.relationships.children = updatedChildren;
-        }
-        if (updatedSiblings !== undefined) {
-            updatedProject.relationships.siblings = updatedSiblings;
-        }
-        if (updatedRelatedTerms !== undefined) {
-            updatedProject.relationships.relatedTerms = updatedRelatedTerms;
-        }
+    let relationships: EntityRelationship[] = existingProject.relationships ? [...existingProject.relationships] : [];
+    
+    if (args.parent !== undefined) {
+        relationships = addRelationship(relationships, 'parent', 'project', args.parent);
+    }
+    
+    if (updatedChildren !== undefined && updatedChildren !== existingChildren) {
+        relationships = setRelationships(relationships, 'child', 'project', updatedChildren);
+    }
+    
+    if (updatedSiblings !== undefined && updatedSiblings !== existingSiblings) {
+        relationships = setRelationships(relationships, 'sibling', 'project', updatedSiblings);
+    }
+    
+    if (updatedRelatedTerms !== undefined && updatedRelatedTerms !== existingRelatedTerms) {
+        relationships = setRelationships(relationships, 'related_term', 'term', updatedRelatedTerms);
+    }
+    
+    if (args.parent !== undefined || updatedChildren !== undefined || updatedSiblings !== undefined || updatedRelatedTerms !== undefined) {
+        updatedProject.relationships = relationships.length > 0 ? relationships : undefined;
     }
 
     await context.saveEntity(updatedProject, true);

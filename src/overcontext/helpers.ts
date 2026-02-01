@@ -38,23 +38,53 @@ export const removeProjectFromTerm = (term: Term, projectId: string): Term => {
  * Check if projectA is a parent of projectB.
  */
 export const isParentProject = (projectA: Project, projectB: Project): boolean => {
-    return projectB.relationships?.parent === projectA.id;
+    // Check new format
+    const parentRel = projectB.relationships?.find(
+        r => r.relationship === 'parent' || r.relationship === 'child_of' || r.relationship === 'part_of'
+    );
+    if (parentRel) {
+        const parentId = parentRel.uri.split('/').pop();
+        return parentId === projectA.id;
+    }
+    
+    return false;
 };
 
 /**
  * Check if projectA is a child of projectB.
  */
 export const isChildProject = (projectA: Project, projectB: Project): boolean => {
-    return projectA.relationships?.parent === projectB.id;
+    // Check new format
+    const parentRel = projectA.relationships?.find(
+        r => r.relationship === 'parent' || r.relationship === 'child_of' || r.relationship === 'part_of'
+    );
+    if (parentRel) {
+        const parentId = parentRel.uri.split('/').pop();
+        return parentId === projectB.id;
+    }
+    
+    return false;
 };
 
 /**
  * Check if two projects are siblings.
  */
 export const areSiblingProjects = (projectA: Project, projectB: Project): boolean => {
-    const aSiblings = projectA.relationships?.siblings || [];
-    const bSiblings = projectB.relationships?.siblings || [];
-    return aSiblings.includes(projectB.id) || bSiblings.includes(projectA.id);
+    // Check new format
+    const aSiblingRels = projectA.relationships?.filter(r => r.relationship === 'sibling') || [];
+    const bSiblingRels = projectB.relationships?.filter(r => r.relationship === 'sibling') || [];
+    
+    for (const rel of aSiblingRels) {
+        const siblingId = rel.uri.split('/').pop();
+        if (siblingId === projectB.id) return true;
+    }
+    
+    for (const rel of bSiblingRels) {
+        const siblingId = rel.uri.split('/').pop();
+        if (siblingId === projectA.id) return true;
+    }
+    
+    return false;
 };
 
 /**
@@ -65,10 +95,17 @@ export const getProjectRelationshipDistance = (projectA: Project, projectB: Proj
     if (projectA.id === projectB.id) return 0;
     if (isParentProject(projectA, projectB) || isChildProject(projectA, projectB)) return 1;
     if (areSiblingProjects(projectA, projectB)) return 2;
-  
-    if (projectA.relationships?.parent && projectB.relationships?.parent &&
-      projectA.relationships.parent === projectB.relationships.parent) {
-        return 2;
+    
+    // Check if they share a parent (new format)
+    const aParentRel = projectA.relationships?.find(r => r.relationship === 'parent' || r.relationship === 'child_of' || r.relationship === 'part_of');
+    const bParentRel = projectB.relationships?.find(r => r.relationship === 'parent' || r.relationship === 'child_of' || r.relationship === 'part_of');
+    
+    if (aParentRel && bParentRel) {
+        const aParentId = aParentRel.uri.split('/').pop();
+        const bParentId = bParentRel.uri.split('/').pop();
+        if (aParentId === bParentId) {
+            return 2;
+        }
     }
   
     return -1;

@@ -494,7 +494,8 @@ routing:
   structure: month
   filename_options: [date, time]
 relationships:
-  parent: parent`
+  - uri: redaksjon://project/parent
+    relationship: parent`
       );
 
       const context = await Context.create({ startingDir: tempDir });

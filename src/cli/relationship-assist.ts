@@ -160,7 +160,14 @@ function findSiblingCandidates(
         let score = 0;
         
         // If we have a suggested parent, check if this project shares that parent
-        if (suggestedParentId && project.relationships?.parent === suggestedParentId) {
+        const parentIds = project.relationships
+            ?.filter(r => r.relationship === 'parent')
+            .map(r => {
+                const match = r.uri.match(/^redaksjon:\/\/[^/]+\/(.+)$/);
+                return match ? match[1] : null;
+            })
+            .filter((id): id is string => id !== null) || [];
+        if (suggestedParentId && parentIds.includes(suggestedParentId)) {
             score += 100; // Very strong - shares parent
             reasons.push(`shares parent "${suggestedParentId}"`);
         }
