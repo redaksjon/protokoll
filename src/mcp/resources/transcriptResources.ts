@@ -7,23 +7,36 @@
 import type { McpResourceContents } from '../types';
 import { buildTranscriptUri, buildTranscriptsListUri } from '../uri';
 import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { resolve, relative } from 'node:path';
 import { listTranscripts } from '@/cli/transcript';
+import * as ServerConfig from '../serverConfig';
 
 /**
  * Read a single transcript resource
+ * 
+ * transcriptPath should be relative to the configured output directory
+ * (e.g., "2026/1/29-2027-riot-doc-voice-and-tone.md")
  */
 export async function readTranscriptResource(transcriptPath: string): Promise<McpResourceContents> {
-    // Handle both absolute and relative paths
+    // Get the configured output directory
+    const outputDirectory = ServerConfig.getOutputDirectory();
+    
+    // Resolve the transcript path relative to the output directory
+    // If it's already absolute, use it directly (for backwards compatibility)
     const fullPath = transcriptPath.startsWith('/')
         ? transcriptPath
-        : resolve(process.cwd(), transcriptPath);
+        : resolve(outputDirectory, transcriptPath);
 
     try {
         const content = await readFile(fullPath, 'utf-8');
         
+        // Always return URI with relative path (even if input was absolute)
+        const relativePath = transcriptPath.startsWith('/')
+            ? relative(outputDirectory, transcriptPath)
+            : transcriptPath;
+        
         return {
-            uri: buildTranscriptUri(transcriptPath),
+            uri: buildTranscriptUri(relativePath),
             mimeType: 'text/markdown',
             text: content,
         };
@@ -60,15 +73,24 @@ export async function readTranscriptsListResource(options: {
         endDate,
     });
 
+    // Get the configured output directory to convert absolute paths to relative
+    const outputDirectory = ServerConfig.getOutputDirectory();
+
     // Convert to resource format with URIs
-    const transcriptsWithUris = result.transcripts.map(t => ({
-        uri: buildTranscriptUri(t.path),
-        path: t.path,
-        filename: t.filename,
-        date: t.date,
-        time: t.time,
-        title: t.title,
-    }));
+    // Convert absolute paths to relative paths (relative to outputDirectory)
+    const transcriptsWithUris = result.transcripts.map(t => {
+        // Convert absolute path to relative path
+        const relativePath = relative(outputDirectory, t.path);
+        
+        return {
+            uri: buildTranscriptUri(relativePath),
+            path: t.path,
+            filename: t.filename,
+            date: t.date,
+            time: t.time,
+            title: t.title,
+        };
+    });
 
     const responseData = {
         directory,

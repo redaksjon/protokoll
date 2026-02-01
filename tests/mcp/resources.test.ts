@@ -8,6 +8,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as Resources from '../../src/mcp/resources';
 import * as Context from '../../src/context';
+import * as ServerConfig from '../../src/mcp/serverConfig';
 
 // Mock dependencies
 vi.mock('../../src/context', () => ({
@@ -16,6 +17,10 @@ vi.mock('../../src/context', () => ({
 
 vi.mock('../../src/cli/transcript', () => ({
     listTranscripts: vi.fn(),
+}));
+
+vi.mock('../../src/mcp/serverConfig', () => ({
+    getOutputDirectory: vi.fn(),
 }));
 
 vi.mock('../../src/mcp/uri', async (importOriginal) => {
@@ -74,6 +79,7 @@ describe('MCP Resources', () => {
         };
 
         vi.mocked(Context.create).mockResolvedValue(mockContext);
+        vi.mocked(ServerConfig.getOutputDirectory).mockReturnValue(`${tempDir}/output`);
         vi.clearAllMocks();
     });
 
@@ -161,15 +167,19 @@ describe('MCP Resources', () => {
         });
 
         it('should handle relative paths', async () => {
+            const outputDir = `${tempDir}/output`;
+            await fs.mkdir(outputDir, { recursive: true });
+            
             const transcriptPath = 'test.md';
-            await fs.writeFile(path.join(process.cwd(), transcriptPath), 'Content');
+            const fullPath = path.join(outputDir, transcriptPath);
+            await fs.writeFile(fullPath, 'Content');
 
             const result = await Resources.readTranscriptResource(transcriptPath);
 
             expect(result.text).toBe('Content');
             
             // Cleanup
-            await fs.unlink(path.join(process.cwd(), transcriptPath));
+            await fs.unlink(fullPath);
         });
 
         it('should throw error for missing file', async () => {

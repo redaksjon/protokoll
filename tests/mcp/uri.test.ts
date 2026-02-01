@@ -26,6 +26,18 @@ describe('URI Parser', () => {
                 expect(result.transcriptPath).toBe('path with spaces/file.md');
             });
 
+            it('should parse transcript URI with absolute path (double slash) for backwards compatibility', () => {
+                const result = parseUri('protokoll://transcript//Users/tobrien/activity/notes/file.md');
+                expect(result.transcriptPath).toBe('/Users/tobrien/activity/notes/file.md');
+                expect(result.transcriptPath.startsWith('/')).toBe(true);
+            });
+
+            it('should parse transcript URI with relative path', () => {
+                const result = parseUri('protokoll://transcript/2026/1/file.md');
+                expect(result.transcriptPath).toBe('2026/1/file.md');
+                expect(result.transcriptPath.startsWith('/')).toBe(false);
+            });
+
             it('should throw on empty transcript path', () => {
                 expect(() => parseUri('protokoll://transcript')).toThrow();
                 expect(() => parseUri('protokoll://transcript/')).toThrow();

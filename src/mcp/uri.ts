@@ -86,7 +86,29 @@ function parseTranscriptUri(
     params: Record<string, string>
 ): TranscriptUri {
     // protokoll://transcript/path/to/file.md
-    const transcriptPath = segments.slice(1).join('/');
+    // Handle both relative and absolute paths
+    // If URI has double slash after transcript, it's an absolute path
+    const withoutScheme = uri.substring(`${SCHEME}://`.length);
+    const [pathPart] = withoutScheme.split('?');
+    
+    // Check if path starts with transcript/ followed by / (absolute path)
+    const transcriptPrefix = 'transcript/';
+    let transcriptPath: string;
+    
+    if (pathPart.startsWith(transcriptPrefix)) {
+        // Extract everything after "transcript/"
+        const afterPrefix = pathPart.substring(transcriptPrefix.length);
+        // If it starts with /, it's an absolute path - preserve it
+        if (afterPrefix.startsWith('/')) {
+            transcriptPath = afterPrefix;
+        } else {
+            // Relative path - use segments
+            transcriptPath = segments.slice(1).join('/');
+        }
+    } else {
+        // Fallback to segments method
+        transcriptPath = segments.slice(1).join('/');
+    }
     
     if (!transcriptPath) {
         throw new Error(`Invalid transcript URI: ${uri}. No path specified.`);
