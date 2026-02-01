@@ -89,6 +89,8 @@ export async function readTranscriptsListResource(options: {
             date: t.date,
             time: t.time,
             title: t.title,
+            entities: t.entities,
+            hasRawTranscript: t.hasRawTranscript,
         };
     });
 

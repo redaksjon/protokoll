@@ -7,6 +7,12 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import * as Context from '@/context';
 import type { Entity } from '@/context/types';
 import type { ContextInstance } from '@/context';
+import { 
+    findPersonResilient, 
+    findCompanyResilient, 
+    findTermResilient, 
+    findProjectResilient 
+} from '@/utils/entityFinder';
 import {
     createUrlContent,
     createTextContent,
@@ -39,13 +45,13 @@ function getEntityByType(
 ): Entity | undefined {
     switch (entityType) {
         case 'person':
-            return context.getPerson(entityId);
+            return findPersonResilient(context, entityId);
         case 'company':
-            return context.getCompany(entityId);
+            return findCompanyResilient(context, entityId);
         case 'term':
-            return context.getTerm(entityId);
+            return findTermResilient(context, entityId);
         case 'project':
-            return context.getProject(entityId);
+            return findProjectResilient(context, entityId);
         default:
             return undefined;
     }

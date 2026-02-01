@@ -90,6 +90,7 @@ interface SessionData {
     sseClients: Set<ServerResponse>;
     initialized: boolean;
     lastActivity: number;
+    subscriptions: Set<string>; // Set of resource URIs this session is subscribed to
 }
 
 const sessions = new Map<string, SessionData>();
@@ -305,6 +306,7 @@ async function handlePost(req: IncomingMessage, res: ServerResponse) {
             sseClients: new Set(),
             initialized: false,
             lastActivity: Date.now(),
+            subscriptions: new Set(),
         };
         
         sessions.set(newSessionId, session);
@@ -483,6 +485,14 @@ async function handlePost(req: IncomingMessage, res: ServerResponse) {
             case 'tools/call': {
                 // Call the tool handler directly
                 const toolResult = await handleToolCall(params.name, params.arguments || {});
+                
+                // Send notifications for transcript-related changes
+                if (params.name === 'protokoll_edit_transcript' || 
+                    params.name === 'protokoll_provide_feedback' ||
+                    params.name === 'protokoll_combine_transcripts') {
+                    await sendTranscriptChangeNotifications(params.name, params.arguments || {}, toolResult);
+                }
+                
                 result = {
                     content: [{ type: 'text', text: JSON.stringify(toolResult, null, 2) }],
                 };
@@ -503,16 +513,52 @@ async function handlePost(req: IncomingMessage, res: ServerResponse) {
             }
             
             case 'resources/subscribe': {
-                // Resource subscriptions not supported
-                // Return success but don't actually subscribe (no-op)
-                // This prevents Cursor from showing errors
+                // Subscribe to resource changes
+                const uri = params.uri as string;
+                if (uri) {
+                    session.subscriptions.add(uri);
+                    // eslint-disable-next-line no-console
+                    console.log('\n─────────────────────────────────────────────────────────────────');
+                    // eslint-disable-next-line no-console
+                    console.log('📝 SUBSCRIPTION CREATED');
+                    // eslint-disable-next-line no-console
+                    console.log('─────────────────────────────────────────────────────────────────');
+                    // eslint-disable-next-line no-console
+                    console.log(`Session:    ${sessionId}`);
+                    // eslint-disable-next-line no-console
+                    console.log(`Resource:   ${uri}`);
+                    // eslint-disable-next-line no-console
+                    console.log(`Total subscriptions for session: ${session.subscriptions.size}`);
+                    // eslint-disable-next-line no-console
+                    console.log('─────────────────────────────────────────────────────────────────\n');
+                }
                 result = {};
                 break;
             }
             
             case 'resources/unsubscribe': {
-                // Resource subscriptions not supported
-                // Return success but don't actually unsubscribe (no-op)
+                // Unsubscribe from resource changes
+                const uri = params.uri as string;
+                if (uri) {
+                    const wasSubscribed = session.subscriptions.has(uri);
+                    session.subscriptions.delete(uri);
+                    // eslint-disable-next-line no-console
+                    console.log('\n─────────────────────────────────────────────────────────────────');
+                    // eslint-disable-next-line no-console
+                    console.log('📝 SUBSCRIPTION REMOVED');
+                    // eslint-disable-next-line no-console
+                    console.log('─────────────────────────────────────────────────────────────────');
+                    // eslint-disable-next-line no-console
+                    console.log(`Session:    ${sessionId}`);
+                    // eslint-disable-next-line no-console
+                    console.log(`Resource:   ${uri}`);
+                    // eslint-disable-next-line no-console
+                    console.log(`Was subscribed: ${wasSubscribed}`);
+                    // eslint-disable-next-line no-console
+                    console.log(`Total subscriptions for session: ${session.subscriptions.size}`);
+                    // eslint-disable-next-line no-console
+                    console.log('─────────────────────────────────────────────────────────────────\n');
+                }
                 result = {};
                 break;
             }
@@ -745,6 +791,252 @@ async function main() {
         });
     });
 }
+
+// ============================================================================
+// Notification Helpers
+// ============================================================================
+
+/**
+ * Send notifications when transcripts are changed
+ */
+async function sendTranscriptChangeNotifications(
+    toolName: string,
+    args: Record<string, unknown>,
+    result: unknown
+): Promise<void> {
+    // eslint-disable-next-line no-console
+    console.log('\n─────────────────────────────────────────────────────────────────');
+    // eslint-disable-next-line no-console
+    console.log('📢 TRANSCRIPT CHANGE DETECTED - Sending notifications');
+    // eslint-disable-next-line no-console
+    console.log('─────────────────────────────────────────────────────────────────');
+    // eslint-disable-next-line no-console
+    console.log(`Tool:         ${toolName}`);
+    // eslint-disable-next-line no-console
+    console.log(`Arguments:    ${JSON.stringify(args, null, 2)}`);
+    // eslint-disable-next-line no-console
+    console.log('─────────────────────────────────────────────────────────────────\n');
+    
+    try {
+        // Import needed modules
+        const { buildTranscriptUri, buildTranscriptsListUri } = await import('./uri');
+        const ServerConfig = await import('./serverConfig');
+        const { relative } = await import('node:path');
+        
+        const outputDirectory = ServerConfig.getOutputDirectory();
+        
+        // Notify about transcripts list changes (always)
+        // We need to determine the directory from args or use a default
+        const directory = (args.contextDirectory as string) || outputDirectory;
+        const transcriptsListUri = buildTranscriptsListUri({ directory });
+        // eslint-disable-next-line no-console
+        console.log(`📋 Notifying about transcripts list change: ${transcriptsListUri}`);
+        notifySubscribedClients(transcriptsListUri, {
+            method: 'notifications/resources_changed',
+        });
+        
+        // Notify about individual transcript changes
+        if (toolName === 'protokoll_edit_transcript') {
+            // Use outputPath from result (full absolute path) instead of transcriptPath from args
+            const editResult = result as { outputPath?: string; renamed?: boolean; originalPath?: string };
+            
+            // Always notify about the output path (where the transcript is now)
+            if (editResult?.outputPath) {
+                // outputPath is the full absolute path, convert to relative for URI
+                const relativePath = relative(outputDirectory, editResult.outputPath);
+                const transcriptUri = buildTranscriptUri(relativePath);
+                
+                // eslint-disable-next-line no-console
+                console.log(`📄 Notifying about individual transcript change: ${transcriptUri}`);
+                // eslint-disable-next-line no-console
+                console.log(`   Full path: ${editResult.outputPath}`);
+                // eslint-disable-next-line no-console
+                console.log(`   Relative path: ${relativePath}`);
+                notifySubscribedClients(transcriptUri, {
+                    method: 'notifications/resource_changed',
+                    params: { uri: transcriptUri },
+                });
+            }
+            
+            // If transcript was renamed, also notify about the old path (for cleanup)
+            if (editResult?.renamed && editResult.originalPath && editResult.originalPath !== editResult.outputPath) {
+                const oldRelativePath = relative(outputDirectory, editResult.originalPath);
+                const oldTranscriptUri = buildTranscriptUri(oldRelativePath);
+                // eslint-disable-next-line no-console
+                console.log(`📄 Notifying about renamed transcript (old path, for cleanup): ${oldTranscriptUri}`);
+                notifySubscribedClients(oldTranscriptUri, {
+                    method: 'notifications/resource_changed',
+                    params: { uri: oldTranscriptUri },
+                });
+            }
+        } else if (toolName === 'protokoll_provide_feedback' || toolName === 'protokoll_combine_transcripts') {
+            // For feedback and combine, check if result has outputPath, otherwise use transcriptPath from args
+            const feedbackResult = result as { outputPath?: string };
+            const transcriptPath = (feedbackResult?.outputPath || args.transcriptPath) as string;
+            
+            if (transcriptPath) {
+                // If transcriptPath is a full absolute path, convert to relative; otherwise use as-is
+                const relativePath = transcriptPath.startsWith('/') || transcriptPath.includes('\\')
+                    ? relative(outputDirectory, transcriptPath)
+                    : transcriptPath;
+                const transcriptUri = buildTranscriptUri(relativePath);
+                
+                // eslint-disable-next-line no-console
+                console.log(`📄 Notifying about modified transcript: ${transcriptUri}`);
+                // eslint-disable-next-line no-console
+                console.log(`   Input path: ${transcriptPath}`);
+                // eslint-disable-next-line no-console
+                console.log(`   Relative path: ${relativePath}`);
+                notifySubscribedClients(transcriptUri, {
+                    method: 'notifications/resource_changed',
+                    params: { uri: transcriptUri },
+                });
+            }
+        }
+    } catch (error) {
+        // Don't fail the tool call if notifications fail
+        // eslint-disable-next-line no-console
+        console.error('\n❌ ERROR sending transcript change notifications:');
+        // eslint-disable-next-line no-console
+        console.error(error);
+        // eslint-disable-next-line no-console
+        console.error('─────────────────────────────────────────────────────────────────\n');
+    }
+}
+
+/**
+ * Send a notification to all sessions subscribed to a resource
+ */
+function notifySubscribedClients(resourceUri: string, notification: {
+    method: string;
+    params?: unknown;
+}): void {
+    let matchedSessions = 0;
+    let totalSessions = 0;
+    
+    for (const [sessionId, session] of sessions.entries()) {
+        totalSessions++;
+        // Check if this session is subscribed to this resource
+        if (session.subscriptions.has(resourceUri)) {
+            matchedSessions++;
+            // eslint-disable-next-line no-console
+            console.log('\n─────────────────────────────────────────────────────────────────');
+            // eslint-disable-next-line no-console
+            console.log('🔔 SUBSCRIPTION MATCHED - Sending notification');
+            // eslint-disable-next-line no-console
+            console.log('─────────────────────────────────────────────────────────────────');
+            // eslint-disable-next-line no-console
+            console.log(`Session:      ${sessionId}`);
+            // eslint-disable-next-line no-console
+            console.log(`Resource URI: ${resourceUri}`);
+            // eslint-disable-next-line no-console
+            console.log(`Notification: ${notification.method}`);
+            // eslint-disable-next-line no-console
+            console.log(`SSE Clients:  ${session.sseClients.size}`);
+            // eslint-disable-next-line no-console
+            console.log(`Total subscriptions for session: ${session.subscriptions.size}`);
+            // eslint-disable-next-line no-console
+            console.log('─────────────────────────────────────────────────────────────────\n');
+            
+            sendNotificationToSession(session, notification, resourceUri);
+        }
+    }
+    
+    if (matchedSessions === 0) {
+        // eslint-disable-next-line no-console
+        console.log('\n─────────────────────────────────────────────────────────────────');
+        // eslint-disable-next-line no-console
+        console.log('⚠️  NO SUBSCRIPTION MATCH');
+        // eslint-disable-next-line no-console
+        console.log('─────────────────────────────────────────────────────────────────');
+        // eslint-disable-next-line no-console
+        console.log(`Resource URI: ${resourceUri}`);
+        // eslint-disable-next-line no-console
+        console.log(`Notification: ${notification.method}`);
+        // eslint-disable-next-line no-console
+        console.log(`Total sessions checked: ${totalSessions}`);
+        // eslint-disable-next-line no-console
+        console.log('─────────────────────────────────────────────────────────────────\n');
+    }
+}
+
+/**
+ * Send a notification to all sessions (for global events like resources/list changed)
+ */
+function notifyAllClients(notification: {
+    method: string;
+    params?: unknown;
+}): void {
+    // eslint-disable-next-line no-console
+    console.log('\n─────────────────────────────────────────────────────────────────');
+    // eslint-disable-next-line no-console
+    console.log('📢 BROADCAST NOTIFICATION - Sending to all sessions');
+    // eslint-disable-next-line no-console
+    console.log('─────────────────────────────────────────────────────────────────');
+    // eslint-disable-next-line no-console
+    console.log(`Notification: ${notification.method}`);
+    // eslint-disable-next-line no-console
+    console.log(`Total sessions: ${sessions.size}`);
+    // eslint-disable-next-line no-console
+    console.log('─────────────────────────────────────────────────────────────────\n');
+    
+    for (const [sessionId, session] of sessions.entries()) {
+        // eslint-disable-next-line no-console
+        console.log(`📤 Sending broadcast to session: ${sessionId} (${session.sseClients.size} SSE client(s))`);
+        sendNotificationToSession(session, notification);
+    }
+}
+
+/**
+ * Send a notification to a specific session via SSE
+ */
+function sendNotificationToSession(session: SessionData, notification: {
+    method: string;
+    params?: unknown;
+}, resourceUri?: string): void {
+    const notificationMessage = {
+        jsonrpc: '2.0' as const,
+        method: notification.method,
+        params: notification.params,
+    };
+
+    const sseMessage = `event: notification\ndata: ${JSON.stringify(notificationMessage)}\n\n`;
+
+    let sentCount = 0;
+    let errorCount = 0;
+
+    for (const client of session.sseClients) {
+        try {
+            client.write(sseMessage);
+            sentCount++;
+        } catch (error) {
+            // Client may have disconnected, remove it
+            errorCount++;
+            // eslint-disable-next-line no-console
+            console.error(`❌ Error sending SSE notification to client:`, error);
+            session.sseClients.delete(client);
+        }
+    }
+    
+    if (sentCount > 0) {
+        // eslint-disable-next-line no-console
+        console.log(`✅ SSE notification sent to ${sentCount} client(s) in session ${session.sessionId}`);
+        if (resourceUri) {
+            // eslint-disable-next-line no-console
+            console.log(`   Resource: ${resourceUri}`);
+        }
+        // eslint-disable-next-line no-console
+        console.log(`   Notification: ${notification.method}`);
+    }
+    
+    if (errorCount > 0) {
+        // eslint-disable-next-line no-console
+        console.log(`⚠️  Failed to send to ${errorCount} client(s) (disconnected)`);
+    }
+}
+
+// Export notification functions for use by other modules
+export { notifySubscribedClients, notifyAllClients };
 
 // ES module equivalent of CommonJS `require.main === module`
 const isMainModule = import.meta.url.startsWith('file:') &&

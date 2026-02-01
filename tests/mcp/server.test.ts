@@ -1104,7 +1104,7 @@ Content from part 2.
 
             await expect(handleEditTranscript({
                 transcriptPath,
-            })).rejects.toThrow('Must specify title and/or projectId');
+            })).rejects.toThrow('Must specify at least one of: title, projectId, tagsToAdd, or tagsToRemove');
         });
     });
 

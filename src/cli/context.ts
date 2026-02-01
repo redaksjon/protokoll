@@ -13,6 +13,7 @@ import * as Context from '../context';
 import { Entity, Person, Project, Company, Term, IgnoredTerm, EntityType, EntityRelationship } from '../context/types';
 import * as ProjectAssist from './project-assist';
 import * as RelationshipAssist from './relationship-assist';
+import { findTermResilient } from '../utils/entityFinder';
 
 // Helper functions for working with relationships in new format
 const createEntityUri = (type: string, id: string): string => {
@@ -1299,11 +1300,7 @@ const editTerm = async (
         removeProject?: string[];
     }
 ): Promise<void> => {
-    const term = context.getTerm(id);
-    if (!term) {
-        print(`Error: Term "${id}" not found`);
-        process.exit(1);
-    }
+    const term = findTermResilient(context, id);
 
     // Helper to merge arrays
     const mergeArray = (
@@ -1487,18 +1484,8 @@ const mergeTerms = async (
     options: { force?: boolean }
 ): Promise<void> => {
     // Get both terms
-    const sourceTerm = context.getTerm(sourceId);
-    const targetTerm = context.getTerm(targetId);
-    
-    if (!sourceTerm) {
-        print(`Error: Source term "${sourceId}" not found.`);
-        process.exit(1);
-    }
-    
-    if (!targetTerm) {
-        print(`Error: Target term "${targetId}" not found.`);
-        process.exit(1);
-    }
+    const sourceTerm = findTermResilient(context, sourceId);
+    const targetTerm = findTermResilient(context, targetId);
     
     // Show what will be merged
     print(`\nMerging terms:`);

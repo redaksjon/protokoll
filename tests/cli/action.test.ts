@@ -511,7 +511,7 @@ describe('combineTranscripts', () => {
 
         await expect(
             combineTranscripts([file1], { projectId: 'non-existent' })
-        ).rejects.toThrow('Project not found: non-existent');
+        ).rejects.toThrow(/Project not found: "non-existent"/);
     });
 
     it('should update metadata when changing project', async () => {
@@ -645,7 +645,7 @@ describe('editTranscript', () => {
 
         await expect(
             editTranscript(file, { projectId: 'non-existent' })
-        ).rejects.toThrow('Project not found: non-existent');
+        ).rejects.toThrow(/Project not found: "non-existent"/);
     });
 });
 

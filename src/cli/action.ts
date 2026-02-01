@@ -16,6 +16,7 @@ import * as os from 'node:os';
 import * as Context from '../context';
 import * as Routing from '../routing';
 import { Project } from '../context/types';
+import { findProjectResilient } from '../utils/entityFinder';
 
 // Helper to print to stdout
 const print = (text: string) => process.stdout.write(text + '\n');
@@ -319,10 +320,7 @@ export const combineTranscripts = async (
     let targetProject: Project | undefined;
     
     if (options.projectId) {
-        targetProject = context.getProject(options.projectId);
-        if (!targetProject) {
-            throw new Error(`Project not found: ${options.projectId}`);
-        }
+        targetProject = findProjectResilient(context, options.projectId);
         
         // Update metadata with new project
         baseMetadata.project = targetProject.name;
@@ -586,6 +584,8 @@ export const editTranscript = async (
     options: {
         title?: string;
         projectId?: string;
+        tagsToAdd?: string[];
+        tagsToRemove?: string[];
         dryRun?: boolean;
         verbose?: boolean;
         contextDirectory?: string;
@@ -602,10 +602,7 @@ export const editTranscript = async (
     let targetProject: Project | undefined;
     
     if (options.projectId) {
-        targetProject = context.getProject(options.projectId);
-        if (!targetProject) {
-            throw new Error(`Project not found: ${options.projectId}`);
-        }
+        targetProject = findProjectResilient(context, options.projectId);
     }
     
     // Use new title if provided, otherwise keep existing
@@ -620,6 +617,27 @@ export const editTranscript = async (
         if (targetProject.routing?.destination) {
             updatedMetadata.destination = expandPath(targetProject.routing.destination);
         }
+    }
+    
+    // Handle tags
+    if (options.tagsToAdd || options.tagsToRemove) {
+        const currentTags = new Set(updatedMetadata.tags || []);
+        
+        // Remove tags first
+        if (options.tagsToRemove) {
+            for (const tag of options.tagsToRemove) {
+                currentTags.delete(tag);
+            }
+        }
+        
+        // Add tags (will automatically deduplicate)
+        if (options.tagsToAdd) {
+            for (const tag of options.tagsToAdd) {
+                currentTags.add(tag);
+            }
+        }
+        
+        updatedMetadata.tags = Array.from(currentTags).sort();
     }
     
     // Build the updated document

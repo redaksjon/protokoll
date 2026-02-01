@@ -7,6 +7,13 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import * as Context from '@/context';
 import * as ProjectAssist from '@/cli/project-assist';
 import type { Person, Project, Term, Company, Entity, EntityRelationship } from '@/context/types';
+import { 
+    findPersonResilient, 
+    findTermResilient, 
+    findCompanyResilient, 
+    findProjectResilient,
+    findIgnoredResilient 
+} from '@/utils/entityFinder';
  
 import { formatEntity, slugify, mergeArray } from './shared.js';
 
@@ -704,10 +711,7 @@ export async function handleEditPerson(args: {
         throw new Error('No .protokoll directory found. Initialize context first.');
     }
 
-    const existingPerson = context.getPerson(args.id);
-    if (!existingPerson) {
-        throw new Error(`Person "${args.id}" not found`);
-    }
+    const existingPerson = findPersonResilient(context, args.id);
 
     const updatedSoundsLike = mergeArray(
         existingPerson.sounds_like,
@@ -906,10 +910,7 @@ export async function handleEditProject(args: {
         throw new Error('No .protokoll directory found. Initialize context first.');
     }
 
-    const existingProject = context.getProject(args.id);
-    if (!existingProject) {
-        throw new Error(`Project "${args.id}" not found`);
-    }
+    const existingProject = findProjectResilient(context, args.id);
 
     const updatedSoundsLike = mergeArray(
         existingProject.sounds_like,
@@ -1125,10 +1126,7 @@ export async function handleUpdateProject(args: {
         throw new Error('No .protokoll directory found. Initialize context first.');
     }
 
-    const existingProject = context.getProject(args.id);
-    if (!existingProject) {
-        throw new Error(`Project "${args.id}" not found`);
-    }
+    const existingProject = findProjectResilient(context, args.id);
 
     const smartConfig = context.getSmartAssistanceConfig();
     if (!smartConfig.enabled) {
@@ -1333,10 +1331,7 @@ export async function handleUpdateTerm(args: {
         throw new Error('No .protokoll directory found. Initialize context first.');
     }
 
-    const existingTerm = context.getTerm(args.id);
-    if (!existingTerm) {
-        throw new Error(`Term "${args.id}" not found`);
-    }
+    const existingTerm = findTermResilient(context, args.id);
 
     const smartConfig = context.getSmartAssistanceConfig();
     if (!smartConfig.enabled || smartConfig.termsEnabled === false) {
@@ -1421,16 +1416,8 @@ export async function handleMergeTerms(args: {
         throw new Error('No .protokoll directory found. Initialize context first.');
     }
 
-    const sourceTerm = context.getTerm(args.sourceId);
-    const targetTerm = context.getTerm(args.targetId);
-
-    if (!sourceTerm) {
-        throw new Error(`Source term "${args.sourceId}" not found`);
-    }
-
-    if (!targetTerm) {
-        throw new Error(`Target term "${args.targetId}" not found`);
-    }
+    const sourceTerm = findTermResilient(context, args.sourceId);
+    const targetTerm = findTermResilient(context, args.targetId);
 
     // Merge metadata
     const mergedTerm: Term = {
@@ -1522,27 +1509,25 @@ export async function handleDeleteEntity(args: { entityType: string; entityId: s
         startingDir: args.contextDirectory || process.cwd(),
     });
 
-    let entity: Entity | undefined;
+    let entity: Entity;
     switch (args.entityType) {
         case 'project':
-            entity = context.getProject(args.entityId);
+            entity = findProjectResilient(context, args.entityId);
             break;
         case 'person':
-            entity = context.getPerson(args.entityId);
+            entity = findPersonResilient(context, args.entityId);
             break;
         case 'term':
-            entity = context.getTerm(args.entityId);
+            entity = findTermResilient(context, args.entityId);
             break;
         case 'company':
-            entity = context.getCompany(args.entityId);
+            entity = findCompanyResilient(context, args.entityId);
             break;
         case 'ignored':
-            entity = context.getIgnored(args.entityId);
+            entity = findIgnoredResilient(context, args.entityId);
             break;
-    }
-
-    if (!entity) {
-        throw new Error(`${args.entityType} "${args.entityId}" not found`);
+        default:
+            throw new Error(`Unknown entity type: ${args.entityType}`);
     }
 
     const deleted = await context.deleteEntity(entity);

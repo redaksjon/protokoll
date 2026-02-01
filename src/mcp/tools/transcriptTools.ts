@@ -157,7 +157,7 @@ export const listTranscriptsTool: Tool = {
 export const editTranscriptTool: Tool = {
     name: 'protokoll_edit_transcript',
     description:
-        'Edit an existing transcript\'s title and/or project assignment. ' +
+        'Edit an existing transcript\'s title, project assignment, and/or tags. ' +
         'You can provide either an absolute path OR just a filename/partial filename. ' +
         'IMPORTANT: When you change the title, this tool RENAMES THE FILE to match the new title (slugified). ' +
         'Always use this tool instead of directly editing transcript files when changing titles. ' +
@@ -179,6 +179,16 @@ export const editTranscriptTool: Tool = {
             projectId: {
                 type: 'string',
                 description: 'New project ID to assign',
+            },
+            tagsToAdd: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Tags to add to the transcript (will be deduplicated with existing tags)',
+            },
+            tagsToRemove: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Tags to remove from the transcript',
             },
             contextDirectory: {
                 type: 'string',
@@ -341,18 +351,22 @@ export async function handleEditTranscript(args: {
     transcriptPath: string;
     title?: string;
     projectId?: string;
+    tagsToAdd?: string[];
+    tagsToRemove?: string[];
     contextDirectory?: string;
 }) {
     // Find the transcript (handles both paths and filenames)
     const transcriptPath = await findTranscript(args.transcriptPath, args.contextDirectory);
 
-    if (!args.title && !args.projectId) {
-        throw new Error('Must specify title and/or projectId');
+    if (!args.title && !args.projectId && !args.tagsToAdd && !args.tagsToRemove) {
+        throw new Error('Must specify at least one of: title, projectId, tagsToAdd, or tagsToRemove');
     }
 
     const result = await editTranscript(transcriptPath, {
         title: args.title,
         projectId: args.projectId,
+        tagsToAdd: args.tagsToAdd,
+        tagsToRemove: args.tagsToRemove,
         contextDirectory: args.contextDirectory,
     });
 
