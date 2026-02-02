@@ -13,7 +13,7 @@ import { listTranscripts } from '@/cli/transcript';
 import { processFeedback, applyChanges, type FeedbackContext } from '@/cli/feedback';
 import { DEFAULT_MODEL } from '@/constants';
 
-import { fileExists, getConfiguredDirectory, sanitizePath } from './shared.js';
+import { fileExists, getConfiguredDirectory, sanitizePath, validatePathWithinDirectory, validatePathWithinOutputDirectory } from './shared.js';
 import * as Metadata from '@/util/metadata';
 
 // ============================================================================
@@ -41,6 +41,11 @@ async function findTranscript(
     
     // Try to resolve as a relative path from the output directory
     const resolvedPath = resolve(outputDirectory, normalizedPath);
+    
+    // Validate that the resolved path stays within the output directory
+    // This prevents path traversal attacks using ../ sequences
+    validatePathWithinDirectory(resolvedPath, outputDirectory);
+    
     if (await fileExists(resolvedPath)) {
         return resolvedPath;
     }
@@ -505,6 +510,10 @@ export async function handleEditTranscript(args: {
         contextDirectory: args.contextDirectory,
     });
 
+    // Validate that the output path stays within the output directory
+    // This prevents project routing from writing files outside the allowed directory
+    await validatePathWithinOutputDirectory(result.outputPath, args.contextDirectory);
+
     // Write the updated content
     await mkdir(dirname(result.outputPath), { recursive: true });
     await writeFile(result.outputPath, result.content, 'utf-8');
@@ -552,6 +561,10 @@ export async function handleCombineTranscripts(args: {
         projectId: args.projectId,
         contextDirectory: args.contextDirectory,
     });
+
+    // Validate that the output path stays within the output directory
+    // This prevents project routing from writing files outside the allowed directory
+    await validatePathWithinOutputDirectory(result.outputPath, args.contextDirectory);
 
     // Write the combined transcript
     await mkdir(dirname(result.outputPath), { recursive: true });

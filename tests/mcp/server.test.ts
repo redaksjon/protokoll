@@ -31,16 +31,25 @@ vi.mock('../../src/util/openai', () => ({
 let mockTempDir: string | null = null;
 vi.mock('../../src/mcp/tools/shared', async () => {
     const actual = await vi.importActual('../../src/mcp/tools/shared');
+    const actualModule = actual as any;
+    
+    // Mock getConfiguredDirectory to return tempDir for outputDirectory
+    const mockGetConfiguredDirectory = vi.fn(async (key: string, _contextDirectory?: string) => {
+        if (key === 'outputDirectory' && mockTempDir) {
+            return mockTempDir;
+        }
+        // For other keys, use the actual implementation
+        return actualModule.getConfiguredDirectory(key, _contextDirectory);
+    });
+    
     return {
         ...actual,
-        getConfiguredDirectory: vi.fn(async (key: string, _contextDirectory?: string) => {
-            if (key === 'outputDirectory' && mockTempDir) {
-                return mockTempDir;
-            }
-            // For other keys, use the actual implementation
-            const actualModule = actual as any;
-            return actualModule.getConfiguredDirectory(key, _contextDirectory);
-        }),
+        getConfiguredDirectory: mockGetConfiguredDirectory,
+        // Override validatePathWithinOutputDirectory to use the mocked getConfiguredDirectory
+        validatePathWithinOutputDirectory: async (resolvedPath: string, _contextDirectory?: string) => {
+            const outputDirectory = await mockGetConfiguredDirectory('outputDirectory', _contextDirectory);
+            actualModule.validatePathWithinDirectory(resolvedPath, outputDirectory);
+        },
     };
 });
 

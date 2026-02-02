@@ -88,6 +88,50 @@ export async function getConfiguredDirectory(
 }
 
 /**
+ * Validate that a resolved path stays within a base directory
+ * This prevents path traversal attacks using ../ sequences
+ * 
+ * @param resolvedPath - The resolved absolute path to validate
+ * @param baseDirectory - The base directory that paths must stay within
+ * @throws Error if the path escapes the base directory
+ */
+export function validatePathWithinDirectory(
+    resolvedPath: string,
+    baseDirectory: string
+): void {
+    // Normalize both paths to handle any ../ sequences
+    const normalizedTarget = resolve(resolvedPath);
+    const normalizedBase = resolve(baseDirectory);
+    
+    // Ensure base directory ends with separator for proper prefix matching
+    const basePath = normalizedBase.endsWith('/') ? normalizedBase : normalizedBase + '/';
+    
+    // Check if the target path is within the base directory
+    // Must either be exactly the base dir, or start with base dir + separator
+    if (normalizedTarget !== normalizedBase && !normalizedTarget.startsWith(basePath)) {
+        throw new Error(
+            `Security error: Path "${resolvedPath}" is outside the allowed directory "${baseDirectory}". ` +
+            `Path traversal is not allowed.`
+        );
+    }
+}
+
+/**
+ * Async version of validatePathWithinDirectory that gets the output directory from config
+ * 
+ * @param resolvedPath - The resolved absolute path to validate
+ * @param contextDirectory - Optional context directory for config lookup
+ * @throws Error if the path escapes the output directory
+ */
+export async function validatePathWithinOutputDirectory(
+    resolvedPath: string,
+    contextDirectory?: string
+): Promise<void> {
+    const outputDirectory = await getConfiguredDirectory('outputDirectory', contextDirectory);
+    validatePathWithinDirectory(resolvedPath, outputDirectory);
+}
+
+/**
  * Convert an absolute file path to a relative path (relative to output directory)
  * This ensures no absolute paths are exposed to HTTP MCP clients
  * 
