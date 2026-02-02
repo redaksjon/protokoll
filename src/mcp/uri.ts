@@ -173,7 +173,7 @@ function parseTranscriptsListUri(
     segments: string[],
     params: Record<string, string>
 ): TranscriptsListUri {
-    // protokoll://transcripts?directory={dir}&startDate={date}&...
+    // protokoll://transcripts?directory={dir}&startDate={date}&projectId={id}&...
     const directory = params.directory || '';
 
     return {
@@ -186,6 +186,7 @@ function parseTranscriptsListUri(
         endDate: params.endDate,
         limit: params.limit ? parseInt(params.limit, 10) : undefined,
         offset: params.offset ? parseInt(params.offset, 10) : undefined,
+        projectId: params.projectId,
     };
 }
 
@@ -272,20 +273,23 @@ export function buildConfigUri(configPath?: string): string {
  * Build a transcripts list URI
  */
 export function buildTranscriptsListUri(options: {
-    directory: string;
+    directory?: string;
     startDate?: string;
     endDate?: string;
     limit?: number;
     offset?: number;
+    projectId?: string;
 }): string {
     const params = new URLSearchParams();
-    params.set('directory', options.directory);
+    if (options.directory) params.set('directory', options.directory);
     if (options.startDate) params.set('startDate', options.startDate);
     if (options.endDate) params.set('endDate', options.endDate);
     if (options.limit !== undefined) params.set('limit', String(options.limit));
     if (options.offset !== undefined) params.set('offset', String(options.offset));
+    if (options.projectId) params.set('projectId', options.projectId);
     
-    return `${SCHEME}://transcripts?${params.toString()}`;
+    const queryString = params.toString();
+    return queryString ? `${SCHEME}://transcripts?${queryString}` : `${SCHEME}://transcripts`;
 }
 
 /**

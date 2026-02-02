@@ -58,17 +58,20 @@ export async function readTranscriptResource(transcriptPath: string): Promise<Mc
  * Read a list of transcripts with filtering
  */
 export async function readTranscriptsListResource(options: {
-    directory: string;
+    directory?: string;
     startDate?: string;
     endDate?: string;
     limit?: number;
     offset?: number;
+    projectId?: string;
 }): Promise<McpResourceContents> {
-    const { directory, startDate, endDate, limit = 50, offset = 0 } = options;
-
-    if (!directory) {
-        throw new Error('Directory is required for transcripts list');
-    }
+    const { startDate, endDate, limit = 50, offset = 0, projectId } = options;
+    
+    // Get the configured output directory to use as fallback
+    const outputDirectory = ServerConfig.getOutputDirectory();
+    
+    // Use provided directory or fall back to configured outputDirectory
+    const directory = options.directory || outputDirectory;
 
     const result = await listTranscripts({
         directory,
@@ -77,10 +80,8 @@ export async function readTranscriptsListResource(options: {
         sortBy: 'date',
         startDate,
         endDate,
+        projectId,
     });
-
-    // Get the configured output directory to convert absolute paths to relative
-    const outputDirectory = ServerConfig.getOutputDirectory();
 
     // Convert to resource format with URIs
     // Convert absolute paths to relative paths (relative to outputDirectory)
@@ -119,8 +120,16 @@ export async function readTranscriptsListResource(options: {
         },
     };
 
+    // Build URI with the actual directory used (may be fallback from config)
     return {
-        uri: buildTranscriptsListUri(options),
+        uri: buildTranscriptsListUri({
+            directory,
+            startDate,
+            endDate,
+            limit,
+            offset,
+            projectId,
+        }),
         mimeType: 'application/json',
         text: JSON.stringify(responseData, null, 2),
     };

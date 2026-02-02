@@ -27,6 +27,11 @@ async function findTranscript(
     filenameOrPath: string,
     contextDirectory?: string
 ): Promise<string> {
+    // Guard against undefined/null/empty values
+    if (!filenameOrPath || typeof filenameOrPath !== 'string') {
+        throw new Error('transcriptPath is required and must be a non-empty string');
+    }
+    
     // If it's already an absolute path that exists, use it
     if (filenameOrPath.startsWith('/') && await fileExists(filenameOrPath)) {
         return filenameOrPath;

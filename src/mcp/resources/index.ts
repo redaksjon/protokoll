@@ -75,6 +75,7 @@ export async function handleReadResource(uri: string): Promise<McpResourceConten
                 endDate: listUri.endDate,
                 limit: listUri.limit,
                 offset: listUri.offset,
+                projectId: listUri.projectId,
             });
         }
         case 'entities-list':

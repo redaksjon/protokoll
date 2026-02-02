@@ -268,6 +268,7 @@ export interface ListTranscriptsOptions {
     startDate?: string;
     endDate?: string;
     search?: string;
+    projectId?: string;
 }
 
 export interface ListTranscriptsResult {
@@ -290,6 +291,7 @@ export const listTranscripts = async (options: ListTranscriptsOptions): Promise<
         startDate,
         endDate,
         search,
+        projectId,
     } = options;
     
     const absoluteDir = path.isAbsolute(directory) 
@@ -347,6 +349,14 @@ export const listTranscripts = async (options: ListTranscriptsOptions): Promise<
         
         // Parse entity metadata from transcript
         const entities = Metadata.parseEntityMetadata(content);
+        
+        // Apply project filtering if projectId is specified
+        if (projectId) {
+            const hasProject = entities?.projects?.some(p => p.id === projectId);
+            if (!hasProject) {
+                continue; // Skip this transcript if it doesn't have the specified project
+            }
+        }
         
         transcripts.push({
             path: filePath,
