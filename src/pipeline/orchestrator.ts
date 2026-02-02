@@ -150,6 +150,61 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
             .map(word => word.charAt(0).toUpperCase() + word.slice(1))
             .join(' ');
     };
+    
+    // Helper to check if a title is meaningful (not just numbers/timestamps)
+    const isMeaningfulTitle = (title: string | undefined): boolean => {
+        if (!title) return false;
+        // Check if title is mostly numbers (timestamp-like) or very short fragments
+        const stripped = title.replace(/\s+/g, '');
+        const numberRatio = (stripped.match(/\d/g) || []).length / stripped.length;
+        // Reject if: mostly numbers, too short, or common bad patterns
+        if (numberRatio > 0.5) return false;
+        if (stripped.length < 3) return false;
+        // Reject titles that are just common words without context
+        const badPatterns = /^(i|i have|i am|the|a|an|um|uh|so|well|okay|oh|hey|hi)$/i;
+        if (badPatterns.test(title.trim())) return false;
+        return true;
+    };
+    
+    // Generate a meaningful title from transcript content using LLM
+    const generateTitleFromContent = async (transcriptText: string, fallbackTitle?: string): Promise<string> => {
+        try {
+            // Use first ~2000 chars for title generation (enough context, not too expensive)
+            const textSample = transcriptText.slice(0, 2000);
+            
+            const response = await reasoning.complete({
+                systemPrompt: `You are a title generator. Given a transcript, generate a concise, descriptive title (3-8 words) that captures the main topic or theme.
+
+Rules:
+- Output ONLY the title, nothing else
+- No quotes around the title
+- Use Title Case
+- Be specific - avoid generic titles like "Meeting Notes" or "Discussion"
+- Focus on the main subject matter
+- If there are multiple topics, pick the most prominent one`,
+                prompt: `Generate a title for this transcript:\n\n${textSample}`,
+            });
+            
+            // Clean up the response - remove quotes, trim whitespace
+            const title = response.content
+                .trim()
+                .replace(/^["']|["']$/g, '')  // Remove surrounding quotes
+                .replace(/^#\s*/, '')          // Remove markdown heading prefix
+                .trim();
+            
+            // Validate the generated title
+            if (title && title.length > 0 && title.length < 100) {
+                logger.debug('Generated title from content: %s', title);
+                return title;
+            }
+            
+            logger.debug('Generated title was invalid, using fallback');
+            return fallbackTitle || 'Untitled';
+        } catch (error) {
+            logger.warn('Title generation failed, using fallback', { error });
+            return fallbackTitle || 'Untitled';
+        }
+    };
 
     const processInput = async (input: PipelineInput): Promise<PipelineResult> => {
         const startTime = Date.now();
@@ -420,9 +475,44 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
                     return hasEntities ? entities : undefined;
                 };
                 
+                // Generate title - prefer path-derived title if meaningful, otherwise use LLM
+                const pathTitle = extractTitleFromPath(paths.final);
+                let title: string;
+                if (isMeaningfulTitle(pathTitle)) {
+                    title = pathTitle!;
+                } else {
+                    log('debug', 'Path-derived title not meaningful (%s), generating from content...', pathTitle || 'empty');
+                    title = await generateTitleFromContent(state.enhancedText, pathTitle);
+                    log('info', 'Generated title: %s', title);
+                    
+                    // Rebuild output path with the generated title as the subject
+                    // This ensures the filename matches the title
+                    const contextWithTitle: Routing.RoutingContext = {
+                        ...routingContext,
+                        subjectOverride: title,
+                    };
+                    const newOutputPath = routing.buildOutputPath(routeResult, contextWithTitle);
+                    
+                    if (newOutputPath !== paths.final) {
+                        log('debug', 'Updating output path with generated title: %s -> %s', paths.final, newOutputPath);
+                        
+                        // Recreate output paths with the new filename
+                        const newPaths = output.createOutputPaths(
+                            input.audioFile,
+                            newOutputPath,
+                            input.hash,
+                            input.creation
+                        );
+                        await output.ensureDirectories(newPaths);
+                        
+                        // Update paths reference
+                        Object.assign(paths, newPaths);
+                    }
+                }
+                
                 // Build metadata from routing decision and input
                 const transcriptMetadata: Metadata.TranscriptMetadata = {
-                    title: extractTitleFromPath(paths.final),
+                    title,
                     projectId: routeResult.projectId || undefined,
                     project: routeResult.projectId || undefined,
                     date: input.creation,

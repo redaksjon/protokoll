@@ -2,7 +2,10 @@
  * Tests for resilient entity finder
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import * as os from 'os';
 import * as Context from '../../src/context';
 import { findProjectResilient, findPersonResilient, findTermResilient } from '../../src/utils/entityFinder';
 import type { Project, Person, Term } from '../../src/context/types';
@@ -12,10 +15,6 @@ describe('entityFinder', () => {
     let tempDir: string;
 
     beforeEach(async () => {
-        const fs = await import('fs/promises');
-        const path = await import('path');
-        const os = await import('os');
-        
         tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'entity-finder-test-'));
         
         // Create .protokoll directory structure
@@ -32,6 +31,13 @@ describe('entityFinder', () => {
             name: 'Test Project',
             type: 'project',
             active: true,
+            classification: {
+                context_type: 'work',
+            },
+            routing: {
+                structure: 'month',
+                filename_options: ['date', 'time', 'subject'],
+            },
         };
         
         const project2: Project = {
@@ -39,6 +45,13 @@ describe('entityFinder', () => {
             name: 'Another Project',
             type: 'project',
             active: true,
+            classification: {
+                context_type: 'work',
+            },
+            routing: {
+                structure: 'month',
+                filename_options: ['date', 'time', 'subject'],
+            },
         };
         
         const person1: Person = {
@@ -57,6 +70,14 @@ describe('entityFinder', () => {
         await context.saveEntity(project2);
         await context.saveEntity(person1);
         await context.saveEntity(term1);
+    });
+
+    afterEach(async () => {
+        try {
+            await fs.rm(tempDir, { recursive: true, force: true });
+        } catch {
+            // Ignore cleanup errors
+        }
     });
 
     describe('findProjectResilient', () => {

@@ -75,5 +75,7 @@ export interface RoutingContext {
     // Optional hints from earlier processing
     detectedPeople?: string[];
     detectedCompanies?: string[];
+    // Optional override for subject in filename (used when LLM generates a better title)
+    subjectOverride?: string;
 }
 

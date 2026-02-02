@@ -158,7 +158,7 @@ function buildFilename(
                 break;
             }
             case 'subject': {
-                const subject = extractSubject(context.transcriptText, context.sourceFile);
+                const subject = extractSubject(context.transcriptText, context.sourceFile, context.subjectOverride);
                 if (subject) {
                     parts.push(subject);
                 }
@@ -171,7 +171,12 @@ function buildFilename(
     return parts.join('-').replace(/--+/g, '-');
 }
 
-function extractSubject(text: string, sourceFile: string): string {
+function extractSubject(text: string, sourceFile: string, subjectOverride?: string): string {
+    // Use override if provided (e.g., LLM-generated title)
+    if (subjectOverride && subjectOverride.length > 0) {
+        return slugify(subjectOverride);
+    }
+    
     // Try to extract from first sentence
     const firstSentence = text.split(/[.!?]/)[0]?.trim() ?? '';
   
