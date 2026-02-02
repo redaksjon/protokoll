@@ -15,6 +15,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import * as Context from '../context';
 import * as Routing from '../routing';
+import * as Metadata from '../util/metadata';
 import { Project } from '../context/types';
 import { findProjectResilient } from '../utils/entityFinder';
 
@@ -667,9 +668,79 @@ export const editTranscript = async (
         updatedMetadata.tags = Array.from(currentTags).sort();
     }
     
-    // Build the updated document
+    // Parse existing Entity References from the original content
+    const existingEntities = Metadata.parseEntityMetadata(transcript.rawText);
+    
+    // Update Entity References if project changed
+    let updatedEntities = existingEntities;
+    if (options.projectId && targetProject) {
+        // Create updated entities with the new project
+        // Preserve other entity types (people, terms, companies) if they exist
+        updatedEntities = {
+            people: existingEntities?.people || [],
+            projects: [{
+                id: targetProject.id,
+                name: targetProject.name,
+                type: 'project' as const,
+            }],
+            terms: existingEntities?.terms || [],
+            companies: existingEntities?.companies || [],
+        };
+    }
+    
+    // Determine which entities to include in the final document
+    // Use updated entities if project changed, otherwise use existing entities
+    const entitiesToInclude = updatedEntities || existingEntities;
+    
+    // Extract content without Entity References section
+    // Find where Entity References section starts (if present)
+    const entityRefsIndex = transcript.rawText.indexOf('## Entity References');
+    let contentWithoutEntityRefs: string;
+    
+    if (entityRefsIndex >= 0) {
+        // Find the content delimiter (---) that separates metadata from content
+        // The content starts after the first --- separator
+        const metadataEndIndex = transcript.rawText.indexOf('---');
+        if (metadataEndIndex >= 0) {
+            // Find the start of content (after --- and any whitespace/newlines)
+            let contentStart = metadataEndIndex + '---'.length;
+            while (contentStart < transcript.rawText.length && 
+                   (transcript.rawText[contentStart] === '\n' || 
+                    transcript.rawText[contentStart] === '\r' || 
+                    transcript.rawText[contentStart] === ' ')) {
+                contentStart++;
+            }
+            // Extract content up to Entity References, trimming trailing whitespace
+            contentWithoutEntityRefs = transcript.rawText
+                .substring(contentStart, entityRefsIndex)
+                .trimEnd();
+        } else {
+            // Fallback: use parsed content but remove Entity References if present
+            const contentEndIndex = transcript.content.indexOf('## Entity References');
+            contentWithoutEntityRefs = contentEndIndex >= 0 
+                ? transcript.content.substring(0, contentEndIndex).trimEnd()
+                : transcript.content;
+        }
+    } else {
+        // No Entity References section, use parsed content as-is
+        contentWithoutEntityRefs = transcript.content;
+    }
+    
+    // Build the updated document with new Entity References
     const metadataSection = formatMetadataMarkdown(newTitle, updatedMetadata, targetProject);
-    const finalContent = metadataSection + transcript.content;
+    
+    // Format Entity References section if we have entities to include
+    // Include Entity References if they exist (either existing or updated)
+    let entityRefsSection = '';
+    if (entitiesToInclude) {
+        // Create a minimal TranscriptMetadata object with just entities for formatting
+        const entityMetadata: Metadata.TranscriptMetadata = {
+            entities: entitiesToInclude,
+        };
+        entityRefsSection = Metadata.formatEntityMetadataMarkdown(entityMetadata);
+    }
+    
+    const finalContent = metadataSection + contentWithoutEntityRefs + entityRefsSection;
     
     // Determine output path
     let outputPath: string;

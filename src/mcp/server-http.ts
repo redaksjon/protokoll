@@ -489,7 +489,10 @@ async function handlePost(req: IncomingMessage, res: ServerResponse) {
                 // Send notifications for transcript-related changes
                 if (params.name === 'protokoll_edit_transcript' || 
                     params.name === 'protokoll_provide_feedback' ||
-                    params.name === 'protokoll_combine_transcripts') {
+                    params.name === 'protokoll_combine_transcripts' ||
+                    params.name === 'protokoll_update_transcript_content' ||
+                    params.name === 'protokoll_update_transcript_entity_references' ||
+                    params.name === 'protokoll_create_note') {
                     await sendTranscriptChangeNotifications(params.name, params.arguments || {}, toolResult);
                 }
                 
@@ -887,6 +890,45 @@ async function sendTranscriptChangeNotifications(
                 console.log(`   Input path: ${transcriptPath}`);
                 // eslint-disable-next-line no-console
                 console.log(`   Relative path: ${relativePath}`);
+                notifySubscribedClients(transcriptUri, {
+                    method: 'notifications/resource_changed',
+                    params: { uri: transcriptUri },
+                });
+            }
+        } else if (toolName === 'protokoll_update_transcript_content' || 
+                   toolName === 'protokoll_update_transcript_entity_references') {
+            // For update content and entity references, result has filePath (already relative)
+            const updateResult = result as { filePath?: string };
+            const transcriptPath = (updateResult?.filePath || args.transcriptPath) as string;
+            
+            if (transcriptPath) {
+                // filePath from result is already relative, use as-is
+                const relativePath = transcriptPath;
+                const transcriptUri = buildTranscriptUri(relativePath);
+                
+                // eslint-disable-next-line no-console
+                console.log(`📄 Notifying about updated transcript: ${transcriptUri}`);
+                // eslint-disable-next-line no-console
+                console.log(`   File path: ${transcriptPath}`);
+                notifySubscribedClients(transcriptUri, {
+                    method: 'notifications/resource_changed',
+                    params: { uri: transcriptUri },
+                });
+            }
+        } else if (toolName === 'protokoll_create_note') {
+            // For create note, result has filePath (already relative)
+            const createResult = result as { filePath?: string };
+            const transcriptPath = createResult?.filePath;
+            
+            if (transcriptPath) {
+                // filePath from result is already relative, use as-is
+                const relativePath = transcriptPath;
+                const transcriptUri = buildTranscriptUri(relativePath);
+                
+                // eslint-disable-next-line no-console
+                console.log(`📄 Notifying about new transcript: ${transcriptUri}`);
+                // eslint-disable-next-line no-console
+                console.log(`   File path: ${transcriptPath}`);
                 notifySubscribedClients(transcriptUri, {
                     method: 'notifications/resource_changed',
                     params: { uri: transcriptUri },

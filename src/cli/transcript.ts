@@ -304,7 +304,6 @@ export const listTranscripts = async (options: ListTranscriptsOptions): Promise<
         ignore: ['**/node_modules/**', '**/.git/**', '**/.transcript/**'],
     });
     
-    // eslint-disable-next-line no-console
     console.log(`   Found ${files.length} markdown files in ${absoluteDir}`);
     
     // Build transcript list
@@ -371,12 +370,10 @@ export const listTranscripts = async (options: ListTranscriptsOptions): Promise<
             if (!hasProject) {
                 // Debug: log first file that should have the project
                 if (filteredByProject === 0 && content.includes('## Entity References') && content.includes('redaksjon')) {
-                    // eslint-disable-next-line no-console
                     console.log(`   [DEBUG] File ${filename} has Entity References section and mentions redaksjon but entities=${entities ? 'found' : 'none'}, projects=${entities?.projects?.length || 0}`);
                     // Show the Entity References section
                     const refSection = content.match(/## Entity References([\s\S]*?)(?=\n##|$)/);
                     if (refSection) {
-                        // eslint-disable-next-line no-console
                         console.log(`   [DEBUG] Entity References content:\n${refSection[1].substring(0, 500)}`);
                     }
                 }
@@ -428,26 +425,20 @@ export const listTranscripts = async (options: ListTranscriptsOptions): Promise<
     
     // Log filtering summary
     if (filteredByDate > 0 || filteredBySearch > 0 || filteredByProject > 0 || skippedUnreadable > 0) {
-        // eslint-disable-next-line no-console
         console.log(`   Filtering summary:`);
         if (filteredByDate > 0) {
-            // eslint-disable-next-line no-console
             console.log(`     Filtered by date: ${filteredByDate}`);
         }
         if (filteredBySearch > 0) {
-            // eslint-disable-next-line no-console
             console.log(`     Filtered by search: ${filteredBySearch}`);
         }
         if (filteredByProject > 0) {
-            // eslint-disable-next-line no-console
             console.log(`     Filtered by project: ${filteredByProject}`);
         }
         if (skippedUnreadable > 0) {
-            // eslint-disable-next-line no-console
             console.log(`     Skipped unreadable: ${skippedUnreadable}`);
         }
     }
-    // eslint-disable-next-line no-console
     console.log(`   Matched transcripts: ${total} (returning ${paginatedTranscripts.length} after pagination)`);
     
     return {

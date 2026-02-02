@@ -4,7 +4,7 @@
  */
  
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, relative, isAbsolute } from 'node:path';
 import { readFile, writeFile, mkdir, unlink } from 'node:fs/promises';
 import * as Context from '@/context';
 import * as Reasoning from '@/reasoning';
@@ -36,11 +36,43 @@ async function findTranscript(
     // Get the output directory from config
     const outputDirectory = await getConfiguredDirectory('outputDirectory', contextDirectory);
     
-    // Normalize the relative path (remove leading slashes, handle backslashes on Windows)
-    const normalizedPath = relativePath.replace(/^[/\\]+/, '').replace(/\\/g, '/');
+    let normalizedPath: string;
+    let resolvedPath: string;
     
-    // Try to resolve as a relative path from the output directory
-    const resolvedPath = resolve(outputDirectory, normalizedPath);
+    // Check if the path is absolute
+    if (isAbsolute(relativePath)) {
+        // If it's an absolute path, try to convert it to relative
+        const normalizedAbsolute = resolve(relativePath);
+        const normalizedOutputDir = resolve(outputDirectory);
+        
+        // Check if the absolute path is within the output directory
+        if (normalizedAbsolute.startsWith(normalizedOutputDir + '/') || normalizedAbsolute === normalizedOutputDir) {
+            // Convert to relative path
+            normalizedPath = relative(normalizedOutputDir, normalizedAbsolute);
+            resolvedPath = normalizedAbsolute;
+        } else {
+            // Absolute path outside output directory - extract relative portion
+            // Try to find the part that looks like a relative path (e.g., "2026/2/file.md")
+            // by looking for common patterns
+            const pathParts = relativePath.split(/[/\\]/);
+            // Look for patterns like "notes/2026/..." or just "2026/..."
+            const notesIndex = pathParts.findIndex(p => p.toLowerCase() === 'notes');
+            if (notesIndex >= 0 && notesIndex < pathParts.length - 1) {
+                // Extract everything after "notes/"
+                normalizedPath = pathParts.slice(notesIndex + 1).join('/');
+                resolvedPath = resolve(outputDirectory, normalizedPath);
+            } else {
+                // Fall back to just the filename
+                normalizedPath = pathParts[pathParts.length - 1] || relativePath;
+                resolvedPath = resolve(outputDirectory, normalizedPath);
+            }
+        }
+    } else {
+        // Normalize the relative path (remove leading slashes, handle backslashes on Windows)
+        normalizedPath = relativePath.replace(/^[/\\]+/, '').replace(/\\/g, '/');
+        // Try to resolve as a relative path from the output directory
+        resolvedPath = resolve(outputDirectory, normalizedPath);
+    }
     
     // Validate that the resolved path stays within the output directory
     // This prevents path traversal attacks using ../ sequences
@@ -400,6 +432,46 @@ export const updateTranscriptEntityReferencesTool: Tool = {
     },
 };
 
+export const createNoteTool: Tool = {
+    name: 'protokoll_create_note',
+    description:
+        'Create a new note/transcript file in the configured output directory. ' +
+        'The file will be created with proper metadata formatting and placed in a date-based directory structure (YYYY/MM/). ' +
+        'Returns the relative path to the created file.',
+    inputSchema: {
+        type: 'object',
+        properties: {
+            title: {
+                type: 'string',
+                description: 'Title for the note/transcript',
+            },
+            content: {
+                type: 'string',
+                description: 'Content/body text for the note (optional, can be empty)',
+                default: '',
+            },
+            projectId: {
+                type: 'string',
+                description: 'Optional: Project ID to assign to the note',
+            },
+            tags: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Optional: Tags to add to the note',
+            },
+            date: {
+                type: 'string',
+                description: 'Optional: Date for the note (ISO 8601 format, e.g., "2026-02-02"). Defaults to current date.',
+            },
+            contextDirectory: {
+                type: 'string',
+                description: 'Optional: Path to the .protokoll context directory',
+            },
+        },
+        required: ['title'],
+    },
+};
+
 // ============================================================================
 // Tool Handlers
 // ============================================================================
@@ -495,6 +567,9 @@ export async function handleEditTranscript(args: {
     tagsToRemove?: string[];
     contextDirectory?: string;
 }) {
+    // Get the output directory first to ensure consistent validation
+    const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
+    
     // Find the transcript (returns absolute path for file operations)
     const absolutePath = await findTranscript(args.transcriptPath, args.contextDirectory);
 
@@ -511,8 +586,9 @@ export async function handleEditTranscript(args: {
     });
 
     // Validate that the output path stays within the output directory
+    // Use the same output directory that was used to find the transcript
     // This prevents project routing from writing files outside the allowed directory
-    await validatePathWithinOutputDirectory(result.outputPath, args.contextDirectory);
+    validatePathWithinDirectory(result.outputPath, outputDirectory);
 
     // Write the updated content
     await mkdir(dirname(result.outputPath), { recursive: true });
@@ -523,8 +599,7 @@ export async function handleEditTranscript(args: {
         await unlink(absolutePath);
     }
 
-    // Convert to relative paths for response
-    const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
+    // Convert to relative paths for response (use the same outputDirectory we got earlier)
     const relativeOriginalPath = await sanitizePath(absolutePath || '', outputDirectory);
     const relativeOutputPath = await sanitizePath(result.outputPath || absolutePath || '', outputDirectory);
 
@@ -643,9 +718,6 @@ export async function handleUpdateTranscriptEntityReferences(args: {
 
     // Read the original file content
     const originalContent = await readFile(absolutePath, 'utf-8');
-
-    // Parse the transcript to get existing metadata
-    const parsed = await parseTranscript(absolutePath);
 
     // Validate and sanitize entity IDs
     const validateEntityId = (id: string, name: string, type: string): string => {
@@ -983,5 +1055,86 @@ export async function handleProvideFeedback(args: {
         })),
         outputPath: relativeOutputPath,
         moved: result?.moved || false,
+    };
+}
+
+export async function handleCreateNote(args: {
+    title: string;
+    content?: string;
+    projectId?: string;
+    tags?: string[];
+    date?: string;
+    contextDirectory?: string;
+}) {
+    // Get the output directory
+    const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
+    
+    // Parse the date or use current date
+    const noteDate = args.date ? new Date(args.date) : new Date();
+    const year = noteDate.getFullYear();
+    const month = String(noteDate.getMonth() + 1).padStart(2, '0');
+    const day = String(noteDate.getDate()).padStart(2, '0');
+    const hours = String(noteDate.getHours()).padStart(2, '0');
+    const minutes = String(noteDate.getMinutes()).padStart(2, '0');
+    const timestamp = String(noteDate.getTime());
+    
+    // Create a slug from the title for the filename
+    const titleSlug = args.title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .substring(0, 50); // Limit length
+    
+    const filename = `${day}-${hours}${minutes}-${timestamp.substring(0, 14)}-${titleSlug}.md`;
+    const relativePath = `${year}/${month}/${filename}`;
+    const absolutePath = resolve(outputDirectory, relativePath);
+    
+    // Validate that the path stays within the output directory
+    validatePathWithinDirectory(absolutePath, outputDirectory);
+    
+    // Build metadata
+    const metadata: Metadata.TranscriptMetadata = {
+        title: args.title,
+        date: noteDate,
+        projectId: args.projectId,
+        tags: args.tags,
+    };
+    
+    // If projectId is provided, try to get project name from context
+    if (args.projectId && args.contextDirectory) {
+        try {
+            const context = await Context.create({
+                startingDir: args.contextDirectory,
+            });
+            const project = await context.getProject(args.projectId);
+            if (project) {
+                metadata.project = project.name;
+            }
+        } catch {
+            // Ignore errors - project name is optional
+        }
+    }
+    
+    // Format the transcript content
+    const metadataSection = Metadata.formatMetadataMarkdown(metadata);
+    const contentSection = args.content || '';
+    const entityRefsSection = Metadata.formatEntityMetadataMarkdown(metadata);
+    
+    const transcriptContent = metadataSection + contentSection + entityRefsSection;
+    
+    // Create directory if it doesn't exist
+    await mkdir(dirname(absolutePath), { recursive: true });
+    
+    // Write the file
+    await writeFile(absolutePath, transcriptContent, 'utf-8');
+    
+    // Convert to relative path for response
+    const relativeOutputPath = await sanitizePath(absolutePath, outputDirectory);
+    
+    return {
+        success: true,
+        filePath: relativeOutputPath,
+        filename: filename,
+        message: `Note "${args.title}" created successfully`,
     };
 }

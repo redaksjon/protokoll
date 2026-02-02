@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
+import { fileURLToPath } from 'node:url';
 import { validatePathWithinDirectory, sanitizePath, fileExists, slugify } from '../../src/mcp/tools/shared';
+
+// ES module equivalent of __filename
+const __filename = fileURLToPath(import.meta.url);
 
 describe('Shared Utilities', () => {
     describe('validatePathWithinDirectory', () => {
