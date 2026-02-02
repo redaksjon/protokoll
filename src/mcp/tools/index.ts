@@ -87,6 +87,8 @@ export const tools: Tool[] = [
     TranscriptTools.editTranscriptTool,
     TranscriptTools.combineTranscriptsTool,
     TranscriptTools.provideFeedbackTool,
+    TranscriptTools.updateTranscriptContentTool,
+    TranscriptTools.updateTranscriptEntityReferencesTool,
 ];
 
 // ============================================================================
@@ -188,6 +190,10 @@ export async function handleToolCall(name: string, args: unknown): Promise<unkno
             return TranscriptTools.handleCombineTranscripts(args as Parameters<typeof TranscriptTools.handleCombineTranscripts>[0]);
         case 'protokoll_provide_feedback':
             return TranscriptTools.handleProvideFeedback(args as Parameters<typeof TranscriptTools.handleProvideFeedback>[0]);
+        case 'protokoll_update_transcript_content':
+            return TranscriptTools.handleUpdateTranscriptContent(args as Parameters<typeof TranscriptTools.handleUpdateTranscriptContent>[0]);
+        case 'protokoll_update_transcript_entity_references':
+            return TranscriptTools.handleUpdateTranscriptEntityReferences(args as Parameters<typeof TranscriptTools.handleUpdateTranscriptEntityReferences>[0]);
 
         default:
             throw new Error(`Unknown tool: ${name}`);

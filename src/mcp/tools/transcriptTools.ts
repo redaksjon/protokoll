@@ -14,6 +14,7 @@ import { processFeedback, applyChanges, type FeedbackContext } from '@/cli/feedb
 import { DEFAULT_MODEL } from '@/constants';
 
 import { fileExists, getConfiguredDirectory, sanitizePath } from './shared.js';
+import * as Metadata from '@/util/metadata';
 
 // ============================================================================
 // Helper Functions
@@ -285,6 +286,115 @@ export const provideFeedbackTool: Tool = {
     },
 };
 
+export const updateTranscriptContentTool: Tool = {
+    name: 'protokoll_update_transcript_content',
+    description:
+        'Update the content section of a transcript file while preserving all metadata. ' +
+        'Path is relative to the configured output directory. ' +
+        'This tool replaces only the content between the --- delimiters, keeping all metadata intact. ' +
+        'IMPORTANT: The content parameter should contain ONLY the transcript body text (the text after the --- delimiter), ' +
+        'NOT the full transcript file with headers and metadata. If the full transcript is provided, ' +
+        'the tool will automatically extract only the content section to prevent duplication.',
+    inputSchema: {
+        type: 'object',
+        properties: {
+            transcriptPath: {
+                type: 'string',
+                description: 
+                    'Relative path to the transcript from the output directory. ' +
+                    'Examples: "meeting-notes.md", "2026/2/01-1325-02012026091511.md"',
+            },
+            content: {
+                type: 'string',
+                description: 
+                    'New content to replace the transcript body. ' +
+                    'Should contain ONLY the body text (content after the --- delimiter). ' +
+                    'If the full transcript is provided, the tool will extract only the content section automatically.',
+            },
+            contextDirectory: {
+                type: 'string',
+                description: 'Optional: Path to the .protokoll context directory',
+            },
+        },
+        required: ['transcriptPath', 'content'],
+    },
+};
+
+export const updateTranscriptEntityReferencesTool: Tool = {
+    name: 'protokoll_update_transcript_entity_references',
+    description:
+        'Update the Entity References section of a transcript file while preserving all other content. ' +
+        'Path is relative to the configured output directory. ' +
+        'This tool replaces only the Entity References section at the end of the transcript, ' +
+        'preserving the title, metadata, and body content.',
+    inputSchema: {
+        type: 'object',
+        properties: {
+            transcriptPath: {
+                type: 'string',
+                description: 
+                    'Relative path to the transcript from the output directory. ' +
+                    'Examples: "meeting-notes.md", "2026/2/01-1325-02012026091511.md"',
+            },
+            entities: {
+                type: 'object',
+                description: 'Entity references to update',
+                properties: {
+                    people: {
+                        type: 'array',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                id: { type: 'string', description: 'Entity ID (slugified identifier)' },
+                                name: { type: 'string', description: 'Display name' },
+                            },
+                            required: ['id', 'name'],
+                        },
+                    },
+                    projects: {
+                        type: 'array',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                id: { type: 'string', description: 'Entity ID (slugified identifier)' },
+                                name: { type: 'string', description: 'Display name' },
+                            },
+                            required: ['id', 'name'],
+                        },
+                    },
+                    terms: {
+                        type: 'array',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                id: { type: 'string', description: 'Entity ID (slugified identifier)' },
+                                name: { type: 'string', description: 'Display name' },
+                            },
+                            required: ['id', 'name'],
+                        },
+                    },
+                    companies: {
+                        type: 'array',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                id: { type: 'string', description: 'Entity ID (slugified identifier)' },
+                                name: { type: 'string', description: 'Display name' },
+                            },
+                            required: ['id', 'name'],
+                        },
+                    },
+                },
+            },
+            contextDirectory: {
+                type: 'string',
+                description: 'Optional: Path to the .protokoll context directory',
+            },
+        },
+        required: ['transcriptPath', 'entities'],
+    },
+};
+
 // ============================================================================
 // Tool Handlers
 // ============================================================================
@@ -475,6 +585,343 @@ export async function handleCombineTranscripts(args: {
         deletedFiles: relativeDeletedFiles,
         message: `Combined ${absolutePaths.length} transcripts into: ${relativeOutputPath}`,
     };
+}
+
+export async function handleUpdateTranscriptContent(args: {
+    transcriptPath: string;
+    content: string;
+    contextDirectory?: string;
+}) {
+    // Find the transcript (returns absolute path for file operations)
+    const absolutePath = await findTranscript(args.transcriptPath, args.contextDirectory);
+
+    // Read the original file content
+    const originalContent = await readFile(absolutePath, 'utf-8');
+
+    // Replace the content section while preserving metadata
+    const updatedContent = replaceTranscriptContent(originalContent, args.content);
+
+    // Write the updated content back to the file
+    await writeFile(absolutePath, updatedContent, 'utf-8');
+
+    // Convert to relative path for response
+    const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
+    const relativePath = await sanitizePath(absolutePath, outputDirectory);
+
+    return {
+        success: true,
+        filePath: relativePath,
+        message: 'Transcript content updated successfully',
+    };
+}
+
+export async function handleUpdateTranscriptEntityReferences(args: {
+    transcriptPath: string;
+    entities: {
+        people?: Array<{ id: string; name: string }>;
+        projects?: Array<{ id: string; name: string }>;
+        terms?: Array<{ id: string; name: string }>;
+        companies?: Array<{ id: string; name: string }>;
+    };
+    contextDirectory?: string;
+}) {
+    // Find the transcript (returns absolute path for file operations)
+    const absolutePath = await findTranscript(args.transcriptPath, args.contextDirectory);
+
+    // Read the original file content
+    const originalContent = await readFile(absolutePath, 'utf-8');
+
+    // Parse the transcript to get existing metadata
+    const parsed = await parseTranscript(absolutePath);
+
+    // Validate and sanitize entity IDs
+    const validateEntityId = (id: string, name: string, type: string): string => {
+        if (!id || typeof id !== 'string') {
+            throw new Error(`Invalid entity ID for ${type} "${name}": ID must be a non-empty string`);
+        }
+        
+        // Check for common JSON parsing errors
+        if (id.includes('},') || id.includes('{') || id.includes('}') || id.includes(',')) {
+            throw new Error(
+                `Invalid entity ID "${id}" for ${type} "${name}". ` +
+                `Entity IDs should be slugified identifiers (e.g., "jack-smith", "discursive"), ` +
+                `not JSON syntax. Please provide a valid slugified ID.`
+            );
+        }
+        
+        // Basic validation: entity IDs should be alphanumeric with hyphens/underscores
+        if (!/^[a-z0-9_-]+$/i.test(id)) {
+            throw new Error(
+                `Invalid entity ID "${id}" for ${type} "${name}". ` +
+                `Entity IDs should only contain letters, numbers, hyphens, and underscores.`
+            );
+        }
+        
+        return id.trim();
+    };
+
+    // Convert incoming entities to EntityReference format with validation
+    const entityReferences: Metadata.EntityReference[] = [];
+    
+    if (args.entities.people) {
+        entityReferences.push(...args.entities.people.map(e => ({
+            id: validateEntityId(e.id, e.name, 'person'),
+            name: e.name.trim(),
+            type: 'person' as const,
+        })));
+    }
+    
+    if (args.entities.projects) {
+        entityReferences.push(...args.entities.projects.map(e => ({
+            id: validateEntityId(e.id, e.name, 'project'),
+            name: e.name.trim(),
+            type: 'project' as const,
+        })));
+    }
+    
+    if (args.entities.terms) {
+        entityReferences.push(...args.entities.terms.map(e => ({
+            id: validateEntityId(e.id, e.name, 'term'),
+            name: e.name.trim(),
+            type: 'term' as const,
+        })));
+    }
+    
+    if (args.entities.companies) {
+        entityReferences.push(...args.entities.companies.map(e => ({
+            id: validateEntityId(e.id, e.name, 'company'),
+            name: e.name.trim(),
+            type: 'company' as const,
+        })));
+    }
+
+    // Group by type
+    const entities: NonNullable<Metadata.TranscriptMetadata['entities']> = {
+        people: entityReferences.filter(e => e.type === 'person'),
+        projects: entityReferences.filter(e => e.type === 'project'),
+        terms: entityReferences.filter(e => e.type === 'term'),
+        companies: entityReferences.filter(e => e.type === 'company'),
+    };
+
+    // Create minimal metadata object with only entities for formatting
+    // formatEntityMetadataMarkdown only uses the entities property
+    const metadataForFormatting: Metadata.TranscriptMetadata = {
+        entities,
+    };
+
+    // Replace Entity References section in the file
+    const updatedContent = replaceEntityReferences(originalContent, metadataForFormatting);
+
+    // Write the updated content back to the file
+    await writeFile(absolutePath, updatedContent, 'utf-8');
+
+    // Convert to relative path for response
+    const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
+    const relativePath = await sanitizePath(absolutePath, outputDirectory);
+
+    return {
+        success: true,
+        filePath: relativePath,
+        message: 'Transcript entity references updated successfully',
+    };
+}
+
+/**
+ * Replace the content section of a transcript file while preserving metadata
+ * Transcript structure: [metadata section]\n---\n[content section]
+ * We preserve everything before and including the --- delimiter, and replace only the content after it
+ * 
+ * This function is smart enough to detect if the incoming content includes headers/metadata
+ * and extract only the actual content section to prevent duplication.
+ */
+function replaceTranscriptContent(originalText: string, newContent: string): string {
+    // Check if newContent appears to contain metadata/headers (common mistake from clients)
+    const hasTitle = newContent.trim().startsWith('# ');
+    const hasMetadata = /##\s+Metadata/i.test(newContent);
+    
+    if (hasTitle || hasMetadata) {
+        // Extract only the content section from newContent (everything after the first --- delimiter)
+        const newContentLines = newContent.split('\n');
+        let contentDelimiterIndex = -1;
+        
+        // Find the first --- delimiter in newContent
+        for (let i = 0; i < newContentLines.length; i++) {
+            if (newContentLines[i].trim() === '---') {
+                contentDelimiterIndex = i;
+                break;
+            }
+        }
+        
+        if (contentDelimiterIndex >= 0) {
+            // Found delimiter - extract only content after it
+            let contentStartIndex = contentDelimiterIndex + 1;
+            // Skip empty lines after delimiter
+            while (contentStartIndex < newContentLines.length && newContentLines[contentStartIndex].trim() === '') {
+                contentStartIndex++;
+            }
+            
+            // Find where content ends (before Entity References section if present)
+            let contentEndIndex = newContentLines.length;
+            for (let i = contentStartIndex; i < newContentLines.length; i++) {
+                if (newContentLines[i].trim() === '## Entity References' || 
+                    newContentLines[i].trim().startsWith('## Entity References')) {
+                    contentEndIndex = i;
+                    break;
+                }
+            }
+            
+            // Use only the content section (stop before Entity References)
+            newContent = newContentLines.slice(contentStartIndex, contentEndIndex).join('\n').trim();
+        } else {
+            // Has headers/metadata but no delimiter - this is invalid
+            // Try to find where content might start (after Entity References section)
+            const entityRefsMatch = newContent.match(/##\s+Entity\s+References[\s\S]*?\n\n([\s\S]*)$/i);
+            if (entityRefsMatch) {
+                newContent = entityRefsMatch[1].trim();
+            } else {
+                // If we can't extract content, throw an error
+                throw new Error(
+                    'The content parameter appears to include headers/metadata but no content delimiter (---) was found. ' +
+                    'Please provide only the transcript body content (text after the --- delimiter), not the full transcript file.'
+                );
+            }
+        }
+    }
+    
+    // Now proceed with normal replacement logic
+    // Split by lines to find the exact --- delimiter line in original
+    const lines = originalText.split('\n');
+    let delimiterIndex = -1;
+    
+    // Find the line that is exactly "---" (possibly with whitespace)
+    for (let i = 0; i < lines.length; i++) {
+        if (lines[i].trim() === '---') {
+            delimiterIndex = i;
+            break;
+        }
+    }
+    
+    if (delimiterIndex >= 0) {
+        // Found the delimiter - preserve everything up to and including it
+        const metadataLines = lines.slice(0, delimiterIndex + 1);
+        
+        // Find Entity References section in original (if present) to preserve it
+        let entityRefsStartIndex = -1;
+        for (let i = delimiterIndex + 1; i < lines.length; i++) {
+            if (lines[i].trim() === '## Entity References' || 
+                lines[i].trim().startsWith('## Entity References')) {
+                entityRefsStartIndex = i;
+                break;
+            }
+        }
+        
+        // Reconstruct: metadata section (including ---) + new content + Entity References (if present)
+        let result = metadataLines.join('\n') + '\n' + newContent;
+        
+        if (entityRefsStartIndex >= 0) {
+            // Preserve Entity References section from original
+            result += '\n\n' + lines.slice(entityRefsStartIndex).join('\n');
+        }
+        
+        return result;
+    }
+
+    // Fallback: if no --- delimiter found, preserve the entire file structure
+    // This shouldn't happen in normal transcripts, but handle it gracefully
+    // Try to detect if there's a metadata section pattern
+    const hasMetadataSection = originalText.match(/##\s+Metadata/i);
+    if (hasMetadataSection) {
+        // Has metadata section but no delimiter - add one before new content
+        // Find where metadata likely ends (before content would start)
+        const entityRefsMatch = originalText.match(/^([\s\S]*?##\s+Entity\s+References[\s\S]*?\n\n)([\s\S]*)$/i);
+        if (entityRefsMatch) {
+            return `${entityRefsMatch[1]}---\n\n${newContent}`;
+        }
+    }
+    
+    // Last resort: append delimiter and new content
+    return `${originalText}\n\n---\n\n${newContent}`;
+}
+
+/**
+ * Replace the Entity References section of a transcript file while preserving all other content
+ * Transcript structure: [title]\n[metadata]\n---\n[content]\n---\n## Entity References\n[entities]
+ */
+function replaceEntityReferences(originalText: string, metadata: Metadata.TranscriptMetadata): string {
+    const lines = originalText.split('\n');
+    
+    // Find where Entity References section starts
+    let entityRefsStartIndex = -1;
+    for (let i = 0; i < lines.length; i++) {
+        if (lines[i].trim() === '## Entity References' || 
+            lines[i].trim().startsWith('## Entity References')) {
+            entityRefsStartIndex = i;
+            break;
+        }
+    }
+    
+    // Generate new Entity References section
+    const newEntityRefsSection = Metadata.formatEntityMetadataMarkdown(metadata);
+    
+    if (entityRefsStartIndex >= 0) {
+        // Entity References section exists - replace it
+        // Find the content section delimiter (---) before Entity References
+        // We want to preserve everything up to and including the content section
+        let contentDelimiterIndex = -1;
+        for (let i = entityRefsStartIndex - 1; i >= 0; i--) {
+            if (lines[i].trim() === '---') {
+                contentDelimiterIndex = i;
+                break;
+            }
+        }
+        
+        if (contentDelimiterIndex >= 0) {
+            // Found content delimiter - preserve everything up to end of content
+            // Find where content actually ends (before Entity References)
+            let contentEndIndex = entityRefsStartIndex;
+            // Go backwards to find the last non-empty line before Entity References
+            while (contentEndIndex > contentDelimiterIndex && 
+                   (lines[contentEndIndex - 1].trim() === '' || 
+                    lines[contentEndIndex - 1].trim() === '---')) {
+                contentEndIndex--;
+            }
+            
+            // Reconstruct: everything before Entity References + new Entity References section
+            const beforeEntityRefs = lines.slice(0, contentEndIndex).join('\n');
+            return beforeEntityRefs + newEntityRefsSection;
+        } else {
+            // No content delimiter found - replace from Entity References onwards
+            return lines.slice(0, entityRefsStartIndex).join('\n') + newEntityRefsSection;
+        }
+    } else {
+        // No Entity References section exists - append it
+        // Find the content section delimiter (---) to append after content
+        let contentDelimiterIndex = -1;
+        for (let i = lines.length - 1; i >= 0; i--) {
+            if (lines[i].trim() === '---') {
+                contentDelimiterIndex = i;
+                break;
+            }
+        }
+        
+        if (contentDelimiterIndex >= 0) {
+            // Found delimiter - append Entity References after content
+            // Find where content ends (last non-empty line)
+            let contentEndIndex = lines.length;
+            for (let i = lines.length - 1; i > contentDelimiterIndex; i--) {
+                if (lines[i].trim() !== '') {
+                    contentEndIndex = i + 1;
+                    break;
+                }
+            }
+            
+            const beforeEntityRefs = lines.slice(0, contentEndIndex).join('\n');
+            return beforeEntityRefs + '\n' + newEntityRefsSection;
+        } else {
+            // No delimiter found - just append
+            return originalText + '\n' + newEntityRefsSection;
+        }
+    }
 }
 
 export async function handleProvideFeedback(args: {
