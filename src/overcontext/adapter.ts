@@ -13,7 +13,6 @@ import {
     RedaksjonEntity,
     RedaksjonEntityType,
 } from '@redaksjon/context';
-import { protokollDiscoveryOptions, protokollPluralNames } from './config';
 // eslint-disable-next-line no-restricted-imports
 import { existsSync, statSync } from 'node:fs';
 import * as path from 'node:path';

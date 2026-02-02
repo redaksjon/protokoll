@@ -6,7 +6,7 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { resolve, dirname } from 'node:path';
 import { stat } from 'node:fs/promises';
 import * as Context from '@/context';
-import { fileExists, type DiscoveredConfig, type ProjectSuggestion } from './shared';
+import { fileExists, sanitizePath, type DiscoveredConfig, type ProjectSuggestion } from './shared';
 
 // ============================================================================
 // Helper Functions
@@ -225,10 +225,16 @@ export async function handleDiscoverConfig(args: { path: string }) {
     // Find all .protokoll configs
     const configPaths = await findProtokolkConfigs(startDir);
 
+    // Get workspace root for path sanitization
+    const ServerConfig = await import('../serverConfig');
+    const workspaceRoot = ServerConfig.getWorkspaceRoot() || process.cwd();
+
     if (configPaths.length === 0) {
+        // Sanitize searchedFrom path
+        const sanitizedSearchedFrom = await sanitizePath(startDir, workspaceRoot);
         return {
             found: false,
-            searchedFrom: startDir,
+            searchedFrom: sanitizedSearchedFrom,
             configs: [],
             message: 'No .protokoll configuration found in the directory hierarchy. ' +
                 'To use Protokoll, create a .protokoll directory with your context files (people, projects, terms).',
@@ -236,19 +242,27 @@ export async function handleDiscoverConfig(args: { path: string }) {
         };
     }
 
-    // Get info about each config
+    // Get info about each config and sanitize paths
     const configs: DiscoveredConfig[] = [];
     for (const configPath of configPaths) {
         const info = await getConfigInfo(configPath);
-        configs.push(info);
+        // Sanitize the path in the config info
+        const sanitizedPath = await sanitizePath(info.path, workspaceRoot);
+        configs.push({
+            ...info,
+            path: sanitizedPath,
+        });
     }
 
     // Primary config is the one closest to the search path
     const primaryConfig = configs[0];
 
+    // Sanitize searchedFrom and primaryConfig paths
+    const sanitizedSearchedFrom = await sanitizePath(startDir, workspaceRoot);
+
     return {
         found: true,
-        searchedFrom: startDir,
+        searchedFrom: sanitizedSearchedFrom,
         primaryConfig: primaryConfig.path,
         configs,
         summary: {

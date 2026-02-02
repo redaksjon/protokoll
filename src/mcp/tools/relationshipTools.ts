@@ -7,7 +7,7 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import * as Context from '@/context';
 import type { Entity } from '@/context/types';
 import type { ContextInstance } from '@/context';
-import { createEntityUri, parseEntityUri, createRelationship, type EntityRelationship } from '@redaksjon/context';
+import { parseEntityUri, createRelationship, type EntityRelationship } from '@redaksjon/context';
 import { 
     findPersonResilient, 
     findCompanyResilient, 

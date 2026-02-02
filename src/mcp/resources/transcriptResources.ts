@@ -10,6 +10,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve, relative } from 'node:path';
 import { listTranscripts } from '@/cli/transcript';
 import * as ServerConfig from '../serverConfig';
+import { sanitizePath } from '../tools/shared';
 
 /**
  * Read a single transcript resource
@@ -18,6 +19,11 @@ import * as ServerConfig from '../serverConfig';
  * (e.g., "2026/1/29-2027-riot-doc-voice-and-tone.md")
  */
 export async function readTranscriptResource(transcriptPath: string): Promise<McpResourceContents> {
+    // Guard against undefined/null paths
+    if (!transcriptPath || typeof transcriptPath !== 'string') {
+        throw new Error(`Invalid transcript path: ${transcriptPath}`);
+    }
+    
     // Get the configured output directory
     const outputDirectory = ServerConfig.getOutputDirectory();
     
@@ -78,21 +84,25 @@ export async function readTranscriptsListResource(options: {
 
     // Convert to resource format with URIs
     // Convert absolute paths to relative paths (relative to outputDirectory)
-    const transcriptsWithUris = result.transcripts.map(t => {
-        // Convert absolute path to relative path
-        const relativePath = relative(outputDirectory, t.path);
-        
-        return {
-            uri: buildTranscriptUri(relativePath),
-            path: t.path,
-            filename: t.filename,
-            date: t.date,
-            time: t.time,
-            title: t.title,
-            entities: t.entities,
-            hasRawTranscript: t.hasRawTranscript,
-        };
-    });
+    // Use sanitizePath to ensure no absolute paths are exposed
+    const transcriptsWithUris = await Promise.all(
+        result.transcripts.map(async (t) => {
+            // Convert absolute path to relative path
+            // Guard against undefined path - use filename as fallback
+            const relativePath = await sanitizePath(t.path || t.filename || '', outputDirectory);
+            
+            return {
+                uri: buildTranscriptUri(relativePath),
+                path: relativePath, // Use sanitized relative path, not absolute
+                filename: t.filename,
+                date: t.date,
+                time: t.time,
+                title: t.title,
+                entities: t.entities,
+                hasRawTranscript: t.hasRawTranscript,
+            };
+        })
+    );
 
     const responseData = {
         directory,

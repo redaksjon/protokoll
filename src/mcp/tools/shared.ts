@@ -3,7 +3,7 @@
  * Shared types, constants, and utilities for MCP tools
  */
 import { stat } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { resolve, relative } from 'node:path';
 import * as Media from '@/util/media';
 import * as Storage from '@/util/storage';
 import { getLogger } from '@/logging';
@@ -84,6 +84,50 @@ export async function getConfiguredDirectory(
             return ServerConfig.getOutputDirectory();
         case 'processedDirectory':
             return ServerConfig.getProcessedDirectory() || resolve(process.cwd(), './processed');
+    }
+}
+
+/**
+ * Convert an absolute file path to a relative path (relative to output directory)
+ * This ensures no absolute paths are exposed to HTTP MCP clients
+ * 
+ * @param absolutePath - The absolute file path to convert
+ * @param baseDirectory - The base directory to make relative to (default: output directory)
+ * @returns Relative path, or the original path if it's already relative
+ */
+export async function sanitizePath(
+    absolutePath: string,
+    baseDirectory?: string
+): Promise<string> {
+    // Guard against undefined/null/empty values
+    if (!absolutePath || typeof absolutePath !== 'string') {
+        // Return empty string for invalid paths to prevent errors downstream
+        return absolutePath || '';
+    }
+    
+    // If it's already a relative path (doesn't start with /), return as-is
+    if (!absolutePath.startsWith('/') && !absolutePath.match(/^[A-Za-z]:/)) {
+        return absolutePath;
+    }
+    
+    // Get the base directory (output directory by default)
+    const base = baseDirectory || await getConfiguredDirectory('outputDirectory');
+    
+    // Convert to relative path
+    try {
+        const relativePath = relative(base, absolutePath);
+        // If relative() returns an absolute path (when paths are on different drives on Windows),
+        // return just the filename as a fallback
+        if (relativePath.startsWith('/') || relativePath.match(/^[A-Za-z]:/)) {
+            // Extract just the filename
+            const parts = absolutePath.split(/[/\\]/);
+            return parts[parts.length - 1] || absolutePath;
+        }
+        return relativePath;
+    } catch {
+        // If conversion fails, return just the filename
+        const parts = absolutePath.split(/[/\\]/);
+        return parts[parts.length - 1] || absolutePath;
     }
 }
 

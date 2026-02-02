@@ -13,7 +13,7 @@ import { listTranscripts } from '@/cli/transcript';
 import { processFeedback, applyChanges, type FeedbackContext } from '@/cli/feedback';
 import { DEFAULT_MODEL } from '@/constants';
  
-import { fileExists, getConfiguredDirectory } from './shared.js';
+import { fileExists, getConfiguredDirectory, sanitizePath } from './shared.js';
 
 // ============================================================================
 // Helper Functions
@@ -283,8 +283,11 @@ export async function handleReadTranscript(args: {
 
     const parsed = await parseTranscript(transcriptPath);
 
+    // Sanitize path to ensure no absolute paths are exposed
+    const sanitizedPath = await sanitizePath(transcriptPath);
+
     return {
-        filePath: transcriptPath,
+        filePath: sanitizedPath,
         title: parsed.title,
         metadata: parsed.metadata,
         content: parsed.content,
@@ -321,16 +324,21 @@ export async function handleListTranscripts(args: {
         search: args.search,
     });
 
-    return {
-        directory,
-        transcripts: result.transcripts.map(t => ({
-            path: t.path,
+    // Sanitize all paths to ensure no absolute paths are exposed
+    const sanitizedTranscripts = await Promise.all(
+        result.transcripts.map(async (t) => ({
+            path: t.path ? await sanitizePath(t.path, directory) : t.filename || '',
             filename: t.filename,
             date: t.date,
             time: t.time,
             title: t.title,
             hasRawTranscript: t.hasRawTranscript,
-        })),
+        }))
+    );
+
+    return {
+        directory,
+        transcripts: sanitizedTranscripts,
         pagination: {
             total: result.total,
             limit: result.limit,
@@ -379,13 +387,18 @@ export async function handleEditTranscript(args: {
         await unlink(transcriptPath);
     }
 
+    // Sanitize paths to ensure no absolute paths are exposed
+    const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
+    const sanitizedOriginalPath = await sanitizePath(transcriptPath || '', outputDirectory);
+    const sanitizedOutputPath = await sanitizePath(result.outputPath || transcriptPath || '', outputDirectory);
+
     return {
         success: true,
-        originalPath: transcriptPath,
-        outputPath: result.outputPath,
+        originalPath: sanitizedOriginalPath,
+        outputPath: sanitizedOutputPath,
         renamed: result.outputPath !== transcriptPath,
         message: result.outputPath !== transcriptPath
-            ? `Transcript updated and moved to: ${result.outputPath}`
+            ? `Transcript updated and moved to: ${sanitizedOutputPath}`
             : 'Transcript updated',
     };
 }
@@ -428,12 +441,22 @@ export async function handleCombineTranscripts(args: {
         }
     }
 
+    // Sanitize paths to ensure no absolute paths are exposed
+    const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
+    const sanitizedOutputPath = await sanitizePath(result.outputPath || '', outputDirectory);
+    const sanitizedSourceFiles = await Promise.all(
+        resolvedPaths.map(p => sanitizePath(p || '', outputDirectory))
+    );
+    const sanitizedDeletedFiles = await Promise.all(
+        deletedFiles.map(p => sanitizePath(p || '', outputDirectory))
+    );
+
     return {
         success: true,
-        outputPath: result.outputPath,
-        sourceFiles: resolvedPaths,
-        deletedFiles,
-        message: `Combined ${resolvedPaths.length} transcripts into: ${result.outputPath}`,
+        outputPath: sanitizedOutputPath,
+        sourceFiles: sanitizedSourceFiles,
+        deletedFiles: sanitizedDeletedFiles,
+        message: `Combined ${resolvedPaths.length} transcripts into: ${sanitizedOutputPath}`,
     };
 }
 
@@ -469,6 +492,11 @@ export async function handleProvideFeedback(args: {
         result = await applyChanges(feedbackCtx);
     }
 
+    // Sanitize path to ensure no absolute paths are exposed
+    const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
+    const finalPath = result?.newPath || transcriptPath || '';
+    const sanitizedOutputPath = await sanitizePath(finalPath, outputDirectory);
+
     return {
         success: true,
         changesApplied: feedbackCtx.changes.length,
@@ -476,7 +504,7 @@ export async function handleProvideFeedback(args: {
             type: c.type,
             description: c.description,
         })),
-        outputPath: result?.newPath || transcriptPath,
+        outputPath: sanitizedOutputPath,
         moved: result?.moved || false,
     };
 }
