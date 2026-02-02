@@ -73,6 +73,22 @@ export async function readTranscriptsListResource(options: {
     // Use provided directory or fall back to configured outputDirectory
     const directory = options.directory || outputDirectory;
 
+    // Log request parameters
+    // eslint-disable-next-line no-console
+    console.log(`📋 Reading transcripts list:`);
+    // eslint-disable-next-line no-console
+    console.log(`   Directory: ${directory}${options.directory ? '' : ' (from config)'}`);
+    if (projectId) {
+        // eslint-disable-next-line no-console
+        console.log(`   Project filter: ${projectId}`);
+    }
+    if (startDate || endDate) {
+        // eslint-disable-next-line no-console
+        console.log(`   Date range: ${startDate || 'any'} to ${endDate || 'any'}`);
+    }
+    // eslint-disable-next-line no-console
+    console.log(`   Limit: ${limit}, Offset: ${offset}`);
+
     const result = await listTranscripts({
         directory,
         limit,
@@ -82,6 +98,16 @@ export async function readTranscriptsListResource(options: {
         endDate,
         projectId,
     });
+
+    // Log results
+    // eslint-disable-next-line no-console
+    console.log(`✅ Transcripts list response:`);
+    // eslint-disable-next-line no-console
+    console.log(`   Total found: ${result.total}`);
+    // eslint-disable-next-line no-console
+    console.log(`   Returned: ${result.transcripts.length} (limit: ${limit}, offset: ${offset})`);
+    // eslint-disable-next-line no-console
+    console.log(`   Has more: ${result.hasMore}`);
 
     // Convert to resource format with URIs
     // Convert absolute paths to relative paths (relative to outputDirectory)

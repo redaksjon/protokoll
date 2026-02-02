@@ -12,7 +12,7 @@ import { parseTranscript, combineTranscripts, editTranscript } from '@/cli/actio
 import { listTranscripts } from '@/cli/transcript';
 import { processFeedback, applyChanges, type FeedbackContext } from '@/cli/feedback';
 import { DEFAULT_MODEL } from '@/constants';
- 
+
 import { fileExists, getConfiguredDirectory, sanitizePath } from './shared.js';
 
 // ============================================================================
@@ -20,36 +20,45 @@ import { fileExists, getConfiguredDirectory, sanitizePath } from './shared.js';
 // ============================================================================
 
 /**
- * Find a transcript by filename or partial filename
- * Searches in the configured output directory
+ * Find a transcript by relative path (relative to output directory)
+ * Returns absolute path for internal file operations
  */
 async function findTranscript(
-    filenameOrPath: string,
+    relativePath: string,
     contextDirectory?: string
 ): Promise<string> {
     // Guard against undefined/null/empty values
-    if (!filenameOrPath || typeof filenameOrPath !== 'string') {
+    if (!relativePath || typeof relativePath !== 'string') {
         throw new Error('transcriptPath is required and must be a non-empty string');
     }
     
-    // If it's already an absolute path that exists, use it
-    if (filenameOrPath.startsWith('/') && await fileExists(filenameOrPath)) {
-        return filenameOrPath;
-    }
-
     // Get the output directory from config
     const outputDirectory = await getConfiguredDirectory('outputDirectory', contextDirectory);
     
-    // Search for the transcript
+    // Normalize the relative path (remove leading slashes, handle backslashes on Windows)
+    const normalizedPath = relativePath.replace(/^[/\\]+/, '').replace(/\\/g, '/');
+    
+    // Try to resolve as a relative path from the output directory
+    const resolvedPath = resolve(outputDirectory, normalizedPath);
+    if (await fileExists(resolvedPath)) {
+        return resolvedPath;
+    }
+    
+    // If direct path resolution didn't work, try searching by filename
+    // Extract just the filename if it's a path
+    const searchTerm = normalizedPath.includes('/')
+        ? normalizedPath.split('/').pop() || normalizedPath
+        : normalizedPath;
+    
     const result = await listTranscripts({
         directory: outputDirectory,
-        search: filenameOrPath,
+        search: searchTerm,
         limit: 10,
     });
 
     if (result.transcripts.length === 0) {
         throw new Error(
-            `No transcript found matching "${filenameOrPath}" in ${outputDirectory}. ` +
+            `No transcript found matching "${relativePath}" in output directory. ` +
             `Try using protokoll_list_transcripts to see available transcripts.`
         );
     }
@@ -58,11 +67,13 @@ async function findTranscript(
         return result.transcripts[0].path;
     }
 
-    // Multiple matches - try exact filename match first
-    const exactMatch = result.transcripts.find(t => 
-        t.filename === filenameOrPath || 
-        t.filename.includes(filenameOrPath)
-    );
+    // Multiple matches - try exact match by relative path
+    const outputDirNormalized = outputDirectory.replace(/\\/g, '/');
+    const exactMatch = result.transcripts.find(t => {
+        const tPathNormalized = t.path.replace(/\\/g, '/');
+        const tRelative = tPathNormalized.replace(outputDirNormalized + '/', '');
+        return tRelative === normalizedPath || t.filename === searchTerm;
+    });
     
     if (exactMatch) {
         return exactMatch.path;
@@ -71,7 +82,7 @@ async function findTranscript(
     // Multiple matches and no exact match
     const matches = result.transcripts.map(t => t.filename).join(', ');
     throw new Error(
-        `Multiple transcripts match "${filenameOrPath}": ${matches}. ` +
+        `Multiple transcripts match "${relativePath}": ${matches}. ` +
         `Please be more specific.`
     );
 }
@@ -84,8 +95,7 @@ export const readTranscriptTool: Tool = {
     name: 'protokoll_read_transcript',
     description:
         'Read a transcript file and parse its metadata and content. ' +
-        'You can provide either an absolute path OR just a filename/partial filename. ' +
-        'If you provide a filename, it will search in the configured output directory. ' +
+        'Path is relative to the configured output directory. ' +
         'Returns structured data including title, metadata, routing info, and content.',
     inputSchema: {
         type: 'object',
@@ -93,8 +103,8 @@ export const readTranscriptTool: Tool = {
             transcriptPath: {
                 type: 'string',
                 description: 
-                    'Filename, partial filename, or absolute path to the transcript. ' +
-                    'Examples: "meeting-notes.md", "2026-01-29", "/full/path/to/transcript.md"',
+                    'Relative path to the transcript from the output directory. ' +
+                    'Examples: "meeting-notes.md", "2026/2/01-1325-02012026091511.md"',
             },
             contextDirectory: {
                 type: 'string',
@@ -163,7 +173,7 @@ export const editTranscriptTool: Tool = {
     name: 'protokoll_edit_transcript',
     description:
         'Edit an existing transcript\'s title, project assignment, and/or tags. ' +
-        'You can provide either an absolute path OR just a filename/partial filename. ' +
+        'Path is relative to the configured output directory. ' +
         'IMPORTANT: When you change the title, this tool RENAMES THE FILE to match the new title (slugified). ' +
         'Always use this tool instead of directly editing transcript files when changing titles. ' +
         'Changing the project will update metadata and may move the file to a new location ' +
@@ -174,8 +184,8 @@ export const editTranscriptTool: Tool = {
             transcriptPath: {
                 type: 'string',
                 description: 
-                    'Filename, partial filename, or absolute path to the transcript. ' +
-                    'Examples: "meeting-notes.md", "2026-01-29", "/full/path/to/transcript.md"',
+                    'Relative path to the transcript from the output directory. ' +
+                    'Examples: "meeting-notes.md", "2026/2/01-1325-02012026091511.md"',
             },
             title: {
                 type: 'string',
@@ -208,7 +218,7 @@ export const combineTranscriptsTool: Tool = {
     name: 'protokoll_combine_transcripts',
     description:
         'Combine multiple transcripts into a single document. ' +
-        'You can provide absolute paths OR filenames/partial filenames. ' +
+        'Paths are relative to the configured output directory. ' +
         'Source files are automatically deleted after combining. ' +
         'Metadata from the first transcript is preserved, and content is organized into sections.',
     inputSchema: {
@@ -218,8 +228,8 @@ export const combineTranscriptsTool: Tool = {
                 type: 'array',
                 items: { type: 'string' },
                 description: 
-                    'Array of filenames, partial filenames, or absolute paths. ' +
-                    'Examples: ["meeting-1.md", "meeting-2.md"] or ["2026-01-29", "2026-01-30"]',
+                    'Array of relative paths from the output directory. ' +
+                    'Examples: ["meeting-1.md", "meeting-2.md"] or ["2026/2/01-1325.md", "2026/2/01-1400.md"]',
             },
             title: {
                 type: 'string',
@@ -242,7 +252,7 @@ export const provideFeedbackTool: Tool = {
     name: 'protokoll_provide_feedback',
     description:
         'Provide natural language feedback to correct a transcript. ' +
-        'You can provide either an absolute path OR just a filename/partial filename. ' +
+        'Path is relative to the configured output directory. ' +
         'The feedback is processed by an agentic model that can: ' +
         '- Fix spelling and term errors ' +
         '- Add new terms, people, or companies to context ' +
@@ -255,8 +265,8 @@ export const provideFeedbackTool: Tool = {
             transcriptPath: {
                 type: 'string',
                 description: 
-                    'Filename, partial filename, or absolute path to the transcript. ' +
-                    'Examples: "meeting-notes.md", "2026-01-29", "/full/path/to/transcript.md"',
+                    'Relative path to the transcript from the output directory. ' +
+                    'Examples: "meeting-notes.md", "2026/2/01-1325-02012026091511.md"',
             },
             feedback: {
                 type: 'string',
@@ -283,16 +293,17 @@ export async function handleReadTranscript(args: {
     transcriptPath: string;
     contextDirectory?: string;
 }) {
-    // Find the transcript (handles both paths and filenames)
-    const transcriptPath = await findTranscript(args.transcriptPath, args.contextDirectory);
+    // Find the transcript (returns absolute path for file operations)
+    const absolutePath = await findTranscript(args.transcriptPath, args.contextDirectory);
 
-    const parsed = await parseTranscript(transcriptPath);
+    const parsed = await parseTranscript(absolutePath);
 
-    // Sanitize path to ensure no absolute paths are exposed
-    const sanitizedPath = await sanitizePath(transcriptPath);
+    // Convert to relative path for response
+    const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
+    const relativePath = await sanitizePath(absolutePath, outputDirectory);
 
     return {
-        filePath: sanitizedPath,
+        filePath: relativePath,
         title: parsed.title,
         metadata: parsed.metadata,
         content: parsed.content,
@@ -329,10 +340,11 @@ export async function handleListTranscripts(args: {
         search: args.search,
     });
 
-    // Sanitize all paths to ensure no absolute paths are exposed
-    const sanitizedTranscripts = await Promise.all(
+    // Convert all paths to relative paths from output directory
+    const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
+    const relativeTranscripts = await Promise.all(
         result.transcripts.map(async (t) => ({
-            path: t.path ? await sanitizePath(t.path, directory) : t.filename || '',
+            path: t.path ? await sanitizePath(t.path, outputDirectory) : t.filename || '',
             filename: t.filename,
             date: t.date,
             time: t.time,
@@ -342,8 +354,8 @@ export async function handleListTranscripts(args: {
     );
 
     return {
-        directory,
-        transcripts: sanitizedTranscripts,
+        directory: await sanitizePath(directory, outputDirectory) || '.',
+        transcripts: relativeTranscripts,
         pagination: {
             total: result.total,
             limit: result.limit,
@@ -368,14 +380,14 @@ export async function handleEditTranscript(args: {
     tagsToRemove?: string[];
     contextDirectory?: string;
 }) {
-    // Find the transcript (handles both paths and filenames)
-    const transcriptPath = await findTranscript(args.transcriptPath, args.contextDirectory);
+    // Find the transcript (returns absolute path for file operations)
+    const absolutePath = await findTranscript(args.transcriptPath, args.contextDirectory);
 
     if (!args.title && !args.projectId && !args.tagsToAdd && !args.tagsToRemove) {
         throw new Error('Must specify at least one of: title, projectId, tagsToAdd, or tagsToRemove');
     }
 
-    const result = await editTranscript(transcriptPath, {
+    const result = await editTranscript(absolutePath, {
         title: args.title,
         projectId: args.projectId,
         tagsToAdd: args.tagsToAdd,
@@ -388,22 +400,22 @@ export async function handleEditTranscript(args: {
     await writeFile(result.outputPath, result.content, 'utf-8');
 
     // Delete original if path changed
-    if (result.outputPath !== transcriptPath) {
-        await unlink(transcriptPath);
+    if (result.outputPath !== absolutePath) {
+        await unlink(absolutePath);
     }
 
-    // Sanitize paths to ensure no absolute paths are exposed
+    // Convert to relative paths for response
     const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
-    const sanitizedOriginalPath = await sanitizePath(transcriptPath || '', outputDirectory);
-    const sanitizedOutputPath = await sanitizePath(result.outputPath || transcriptPath || '', outputDirectory);
+    const relativeOriginalPath = await sanitizePath(absolutePath || '', outputDirectory);
+    const relativeOutputPath = await sanitizePath(result.outputPath || absolutePath || '', outputDirectory);
 
     return {
         success: true,
-        originalPath: sanitizedOriginalPath,
-        outputPath: sanitizedOutputPath,
-        renamed: result.outputPath !== transcriptPath,
-        message: result.outputPath !== transcriptPath
-            ? `Transcript updated and moved to: ${sanitizedOutputPath}`
+        originalPath: relativeOriginalPath,
+        outputPath: relativeOutputPath,
+        renamed: result.outputPath !== absolutePath,
+        message: result.outputPath !== absolutePath
+            ? `Transcript updated and moved to: ${relativeOutputPath}`
             : 'Transcript updated',
     };
 }
@@ -418,14 +430,14 @@ export async function handleCombineTranscripts(args: {
         throw new Error('At least 2 transcript files are required');
     }
 
-    // Find all transcripts (handles both paths and filenames)
-    const resolvedPaths: string[] = [];
-    for (const path of args.transcriptPaths) {
-        const resolved = await findTranscript(path, args.contextDirectory);
-        resolvedPaths.push(resolved);
+    // Find all transcripts (returns absolute paths for file operations)
+    const absolutePaths: string[] = [];
+    for (const relativePath of args.transcriptPaths) {
+        const absolute = await findTranscript(relativePath, args.contextDirectory);
+        absolutePaths.push(absolute);
     }
 
-    const result = await combineTranscripts(resolvedPaths, {
+    const result = await combineTranscripts(absolutePaths, {
         title: args.title,
         projectId: args.projectId,
         contextDirectory: args.contextDirectory,
@@ -437,7 +449,7 @@ export async function handleCombineTranscripts(args: {
 
     // Delete source files
     const deletedFiles: string[] = [];
-    for (const path of resolvedPaths) {
+    for (const path of absolutePaths) {
         try {
             await unlink(path);
             deletedFiles.push(path);
@@ -446,22 +458,22 @@ export async function handleCombineTranscripts(args: {
         }
     }
 
-    // Sanitize paths to ensure no absolute paths are exposed
+    // Convert to relative paths for response
     const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
-    const sanitizedOutputPath = await sanitizePath(result.outputPath || '', outputDirectory);
-    const sanitizedSourceFiles = await Promise.all(
-        resolvedPaths.map(p => sanitizePath(p || '', outputDirectory))
+    const relativeOutputPath = await sanitizePath(result.outputPath || '', outputDirectory);
+    const relativeSourceFiles = await Promise.all(
+        absolutePaths.map(p => sanitizePath(p || '', outputDirectory))
     );
-    const sanitizedDeletedFiles = await Promise.all(
+    const relativeDeletedFiles = await Promise.all(
         deletedFiles.map(p => sanitizePath(p || '', outputDirectory))
     );
 
     return {
         success: true,
-        outputPath: sanitizedOutputPath,
-        sourceFiles: sanitizedSourceFiles,
-        deletedFiles: sanitizedDeletedFiles,
-        message: `Combined ${resolvedPaths.length} transcripts into: ${sanitizedOutputPath}`,
+        outputPath: relativeOutputPath,
+        sourceFiles: relativeSourceFiles,
+        deletedFiles: relativeDeletedFiles,
+        message: `Combined ${absolutePaths.length} transcripts into: ${relativeOutputPath}`,
     };
 }
 
@@ -471,17 +483,17 @@ export async function handleProvideFeedback(args: {
     model?: string;
     contextDirectory?: string;
 }) {
-    // Find the transcript (handles both paths and filenames)
-    const transcriptPath = await findTranscript(args.transcriptPath, args.contextDirectory);
+    // Find the transcript (returns absolute path for file operations)
+    const absolutePath = await findTranscript(args.transcriptPath, args.contextDirectory);
 
-    const transcriptContent = await readFile(transcriptPath, 'utf-8');
+    const transcriptContent = await readFile(absolutePath, 'utf-8');
     const context = await Context.create({
-        startingDir: args.contextDirectory || dirname(transcriptPath),
+        startingDir: args.contextDirectory || dirname(absolutePath),
     });
     const reasoning = Reasoning.create({ model: args.model || DEFAULT_MODEL });
 
     const feedbackCtx: FeedbackContext = {
-        transcriptPath,
+        transcriptPath: absolutePath,
         transcriptContent,
         originalContent: transcriptContent,
         context,
@@ -497,10 +509,10 @@ export async function handleProvideFeedback(args: {
         result = await applyChanges(feedbackCtx);
     }
 
-    // Sanitize path to ensure no absolute paths are exposed
+    // Convert to relative path for response
     const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
-    const finalPath = result?.newPath || transcriptPath || '';
-    const sanitizedOutputPath = await sanitizePath(finalPath, outputDirectory);
+    const finalAbsolutePath = result?.newPath || absolutePath || '';
+    const relativeOutputPath = await sanitizePath(finalAbsolutePath, outputDirectory);
 
     return {
         success: true,
@@ -509,7 +521,7 @@ export async function handleProvideFeedback(args: {
             type: c.type,
             description: c.description,
         })),
-        outputPath: sanitizedOutputPath,
+        outputPath: relativeOutputPath,
         moved: result?.moved || false,
     };
 }

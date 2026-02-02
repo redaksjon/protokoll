@@ -328,7 +328,14 @@ export const combineTranscripts = async (
         
         // Update destination if project has routing configured
         if (targetProject.routing?.destination) {
-            baseMetadata.destination = expandPath(targetProject.routing.destination);
+            const config = context.getConfig();
+            const defaultPath = expandPath((config.outputDirectory as string) || '~/notes');
+            const routingPath = expandPath(targetProject.routing.destination);
+            // Resolve relative paths relative to the configured output directory
+            const resolvedPath = !routingPath.startsWith('/') && !routingPath.match(/^[A-Za-z]:/)
+                ? path.resolve(defaultPath, routingPath)
+                : routingPath;
+            baseMetadata.destination = resolvedPath;
         }
     }
     
@@ -436,13 +443,26 @@ const buildRoutingConfig = (
     const config = context.getConfig();
     const defaultPath = expandPath((config.outputDirectory as string) || '~/notes');
     
+    // Resolve relative paths relative to the configured output directory
+    const resolveRoutingPath = (routingPath: string | undefined): string => {
+        if (!routingPath) {
+            return defaultPath;
+        }
+        const expanded = expandPath(routingPath);
+        // If it's a relative path (doesn't start with / and isn't already absolute), resolve relative to output directory
+        if (!expanded.startsWith('/') && !expanded.match(/^[A-Za-z]:/)) {
+            return path.resolve(defaultPath, expanded);
+        }
+        return expanded;
+    };
+    
     // Build project routes from all projects
     const projects: Routing.ProjectRoute[] = context.getAllProjects()
         .filter(p => p.active !== false)
         .map(p => ({
             projectId: p.id,
             destination: {
-                path: expandPath(p.routing?.destination || defaultPath),
+                path: resolveRoutingPath(p.routing?.destination),
                 structure: p.routing?.structure || 'month',
                 filename_options: p.routing?.filename_options || ['date', 'time', 'subject'],
             },
@@ -615,7 +635,14 @@ export const editTranscript = async (
         updatedMetadata.project = targetProject.name;
         updatedMetadata.projectId = targetProject.id;
         if (targetProject.routing?.destination) {
-            updatedMetadata.destination = expandPath(targetProject.routing.destination);
+            const config = context.getConfig();
+            const defaultPath = expandPath((config.outputDirectory as string) || '~/notes');
+            const routingPath = expandPath(targetProject.routing.destination);
+            // Resolve relative paths relative to the configured output directory
+            const resolvedPath = !routingPath.startsWith('/') && !routingPath.match(/^[A-Za-z]:/)
+                ? path.resolve(defaultPath, routingPath)
+                : routingPath;
+            updatedMetadata.destination = resolvedPath;
         }
     }
     

@@ -190,12 +190,26 @@ export const formatEntityMetadataMarkdown = (metadata: TranscriptMetadata): stri
  * Reads the Entity References section if present
  */
 export const parseEntityMetadata = (content: string): TranscriptMetadata['entities'] | undefined => {
-    const entitySection = content.match(/## Entity References\s*\n([\s\S]*?)(?:\n##|$)/);
-    if (!entitySection) {
+    // Find the Entity References section
+    // Look for "## Entity References" and capture everything after it until the next "##" header or end of content
+    const headerIndex = content.indexOf('## Entity References');
+    if (headerIndex === -1) {
         return undefined;
     }
     
-    const sectionContent = entitySection[1];
+    // Find the start of the content (after the header and any whitespace/newlines)
+    let contentStart = headerIndex + '## Entity References'.length;
+    // Skip whitespace and newlines
+    while (contentStart < content.length && (content[contentStart] === '\n' || content[contentStart] === '\r' || content[contentStart] === ' ' || content[contentStart] === '\t')) {
+        contentStart++;
+    }
+    
+    // Find the end - look for next "##" at start of line or end of content
+    const remainingContent = content.substring(contentStart);
+    const nextHeaderMatch = remainingContent.match(/\n## /);
+    const sectionContent = nextHeaderMatch 
+        ? remainingContent.substring(0, nextHeaderMatch.index)
+        : remainingContent;
     const entities: NonNullable<TranscriptMetadata['entities']> = {
         people: [],
         projects: [],
@@ -216,25 +230,51 @@ export const parseEntityMetadata = (content: string): TranscriptMetadata['entiti
         const entityType = typeMap[type];
         
         // Find the section for this type
-        const sectionStart = sectionContent.indexOf(`### ${type}`);
+        const sectionHeader = `### ${type}`;
+        const sectionStart = sectionContent.indexOf(sectionHeader);
         if (sectionStart === -1) return [];
         
         // Find the end (next ### or end of content)
-        const afterSection = sectionContent.substring(sectionStart + type.length + 4); // +4 for "### "
+        // Skip past the header line (including newline)
+        const headerEnd = sectionStart + sectionHeader.length;
+        let sectionTextStart = headerEnd;
+        // Skip whitespace and newlines after the header
+        while (sectionTextStart < sectionContent.length && 
+               (sectionContent[sectionTextStart] === '\n' || sectionContent[sectionTextStart] === '\r' || sectionContent[sectionTextStart] === ' ')) {
+            sectionTextStart++;
+        }
+        
+        const afterSection = sectionContent.substring(sectionTextStart);
         const nextSection = afterSection.search(/\n###/);
         const sectionText = nextSection === -1 ? afterSection : afterSection.substring(0, nextSection);
         
-        // Extract items
-        const items: EntityReference[] = [];
-        const itemRegex = /- `([^`]+)`: (.+?)$/gm;
-        let itemMatch;
+        // Debug logging for Projects parsing (remove after fixing)
+        if (type === 'Projects' && sectionText.length > 0) {
+            // eslint-disable-next-line no-console
+            console.log(`   [DEBUG] Parsing Projects section, text length: ${sectionText.length}, first 100 chars: ${sectionText.substring(0, 100).replace(/\n/g, '\\n')}`);
+        }
         
-        while ((itemMatch = itemRegex.exec(sectionText)) !== null) {
-            items.push({
-                id: itemMatch[1],
-                name: itemMatch[2].trim(),
-                type: entityType,
-            });
+        // Extract items - match format: "- `id`: name"
+        // Match bullet point with backticked ID and name
+        const items: EntityReference[] = [];
+        // Use multiline regex to match across lines, look for "- `id`: name" pattern
+        const lines = sectionText.split('\n');
+        for (const line of lines) {
+            const trimmed = line.trim();
+            // Match: "- `id`: name" or "- `id`:name" (with or without space after colon)
+            const match = trimmed.match(/^- `([^`]+)`:\s*(.+)$/);
+            if (match) {
+                items.push({
+                    id: match[1],
+                    name: match[2].trim(),
+                    type: entityType,
+                });
+                // Debug logging
+                if (type === 'Projects') {
+                    // eslint-disable-next-line no-console
+                    console.log(`   [DEBUG] Found project: id="${match[1]}", name="${match[2].trim()}"`);
+                }
+            }
         }
         
         return items;
