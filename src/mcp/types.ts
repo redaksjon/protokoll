@@ -109,11 +109,12 @@ export interface ConfigUri extends ParsedResourceUri {
 
 export interface TranscriptsListUri extends ParsedResourceUri {
     resourceType: 'transcripts-list';
-    directory: string;
+    directory?: string;
     startDate?: string;
     endDate?: string;
     limit?: number;
     offset?: number;
+    projectId?: string;
 }
 
 export interface EntitiesListUri extends ParsedResourceUri {

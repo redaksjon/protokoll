@@ -1,6 +1,5 @@
 import { 
-    redaksjonSchemas, 
-    redaksjonPluralNames,
+    redaksjonSchemas,
 } from '@redaksjon/context';
 
 /**

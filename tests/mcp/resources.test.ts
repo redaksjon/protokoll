@@ -8,6 +8,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as Resources from '../../src/mcp/resources';
 import * as Context from '../../src/context';
+import * as ServerConfig from '../../src/mcp/serverConfig';
 
 // Mock dependencies
 vi.mock('../../src/context', () => ({
@@ -18,6 +19,10 @@ vi.mock('../../src/cli/transcript', () => ({
     listTranscripts: vi.fn(),
 }));
 
+vi.mock('../../src/mcp/serverConfig', () => ({
+    getOutputDirectory: vi.fn(),
+}));
+
 vi.mock('../../src/mcp/uri', async (importOriginal) => {
     const actual = await importOriginal() as any;
     return {
@@ -25,7 +30,12 @@ vi.mock('../../src/mcp/uri', async (importOriginal) => {
         buildTranscriptUri: vi.fn((path: string) => `protokoll://transcript/${path}`),
         buildEntityUri: vi.fn((type: string, id: string) => `protokoll://entity/${type}/${id}`),
         buildConfigUri: vi.fn((path?: string) => `protokoll://config${path ? `?path=${path}` : ''}`),
-        buildTranscriptsListUri: vi.fn((opts: any) => `protokoll://transcripts?directory=${opts.directory}`),
+        buildTranscriptsListUri: vi.fn((opts: any) => {
+            if (opts.directory) {
+                return `protokoll://transcripts?directory=${opts.directory}`;
+            }
+            return 'protokoll://transcripts';
+        }),
         buildEntitiesListUri: vi.fn((type: string) => `protokoll://entities/${type}`),
     };
 });
@@ -74,6 +84,7 @@ describe('MCP Resources', () => {
         };
 
         vi.mocked(Context.create).mockResolvedValue(mockContext);
+        vi.mocked(ServerConfig.getOutputDirectory).mockReturnValue(`${tempDir}/output`);
         vi.clearAllMocks();
     });
 
@@ -161,15 +172,19 @@ describe('MCP Resources', () => {
         });
 
         it('should handle relative paths', async () => {
+            const outputDir = `${tempDir}/output`;
+            await fs.mkdir(outputDir, { recursive: true });
+            
             const transcriptPath = 'test.md';
-            await fs.writeFile(path.join(process.cwd(), transcriptPath), 'Content');
+            const fullPath = path.join(outputDir, transcriptPath);
+            await fs.writeFile(fullPath, 'Content');
 
             const result = await Resources.readTranscriptResource(transcriptPath);
 
             expect(result.text).toBe('Content');
             
             // Cleanup
-            await fs.unlink(path.join(process.cwd(), transcriptPath));
+            await fs.unlink(fullPath);
         });
 
         it('should throw error for missing file', async () => {
@@ -381,10 +396,46 @@ describe('MCP Resources', () => {
             expect(data.filters.endDate).toBe('2026-01-31');
         });
 
-        it('should throw error when directory not provided', async () => {
-            await expect(
-                Resources.readTranscriptsListResource({ directory: '' })
-            ).rejects.toThrow('Directory is required');
+        it('should fall back to configured outputDirectory when directory not provided', async () => {
+            const { listTranscripts } = await import('../../src/cli/transcript');
+            vi.mocked(listTranscripts).mockResolvedValue({
+                transcripts: [],
+                total: 0,
+                limit: 50,
+                offset: 0,
+                hasMore: false,
+            });
+
+            const result = await Resources.readTranscriptsListResource({ directory: '' });
+
+            const data = JSON.parse(result.text!);
+            expect(data.directory).toBe(`${tempDir}/output`);
+            expect(vi.mocked(listTranscripts)).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    directory: `${tempDir}/output`,
+                })
+            );
+        });
+
+        it('should fall back to configured outputDirectory when directory is undefined', async () => {
+            const { listTranscripts } = await import('../../src/cli/transcript');
+            vi.mocked(listTranscripts).mockResolvedValue({
+                transcripts: [],
+                total: 0,
+                limit: 50,
+                offset: 0,
+                hasMore: false,
+            });
+
+            const result = await Resources.readTranscriptsListResource({});
+
+            const data = JSON.parse(result.text!);
+            expect(data.directory).toBe(`${tempDir}/output`);
+            expect(vi.mocked(listTranscripts)).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    directory: `${tempDir}/output`,
+                })
+            );
         });
 
         it('should use default limit when not specified', async () => {

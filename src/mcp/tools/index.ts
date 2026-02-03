@@ -12,6 +12,8 @@ import * as EntityTools from './entityTools';
 import * as AssistTools from './assistTools';
 import * as TranscriptTools from './transcriptTools';
 import * as SystemTools from './systemTools';
+import * as RelationshipTools from './relationshipTools';
+import * as ContentTools from './contentTools';
 
 // Re-export all handlers for testing
 export * from './discoveryTools';
@@ -21,6 +23,8 @@ export * from './entityTools';
 export * from './assistTools';
 export * from './transcriptTools';
 export * from './systemTools';
+export * from './relationshipTools';
+export * from './contentTools';
 export * from './shared';
 
 // ============================================================================
@@ -61,6 +65,18 @@ export const tools: Tool[] = [
     EntityTools.addCompanyTool,
     EntityTools.deleteEntityTool,
 
+    // Relationship Management
+    RelationshipTools.addRelationshipTool,
+    RelationshipTools.removeRelationshipTool,
+    RelationshipTools.listRelationshipsTool,
+    RelationshipTools.findRelatedEntitiesTool,
+
+    // Content Management
+    ContentTools.addContentTool,
+    ContentTools.removeContentTool,
+    ContentTools.listContentTool,
+    ContentTools.getContentTool,
+
     // Smart Assistance
     AssistTools.suggestProjectMetadataTool,
     AssistTools.suggestTermMetadataTool,
@@ -71,6 +87,9 @@ export const tools: Tool[] = [
     TranscriptTools.editTranscriptTool,
     TranscriptTools.combineTranscriptsTool,
     TranscriptTools.provideFeedbackTool,
+    TranscriptTools.updateTranscriptContentTool,
+    TranscriptTools.updateTranscriptEntityReferencesTool,
+    TranscriptTools.createNoteTool,
 ];
 
 // ============================================================================
@@ -141,6 +160,26 @@ export async function handleToolCall(name: string, args: unknown): Promise<unkno
         case 'protokoll_suggest_term_metadata':
             return AssistTools.handleSuggestTermMetadata(args as Parameters<typeof AssistTools.handleSuggestTermMetadata>[0]);
 
+        // Relationship Management
+        case 'protokoll_add_relationship':
+            return RelationshipTools.handleAddRelationship(args as Parameters<typeof RelationshipTools.handleAddRelationship>[0]);
+        case 'protokoll_remove_relationship':
+            return RelationshipTools.handleRemoveRelationship(args as Parameters<typeof RelationshipTools.handleRemoveRelationship>[0]);
+        case 'protokoll_list_relationships':
+            return RelationshipTools.handleListRelationships(args as Parameters<typeof RelationshipTools.handleListRelationships>[0]);
+        case 'protokoll_find_related_entities':
+            return RelationshipTools.handleFindRelatedEntities(args as Parameters<typeof RelationshipTools.handleFindRelatedEntities>[0]);
+
+        // Content Management
+        case 'protokoll_add_content':
+            return ContentTools.handleAddContent(args as Parameters<typeof ContentTools.handleAddContent>[0]);
+        case 'protokoll_remove_content':
+            return ContentTools.handleRemoveContent(args as Parameters<typeof ContentTools.handleRemoveContent>[0]);
+        case 'protokoll_list_content':
+            return ContentTools.handleListContent(args as Parameters<typeof ContentTools.handleListContent>[0]);
+        case 'protokoll_get_content':
+            return ContentTools.handleGetContent(args as Parameters<typeof ContentTools.handleGetContent>[0]);
+
         // Transcript Operations
         case 'protokoll_read_transcript':
             return TranscriptTools.handleReadTranscript(args as Parameters<typeof TranscriptTools.handleReadTranscript>[0]);
@@ -152,6 +191,12 @@ export async function handleToolCall(name: string, args: unknown): Promise<unkno
             return TranscriptTools.handleCombineTranscripts(args as Parameters<typeof TranscriptTools.handleCombineTranscripts>[0]);
         case 'protokoll_provide_feedback':
             return TranscriptTools.handleProvideFeedback(args as Parameters<typeof TranscriptTools.handleProvideFeedback>[0]);
+        case 'protokoll_update_transcript_content':
+            return TranscriptTools.handleUpdateTranscriptContent(args as Parameters<typeof TranscriptTools.handleUpdateTranscriptContent>[0]);
+        case 'protokoll_update_transcript_entity_references':
+            return TranscriptTools.handleUpdateTranscriptEntityReferences(args as Parameters<typeof TranscriptTools.handleUpdateTranscriptEntityReferences>[0]);
+        case 'protokoll_create_note':
+            return TranscriptTools.handleCreateNote(args as Parameters<typeof TranscriptTools.handleCreateNote>[0]);
 
         default:
             throw new Error(`Unknown tool: ${name}`);

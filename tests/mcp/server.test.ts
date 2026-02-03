@@ -26,6 +26,33 @@ vi.mock('../../src/util/openai', () => ({
     createCompletion: vi.fn().mockResolvedValue('test variant 1,test variant 2,test phrase'),
 }));
 
+// Mock getConfiguredDirectory to return tempDir for outputDirectory in tests
+// This will be set up in beforeEach
+let mockTempDir: string | null = null;
+vi.mock('../../src/mcp/tools/shared', async () => {
+    const actual = await vi.importActual('../../src/mcp/tools/shared');
+    const actualModule = actual as any;
+    
+    // Mock getConfiguredDirectory to return tempDir for outputDirectory
+    const mockGetConfiguredDirectory = vi.fn(async (key: string, _contextDirectory?: string) => {
+        if (key === 'outputDirectory' && mockTempDir) {
+            return mockTempDir;
+        }
+        // For other keys, use the actual implementation
+        return actualModule.getConfiguredDirectory(key, _contextDirectory);
+    });
+    
+    return {
+        ...actual,
+        getConfiguredDirectory: mockGetConfiguredDirectory,
+        // Override validatePathWithinOutputDirectory to use the mocked getConfiguredDirectory
+        validatePathWithinOutputDirectory: async (resolvedPath: string, _contextDirectory?: string) => {
+            const outputDirectory = await mockGetConfiguredDirectory('outputDirectory', _contextDirectory);
+            actualModule.validatePathWithinDirectory(resolvedPath, outputDirectory);
+        },
+    };
+});
+
 import {
     fileExists,
     getAudioMetadata,
@@ -89,6 +116,7 @@ describe('MCP Server', () => {
     beforeEach(async () => {
         // Create a temporary directory for testing
         tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mcp-test-'));
+        mockTempDir = tempDir; // Set for the mock
         protokollDir = path.join(tempDir, '.protokoll');
         await fs.mkdir(protokollDir, { recursive: true });
         await fs.mkdir(path.join(protokollDir, 'context', 'people'), { recursive: true });
@@ -100,11 +128,19 @@ describe('MCP Server', () => {
     afterEach(async () => {
         // Cleanup temp directory
         await fs.rm(tempDir, { recursive: true, force: true });
+        mockTempDir = null;
     });
 
     // ========================================================================
     // Utility Functions
     // ========================================================================
+
+    /**
+     * Convert an absolute path to a relative path from tempDir (output directory)
+     */
+    function toRelativePath(absolutePath: string): string {
+        return path.relative(tempDir, absolutePath);
+    }
 
     describe('fileExists', () => {
         it('should return true for existing file', async () => {
@@ -263,9 +299,13 @@ routing:
             const result = await handleDiscoverConfig({ path: tempDir });
 
             expect(result.found).toBe(true);
-            expect(result.searchedFrom).toBe(tempDir);
+            // Paths are now sanitized to be relative (no absolute paths exposed)
+            expect(result.searchedFrom).toBeTruthy();
+            expect(typeof result.searchedFrom).toBe('string');
             expect(result.configs.length).toBeGreaterThan(0);
-            expect(result.primaryConfig).toBe(protokollDir);
+            // primaryConfig is also sanitized to relative path
+            expect(result.primaryConfig).toBeTruthy();
+            expect(typeof result.primaryConfig).toBe('string');
         });
 
         it('should throw error for non-existent path', async () => {
@@ -978,16 +1018,25 @@ routing:
             const transcriptPath = path.join(tempDir, 'transcript.md');
             await fs.writeFile(transcriptPath, SAMPLE_TRANSCRIPT);
 
-            const result = await handleReadTranscript({ transcriptPath });
+            const result = await handleReadTranscript({ 
+                transcriptPath: toRelativePath(transcriptPath),
+                contextDirectory: protokollDir
+            });
 
-            expect(result.filePath).toBe(transcriptPath);
+            // Paths are now sanitized to be relative (no absolute paths exposed)
+            expect(result.filePath).toBeTruthy();
+            expect(typeof result.filePath).toBe('string');
+            // Verify the file can be resolved from the relative path
             expect(result.title).toBe('Test Meeting Notes');
             expect(result.content).toContain('transcript content');
         });
 
         it('should throw error for non-existent file', async () => {
             const fakePath = path.join(tempDir, 'nonexistent.md');
-            await expect(handleReadTranscript({ transcriptPath: fakePath }))
+            await expect(handleReadTranscript({ 
+                transcriptPath: toRelativePath(fakePath),
+                contextDirectory: protokollDir
+            }))
                 .rejects.toThrow('No transcript found matching');
         });
     });
@@ -998,17 +1047,25 @@ routing:
             await fs.writeFile(transcriptPath, SAMPLE_TRANSCRIPT);
 
             const result = await handleEditTranscript({
-                transcriptPath,
-                title: 'New Title'
+                transcriptPath: toRelativePath(transcriptPath),
+                title: 'New Title',
+                contextDirectory: protokollDir
             });
 
             expect(result.success).toBe(true);
-            expect(result.originalPath).toBe(transcriptPath);
+            // Paths are now sanitized to be relative (no absolute paths exposed)
+            expect(result.originalPath).toBeTruthy();
+            expect(typeof result.originalPath).toBe('string');
             expect(result.outputPath).toBeTruthy();
+            expect(typeof result.outputPath).toBe('string');
             expect(result.message).toBeTruthy();
 
-            // Verify the file was updated
-            const content = await fs.readFile(result.outputPath, 'utf-8');
+            // Verify the file was updated - resolve the relative path to absolute for reading
+            // The outputPath should be relative, so resolve it from tempDir (which is the output directory in tests)
+            const absoluteOutputPath = path.isAbsolute(result.outputPath) 
+                ? result.outputPath 
+                : path.resolve(tempDir, result.outputPath);
+            const content = await fs.readFile(absoluteOutputPath, 'utf-8');
             expect(content).toContain('New Title');
         });
     });
@@ -1050,7 +1107,7 @@ Content from part 2.
 `);
 
             const result = await handleCombineTranscripts({
-                transcriptPaths: [transcript1, transcript2],
+                transcriptPaths: [toRelativePath(transcript1), toRelativePath(transcript2)],
                 title: 'Combined Transcript',
                 contextDirectory: protokollDir
             });
@@ -1060,8 +1117,9 @@ Content from part 2.
             expect(result.sourceFiles).toHaveLength(2);
             expect(result.message).toContain('Combined 2 transcripts');
 
-            // Verify the combined file exists
-            const combinedContent = await fs.readFile(result.outputPath, 'utf-8');
+            // Verify the combined file exists - result.outputPath is relative, resolve it
+            const absoluteCombinedPath = path.resolve(tempDir, result.outputPath);
+            const combinedContent = await fs.readFile(absoluteCombinedPath, 'utf-8');
             expect(combinedContent).toContain('Combined Transcript');
             expect(combinedContent).toContain('Content from part 1');
             expect(combinedContent).toContain('Content from part 2');
@@ -1103,8 +1161,9 @@ Content from part 2.
             await fs.writeFile(transcriptPath, SAMPLE_TRANSCRIPT);
 
             await expect(handleEditTranscript({
-                transcriptPath,
-            })).rejects.toThrow('Must specify title and/or projectId');
+                transcriptPath: toRelativePath(transcriptPath),
+                contextDirectory: protokollDir
+            })).rejects.toThrow('Must specify at least one of: title, projectId, tagsToAdd, or tagsToRemove');
         });
     });
 

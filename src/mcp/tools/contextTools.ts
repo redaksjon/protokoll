@@ -6,6 +6,13 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import * as Context from '@/context';
 import type { Entity, EntityType } from '@/context/types';
 import { formatEntity } from './shared';
+import { 
+    findPersonResilient, 
+    findCompanyResilient, 
+    findTermResilient, 
+    findProjectResilient,
+    findIgnoredResilient 
+} from '@/utils/entityFinder';
 
 // ============================================================================
 // Tool Definitions
@@ -284,27 +291,25 @@ export async function handleGetEntity(args: { entityType: EntityType; entityId: 
         startingDir: args.contextDirectory || process.cwd(),
     });
 
-    let entity: Entity | undefined;
+    let entity: Entity;
     switch (args.entityType) {
         case 'project':
-            entity = context.getProject(args.entityId);
+            entity = findProjectResilient(context, args.entityId);
             break;
         case 'person':
-            entity = context.getPerson(args.entityId);
+            entity = findPersonResilient(context, args.entityId);
             break;
         case 'term':
-            entity = context.getTerm(args.entityId);
+            entity = findTermResilient(context, args.entityId);
             break;
         case 'company':
-            entity = context.getCompany(args.entityId);
+            entity = findCompanyResilient(context, args.entityId);
             break;
         case 'ignored':
-            entity = context.getIgnored(args.entityId);
+            entity = findIgnoredResilient(context, args.entityId);
             break;
-    }
-
-    if (!entity) {
-        throw new Error(`${args.entityType} "${args.entityId}" not found`);
+        default:
+            throw new Error(`Unknown entity type: ${args.entityType}`);
     }
 
     const filePath = context.getEntityFilePath(entity);

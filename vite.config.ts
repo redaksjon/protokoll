@@ -82,6 +82,7 @@ export default defineConfig({
             input: {
                 main: 'src/main.ts',
                 'mcp/server': 'src/mcp/server.ts',
+                'mcp/server-http': 'src/mcp/server-http.ts',
             },
             output: {
                 format: 'esm',

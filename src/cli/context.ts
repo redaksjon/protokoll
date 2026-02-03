@@ -10,9 +10,48 @@ import * as readline from 'readline';
 import * as yaml from 'js-yaml';
 import Table from 'cli-table3';
 import * as Context from '../context';
-import { Entity, Person, Project, Company, Term, IgnoredTerm, EntityType } from '../context/types';
+import { Entity, Person, Project, Company, Term, IgnoredTerm, EntityType, EntityRelationship } from '../context/types';
 import * as ProjectAssist from './project-assist';
 import * as RelationshipAssist from './relationship-assist';
+import { findTermResilient } from '../utils/entityFinder';
+
+// Helper functions for working with relationships in new format
+const createEntityUri = (type: string, id: string): string => {
+    return `redaksjon://${type}/${id}`;
+};
+
+const getIdFromUri = (uri: string): string | null => {
+    const match = uri.match(/^redaksjon:\/\/[^/]+\/(.+)$/);
+    return match ? match[1] : null;
+};
+
+const getRelationshipsByType = (relationships: EntityRelationship[] | undefined, relationshipType: string): EntityRelationship[] => {
+    if (!relationships) return [];
+    return relationships.filter(r => r.relationship === relationshipType);
+};
+
+const getEntityIdsByRelationshipType = (relationships: EntityRelationship[] | undefined, relationshipType: string): string[] => {
+    return getRelationshipsByType(relationships, relationshipType)
+        .map(r => getIdFromUri(r.uri))
+        .filter((id): id is string => id !== null);
+};
+
+const addRelationship = (relationships: EntityRelationship[] | undefined, type: string, entityType: string, entityId: string): EntityRelationship[] => {
+    const rels = relationships || [];
+    const uri = createEntityUri(entityType, entityId);
+    // Remove existing relationship of this type to this entity, then add new one
+    const filtered = rels.filter(r => !(r.relationship === type && r.uri === uri));
+    return [...filtered, { uri, relationship: type }];
+};
+
+const setRelationships = (relationships: EntityRelationship[] | undefined, type: string, entityType: string, entityIds: string[]): EntityRelationship[] => {
+    const rels = relationships || [];
+    // Remove all relationships of this type
+    const filtered = rels.filter(r => r.relationship !== type);
+    // Add new relationships
+    const newRels = entityIds.map(id => ({ uri: createEntityUri(entityType, id), relationship: type }));
+    return [...filtered, ...newRels];
+};
 
 // Options for adding a project
 interface AddProjectOptions {
@@ -340,21 +379,27 @@ const displayEntityDetails = (entity: Entity, filePath?: string): void => {
         }
         
         // Relationships
-        if (project.relationships) {
-            const rel = project.relationships;
+        if (project.relationships && project.relationships.length > 0) {
             const relParts: string[] = [];
             
-            if (rel.parent) {
-                relParts.push(`Parent: ${rel.parent}`);
+            const parentIds = getEntityIdsByRelationshipType(project.relationships, 'parent');
+            if (parentIds.length > 0) {
+                relParts.push(`Parent: ${parentIds.join(', ')}`);
             }
-            if (rel.children && rel.children.length > 0) {
-                relParts.push(`Children: ${rel.children.join(', ')}`);
+            
+            const childrenIds = getEntityIdsByRelationshipType(project.relationships, 'child');
+            if (childrenIds.length > 0) {
+                relParts.push(`Children: ${childrenIds.join(', ')}`);
             }
-            if (rel.siblings && rel.siblings.length > 0) {
-                relParts.push(`Siblings: ${rel.siblings.join(', ')}`);
+            
+            const siblingIds = getEntityIdsByRelationshipType(project.relationships, 'sibling');
+            if (siblingIds.length > 0) {
+                relParts.push(`Siblings: ${siblingIds.join(', ')}`);
             }
-            if (rel.relatedTerms && rel.relatedTerms.length > 0) {
-                relParts.push(`Related Terms: ${rel.relatedTerms.join(', ')}`);
+            
+            const relatedTermIds = getEntityIdsByRelationshipType(project.relationships, 'related_term');
+            if (relatedTermIds.length > 0) {
+                relParts.push(`Related Terms: ${relatedTermIds.join(', ')}`);
             }
             
             if (relParts.length > 0) {
@@ -804,11 +849,7 @@ const addProject = async (
         
         // ===== PHASE 4: Relationship Suggestions =====
         
-        let relationships: {
-            parent?: string;
-            siblings?: string[];
-            relatedTerms?: string[];
-        } | undefined;
+        let relationships: EntityRelationship[] | undefined;
         
         // Only suggest relationships if in interactive mode (not --yes)
         if (!options.yes && (topics.length > 0 || description)) {
@@ -828,8 +869,7 @@ const addProject = async (
                 
                 const parentAnswer = await askQuestion(rl, `Set "${relationshipSuggestions.parent.name}" as parent? (Y/n): `);
                 if (parentAnswer.toLowerCase() !== 'n' && parentAnswer.toLowerCase() !== 'no') {
-                    relationships = relationships || {};
-                    relationships.parent = relationshipSuggestions.parent.id;
+                    relationships = addRelationship(relationships, 'parent', 'project', relationshipSuggestions.parent.id);
                     print(`  ✓ Parent set to "${relationshipSuggestions.parent.name}"`);
                 }
             }
@@ -848,8 +888,8 @@ const addProject = async (
                         .filter(i => i >= 0 && i < relationshipSuggestions.siblings!.length);
                     
                     if (indices.length > 0) {
-                        relationships = relationships || {};
-                        relationships.siblings = indices.map(i => relationshipSuggestions.siblings![i].id);
+                        const siblingIds = indices.map(i => relationshipSuggestions.siblings![i].id);
+                        relationships = setRelationships(relationships, 'sibling', 'project', siblingIds);
                         print(`  ✓ Added ${indices.length} siblings`);
                     }
                 }
@@ -869,8 +909,8 @@ const addProject = async (
                         .filter(i => i >= 0 && i < relationshipSuggestions.relatedTerms!.length);
                     
                     if (indices.length > 0) {
-                        relationships = relationships || {};
-                        relationships.relatedTerms = indices.map(i => relationshipSuggestions.relatedTerms![i].id);
+                        const termIds = indices.map(i => relationshipSuggestions.relatedTerms![i].id);
+                        relationships = setRelationships(relationships, 'related_term', 'term', termIds);
                         print(`  ✓ Added ${indices.length} related terms`);
                     }
                 }
@@ -1124,36 +1164,38 @@ const editProject = async (
     if (options.parent || options.addChild || options.removeChild || 
         options.addSibling || options.removeSibling || options.addTerm || options.removeTerm) {
         
-        const existingRel = project.relationships || {};
-        const relationships: any = { ...existingRel };
+        let relationships: EntityRelationship[] = project.relationships ? [...project.relationships] : [];
         
         if (options.parent) {
-            relationships.parent = options.parent;
+            relationships = addRelationship(relationships, 'parent', 'project', options.parent);
             changes.push(`parent: ${options.parent}`);
         }
         
-        const updatedChildren = mergeArray(existingRel.children, options.addChild, options.removeChild);
-        if (updatedChildren) {
-            relationships.children = updatedChildren;
+        const existingChildren = getEntityIdsByRelationshipType(relationships, 'child');
+        const updatedChildren = mergeArray(existingChildren, options.addChild, options.removeChild);
+        if (updatedChildren !== undefined && updatedChildren !== existingChildren) {
+            relationships = setRelationships(relationships, 'child', 'project', updatedChildren);
             if (options.addChild?.length) changes.push(`added ${options.addChild.length} children`);
             if (options.removeChild?.length) changes.push(`removed ${options.removeChild.length} children`);
         }
         
-        const updatedSiblings = mergeArray(existingRel.siblings, options.addSibling, options.removeSibling);
-        if (updatedSiblings) {
-            relationships.siblings = updatedSiblings;
+        const existingSiblings = getEntityIdsByRelationshipType(relationships, 'sibling');
+        const updatedSiblings = mergeArray(existingSiblings, options.addSibling, options.removeSibling);
+        if (updatedSiblings !== undefined && updatedSiblings !== existingSiblings) {
+            relationships = setRelationships(relationships, 'sibling', 'project', updatedSiblings);
             if (options.addSibling?.length) changes.push(`added ${options.addSibling.length} siblings`);
             if (options.removeSibling?.length) changes.push(`removed ${options.removeSibling.length} siblings`);
         }
         
-        const updatedRelatedTerms = mergeArray(existingRel.relatedTerms, options.addTerm, options.removeTerm);
-        if (updatedRelatedTerms) {
-            relationships.relatedTerms = updatedRelatedTerms;
+        const existingRelatedTerms = getEntityIdsByRelationshipType(relationships, 'related_term');
+        const updatedRelatedTerms = mergeArray(existingRelatedTerms, options.addTerm, options.removeTerm);
+        if (updatedRelatedTerms !== undefined && updatedRelatedTerms !== existingRelatedTerms) {
+            relationships = setRelationships(relationships, 'related_term', 'term', updatedRelatedTerms);
             if (options.addTerm?.length) changes.push(`added ${options.addTerm.length} related terms`);
             if (options.removeTerm?.length) changes.push(`removed ${options.removeTerm.length} related terms`);
         }
         
-        updated.relationships = relationships;
+        updated.relationships = relationships.length > 0 ? relationships : undefined;
     }
 
     updated.updatedAt = new Date();
@@ -1258,11 +1300,7 @@ const editTerm = async (
         removeProject?: string[];
     }
 ): Promise<void> => {
-    const term = context.getTerm(id);
-    if (!term) {
-        print(`Error: Term "${id}" not found`);
-        process.exit(1);
-    }
+    const term = findTermResilient(context, id);
 
     // Helper to merge arrays
     const mergeArray = (
@@ -1446,18 +1484,8 @@ const mergeTerms = async (
     options: { force?: boolean }
 ): Promise<void> => {
     // Get both terms
-    const sourceTerm = context.getTerm(sourceId);
-    const targetTerm = context.getTerm(targetId);
-    
-    if (!sourceTerm) {
-        print(`Error: Source term "${sourceId}" not found.`);
-        process.exit(1);
-    }
-    
-    if (!targetTerm) {
-        print(`Error: Target term "${targetId}" not found.`);
-        process.exit(1);
-    }
+    const sourceTerm = findTermResilient(context, sourceId);
+    const targetTerm = findTermResilient(context, targetId);
     
     // Show what will be merged
     print(`\nMerging terms:`);

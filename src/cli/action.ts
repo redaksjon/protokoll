@@ -15,7 +15,9 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import * as Context from '../context';
 import * as Routing from '../routing';
+import * as Metadata from '../util/metadata';
 import { Project } from '../context/types';
+import { findProjectResilient } from '../utils/entityFinder';
 
 // Helper to print to stdout
 const print = (text: string) => process.stdout.write(text + '\n');
@@ -319,10 +321,7 @@ export const combineTranscripts = async (
     let targetProject: Project | undefined;
     
     if (options.projectId) {
-        targetProject = context.getProject(options.projectId);
-        if (!targetProject) {
-            throw new Error(`Project not found: ${options.projectId}`);
-        }
+        targetProject = findProjectResilient(context, options.projectId);
         
         // Update metadata with new project
         baseMetadata.project = targetProject.name;
@@ -330,7 +329,14 @@ export const combineTranscripts = async (
         
         // Update destination if project has routing configured
         if (targetProject.routing?.destination) {
-            baseMetadata.destination = expandPath(targetProject.routing.destination);
+            const config = context.getConfig();
+            const defaultPath = expandPath((config.outputDirectory as string) || '~/notes');
+            const routingPath = expandPath(targetProject.routing.destination);
+            // Resolve relative paths relative to the configured output directory
+            const resolvedPath = !routingPath.startsWith('/') && !routingPath.match(/^[A-Za-z]:/)
+                ? path.resolve(defaultPath, routingPath)
+                : routingPath;
+            baseMetadata.destination = resolvedPath;
         }
     }
     
@@ -438,13 +444,26 @@ const buildRoutingConfig = (
     const config = context.getConfig();
     const defaultPath = expandPath((config.outputDirectory as string) || '~/notes');
     
+    // Resolve relative paths relative to the configured output directory
+    const resolveRoutingPath = (routingPath: string | undefined): string => {
+        if (!routingPath) {
+            return defaultPath;
+        }
+        const expanded = expandPath(routingPath);
+        // If it's a relative path (doesn't start with / and isn't already absolute), resolve relative to output directory
+        if (!expanded.startsWith('/') && !expanded.match(/^[A-Za-z]:/)) {
+            return path.resolve(defaultPath, expanded);
+        }
+        return expanded;
+    };
+    
     // Build project routes from all projects
     const projects: Routing.ProjectRoute[] = context.getAllProjects()
         .filter(p => p.active !== false)
         .map(p => ({
             projectId: p.id,
             destination: {
-                path: expandPath(p.routing?.destination || defaultPath),
+                path: resolveRoutingPath(p.routing?.destination),
                 structure: p.routing?.structure || 'month',
                 filename_options: p.routing?.filename_options || ['date', 'time', 'subject'],
             },
@@ -586,6 +605,8 @@ export const editTranscript = async (
     options: {
         title?: string;
         projectId?: string;
+        tagsToAdd?: string[];
+        tagsToRemove?: string[];
         dryRun?: boolean;
         verbose?: boolean;
         contextDirectory?: string;
@@ -602,10 +623,7 @@ export const editTranscript = async (
     let targetProject: Project | undefined;
     
     if (options.projectId) {
-        targetProject = context.getProject(options.projectId);
-        if (!targetProject) {
-            throw new Error(`Project not found: ${options.projectId}`);
-        }
+        targetProject = findProjectResilient(context, options.projectId);
     }
     
     // Use new title if provided, otherwise keep existing
@@ -618,13 +636,111 @@ export const editTranscript = async (
         updatedMetadata.project = targetProject.name;
         updatedMetadata.projectId = targetProject.id;
         if (targetProject.routing?.destination) {
-            updatedMetadata.destination = expandPath(targetProject.routing.destination);
+            const config = context.getConfig();
+            const defaultPath = expandPath((config.outputDirectory as string) || '~/notes');
+            const routingPath = expandPath(targetProject.routing.destination);
+            // Resolve relative paths relative to the configured output directory
+            const resolvedPath = !routingPath.startsWith('/') && !routingPath.match(/^[A-Za-z]:/)
+                ? path.resolve(defaultPath, routingPath)
+                : routingPath;
+            updatedMetadata.destination = resolvedPath;
         }
     }
     
-    // Build the updated document
+    // Handle tags
+    if (options.tagsToAdd || options.tagsToRemove) {
+        const currentTags = new Set(updatedMetadata.tags || []);
+        
+        // Remove tags first
+        if (options.tagsToRemove) {
+            for (const tag of options.tagsToRemove) {
+                currentTags.delete(tag);
+            }
+        }
+        
+        // Add tags (will automatically deduplicate)
+        if (options.tagsToAdd) {
+            for (const tag of options.tagsToAdd) {
+                currentTags.add(tag);
+            }
+        }
+        
+        updatedMetadata.tags = Array.from(currentTags).sort();
+    }
+    
+    // Parse existing Entity References from the original content
+    const existingEntities = Metadata.parseEntityMetadata(transcript.rawText);
+    
+    // Update Entity References if project changed
+    let updatedEntities = existingEntities;
+    if (options.projectId && targetProject) {
+        // Create updated entities with the new project
+        // Preserve other entity types (people, terms, companies) if they exist
+        updatedEntities = {
+            people: existingEntities?.people || [],
+            projects: [{
+                id: targetProject.id,
+                name: targetProject.name,
+                type: 'project' as const,
+            }],
+            terms: existingEntities?.terms || [],
+            companies: existingEntities?.companies || [],
+        };
+    }
+    
+    // Determine which entities to include in the final document
+    // Use updated entities if project changed, otherwise use existing entities
+    const entitiesToInclude = updatedEntities || existingEntities;
+    
+    // Extract content without Entity References section
+    // Find where Entity References section starts (if present)
+    const entityRefsIndex = transcript.rawText.indexOf('## Entity References');
+    let contentWithoutEntityRefs: string;
+    
+    if (entityRefsIndex >= 0) {
+        // Find the content delimiter (---) that separates metadata from content
+        // The content starts after the first --- separator
+        const metadataEndIndex = transcript.rawText.indexOf('---');
+        if (metadataEndIndex >= 0) {
+            // Find the start of content (after --- and any whitespace/newlines)
+            let contentStart = metadataEndIndex + '---'.length;
+            while (contentStart < transcript.rawText.length && 
+                   (transcript.rawText[contentStart] === '\n' || 
+                    transcript.rawText[contentStart] === '\r' || 
+                    transcript.rawText[contentStart] === ' ')) {
+                contentStart++;
+            }
+            // Extract content up to Entity References, trimming trailing whitespace
+            contentWithoutEntityRefs = transcript.rawText
+                .substring(contentStart, entityRefsIndex)
+                .trimEnd();
+        } else {
+            // Fallback: use parsed content but remove Entity References if present
+            const contentEndIndex = transcript.content.indexOf('## Entity References');
+            contentWithoutEntityRefs = contentEndIndex >= 0 
+                ? transcript.content.substring(0, contentEndIndex).trimEnd()
+                : transcript.content;
+        }
+    } else {
+        // No Entity References section, use parsed content as-is
+        contentWithoutEntityRefs = transcript.content;
+    }
+    
+    // Build the updated document with new Entity References
     const metadataSection = formatMetadataMarkdown(newTitle, updatedMetadata, targetProject);
-    const finalContent = metadataSection + transcript.content;
+    
+    // Format Entity References section if we have entities to include
+    // Include Entity References if they exist (either existing or updated)
+    let entityRefsSection = '';
+    if (entitiesToInclude) {
+        // Create a minimal TranscriptMetadata object with just entities for formatting
+        const entityMetadata: Metadata.TranscriptMetadata = {
+            entities: entitiesToInclude,
+        };
+        entityRefsSection = Metadata.formatEntityMetadataMarkdown(entityMetadata);
+    }
+    
+    const finalContent = metadataSection + contentWithoutEntityRefs + entityRefsSection;
     
     // Determine output path
     let outputPath: string;

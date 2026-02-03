@@ -86,7 +86,29 @@ function parseTranscriptUri(
     params: Record<string, string>
 ): TranscriptUri {
     // protokoll://transcript/path/to/file.md
-    const transcriptPath = segments.slice(1).join('/');
+    // Handle both relative and absolute paths
+    // If URI has double slash after transcript, it's an absolute path
+    const withoutScheme = uri.substring(`${SCHEME}://`.length);
+    const [pathPart] = withoutScheme.split('?');
+    
+    // Check if path starts with transcript/ followed by / (absolute path)
+    const transcriptPrefix = 'transcript/';
+    let transcriptPath: string;
+    
+    if (pathPart.startsWith(transcriptPrefix)) {
+        // Extract everything after "transcript/"
+        const afterPrefix = pathPart.substring(transcriptPrefix.length);
+        // If it starts with /, it's an absolute path - preserve it
+        if (afterPrefix.startsWith('/')) {
+            transcriptPath = afterPrefix;
+        } else {
+            // Relative path - use segments
+            transcriptPath = segments.slice(1).join('/');
+        }
+    } else {
+        // Fallback to segments method
+        transcriptPath = segments.slice(1).join('/');
+    }
     
     if (!transcriptPath) {
         throw new Error(`Invalid transcript URI: ${uri}. No path specified.`);
@@ -151,7 +173,7 @@ function parseTranscriptsListUri(
     segments: string[],
     params: Record<string, string>
 ): TranscriptsListUri {
-    // protokoll://transcripts?directory={dir}&startDate={date}&...
+    // protokoll://transcripts?directory={dir}&startDate={date}&projectId={id}&...
     const directory = params.directory || '';
 
     return {
@@ -164,6 +186,7 @@ function parseTranscriptsListUri(
         endDate: params.endDate,
         limit: params.limit ? parseInt(params.limit, 10) : undefined,
         offset: params.offset ? parseInt(params.offset, 10) : undefined,
+        projectId: params.projectId,
     };
 }
 
@@ -250,20 +273,23 @@ export function buildConfigUri(configPath?: string): string {
  * Build a transcripts list URI
  */
 export function buildTranscriptsListUri(options: {
-    directory: string;
+    directory?: string;
     startDate?: string;
     endDate?: string;
     limit?: number;
     offset?: number;
+    projectId?: string;
 }): string {
     const params = new URLSearchParams();
-    params.set('directory', options.directory);
+    if (options.directory) params.set('directory', options.directory);
     if (options.startDate) params.set('startDate', options.startDate);
     if (options.endDate) params.set('endDate', options.endDate);
     if (options.limit !== undefined) params.set('limit', String(options.limit));
     if (options.offset !== undefined) params.set('offset', String(options.offset));
+    if (options.projectId) params.set('projectId', options.projectId);
     
-    return `${SCHEME}://transcripts?${params.toString()}`;
+    const queryString = params.toString();
+    return queryString ? `${SCHEME}://transcripts?${queryString}` : `${SCHEME}://transcripts`;
 }
 
 /**

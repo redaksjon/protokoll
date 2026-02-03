@@ -18,7 +18,7 @@ import {
     DEFAULT_REASONING_LEVEL,
     DEFAULT_TEMP_DIRECTORY,
 } from '@/constants';
-import { fileExists, getAudioMetadata, getConfiguredDirectory, type ProcessingResult } from './shared';
+import { fileExists, getAudioMetadata, getConfiguredDirectory, sanitizePath, type ProcessingResult } from './shared';
 
 // ============================================================================
 // Helper Functions
@@ -217,8 +217,11 @@ export async function handleProcessAudio(args: {
         hash,
     });
 
+    // Sanitize outputPath to ensure no absolute paths are exposed
+    const sanitizedOutputPath = await sanitizePath(result.outputPath, outputDirectory);
+
     return {
-        outputPath: result.outputPath,
+        outputPath: sanitizedOutputPath,
         enhancedText: result.enhancedText,
         rawTranscript: result.rawTranscript,
         routedProject: result.routedProject ?? undefined,
@@ -263,8 +266,10 @@ export async function handleBatchProcess(args: {
             });
             processed.push(result);
         } catch (error) {
+            // Sanitize file path in error to ensure no absolute paths are exposed
+            const sanitizedFile = await sanitizePath(file, inputDir);
             errors.push({
-                file,
+                file: sanitizedFile,
                 error: error instanceof Error ? error.message : String(error),
             });
         }
