@@ -210,7 +210,7 @@ export const listTranscriptsTool: Tool = {
 export const editTranscriptTool: Tool = {
     name: 'protokoll_edit_transcript',
     description:
-        'Edit an existing transcript\'s title, project assignment, and/or tags. ' +
+        'Edit an existing transcript\'s title, project assignment, tags, and/or status. ' +
         'Path is relative to the configured output directory. ' +
         'IMPORTANT: When you change the title, this tool RENAMES THE FILE to match the new title (slugified). ' +
         'Always use this tool instead of directly editing transcript files when changing titles. ' +
@@ -242,6 +242,11 @@ export const editTranscriptTool: Tool = {
                 type: 'array',
                 items: { type: 'string' },
                 description: 'Tags to remove from the transcript',
+            },
+            status: {
+                type: 'string',
+                enum: ['initial', 'enhanced', 'reviewed', 'in_progress', 'closed', 'archived'],
+                description: 'New lifecycle status. Status transitions are recorded in history.',
             },
             contextDirectory: {
                 type: 'string',
@@ -565,6 +570,7 @@ export async function handleEditTranscript(args: {
     projectId?: string;
     tagsToAdd?: string[];
     tagsToRemove?: string[];
+    status?: string;
     contextDirectory?: string;
 }) {
     // Get the output directory first to ensure consistent validation
@@ -573,44 +579,87 @@ export async function handleEditTranscript(args: {
     // Find the transcript (returns absolute path for file operations)
     const absolutePath = await findTranscript(args.transcriptPath, args.contextDirectory);
 
-    if (!args.title && !args.projectId && !args.tagsToAdd && !args.tagsToRemove) {
-        throw new Error('Must specify at least one of: title, projectId, tagsToAdd, or tagsToRemove');
+    // Validate status if provided
+    if (args.status && !Metadata.isValidStatus(args.status)) {
+        throw new Error(
+            `Invalid status "${args.status}". ` +
+            `Valid statuses are: ${Metadata.VALID_STATUSES.join(', ')}`
+        );
     }
 
-    const result = await editTranscript(absolutePath, {
-        title: args.title,
-        projectId: args.projectId,
-        tagsToAdd: args.tagsToAdd,
-        tagsToRemove: args.tagsToRemove,
-        contextDirectory: args.contextDirectory,
-    });
-
-    // Validate that the output path stays within the output directory
-    // Use the same output directory that was used to find the transcript
-    // This prevents project routing from writing files outside the allowed directory
-    validatePathWithinDirectory(result.outputPath, outputDirectory);
-
-    // Write the updated content
-    await mkdir(dirname(result.outputPath), { recursive: true });
-    await writeFile(result.outputPath, result.content, 'utf-8');
-
-    // Delete original if path changed
-    if (result.outputPath !== absolutePath) {
-        await unlink(absolutePath);
+    if (!args.title && !args.projectId && !args.tagsToAdd && !args.tagsToRemove && !args.status) {
+        throw new Error('Must specify at least one of: title, projectId, tagsToAdd, tagsToRemove, or status');
     }
 
-    // Convert to relative paths for response (use the same outputDirectory we got earlier)
+    let finalOutputPath = absolutePath;
+    let wasRenamed = false;
+    
+    // Handle title/project/tags changes via existing editTranscript function
+    if (args.title || args.projectId || args.tagsToAdd || args.tagsToRemove) {
+        const result = await editTranscript(absolutePath, {
+            title: args.title,
+            projectId: args.projectId,
+            tagsToAdd: args.tagsToAdd,
+            tagsToRemove: args.tagsToRemove,
+            contextDirectory: args.contextDirectory,
+        });
+
+        // Validate that the output path stays within the output directory
+        validatePathWithinDirectory(result.outputPath, outputDirectory);
+
+        // Write the updated content
+        await mkdir(dirname(result.outputPath), { recursive: true });
+        await writeFile(result.outputPath, result.content, 'utf-8');
+
+        // Delete original if path changed
+        if (result.outputPath !== absolutePath) {
+            await unlink(absolutePath);
+            wasRenamed = true;
+        }
+        
+        finalOutputPath = result.outputPath;
+    }
+
+    // Handle status change using frontmatter utilities
+    let statusChanged = false;
+    let previousStatus: string | undefined;
+    
+    if (args.status) {
+        const content = await readFile(finalOutputPath, 'utf-8');
+        const { parseTranscriptContent, stringifyTranscript } = await import('@/util/frontmatter');
+        const parsed = parseTranscriptContent(content);
+        
+        previousStatus = parsed.metadata.status || 'reviewed';
+        
+        if (previousStatus !== args.status) {
+            const updatedMetadata = Metadata.updateStatus(parsed.metadata, args.status as Metadata.TranscriptStatus);
+            const updatedContent = stringifyTranscript(updatedMetadata, parsed.body);
+            await writeFile(finalOutputPath, updatedContent, 'utf-8');
+            statusChanged = true;
+        }
+    }
+
+    // Convert to relative paths for response
     const relativeOriginalPath = await sanitizePath(absolutePath || '', outputDirectory);
-    const relativeOutputPath = await sanitizePath(result.outputPath || absolutePath || '', outputDirectory);
+    const relativeOutputPath = await sanitizePath(finalOutputPath || '', outputDirectory);
+
+    // Build message
+    const changes: string[] = [];
+    if (wasRenamed) changes.push(`moved to ${relativeOutputPath}`);
+    if (args.title) changes.push(`title updated`);
+    if (args.projectId) changes.push(`project changed`);
+    if (args.tagsToAdd?.length) changes.push(`${args.tagsToAdd.length} tag(s) added`);
+    if (args.tagsToRemove?.length) changes.push(`${args.tagsToRemove.length} tag(s) removed`);
+    if (statusChanged) changes.push(`status: ${previousStatus} → ${args.status}`);
+    if (!statusChanged && args.status) changes.push(`status unchanged (already ${args.status})`);
 
     return {
         success: true,
         originalPath: relativeOriginalPath,
         outputPath: relativeOutputPath,
-        renamed: result.outputPath !== absolutePath,
-        message: result.outputPath !== absolutePath
-            ? `Transcript updated and moved to: ${relativeOutputPath}`
-            : 'Transcript updated',
+        renamed: wasRenamed,
+        statusChanged,
+        message: changes.length > 0 ? `Transcript updated: ${changes.join(', ')}` : 'No changes made',
     };
 }
 

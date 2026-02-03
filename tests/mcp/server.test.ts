@@ -1163,7 +1163,7 @@ Content from part 2.
             await expect(handleEditTranscript({
                 transcriptPath: toRelativePath(transcriptPath),
                 contextDirectory: protokollDir
-            })).rejects.toThrow('Must specify at least one of: title, projectId, tagsToAdd, or tagsToRemove');
+            })).rejects.toThrow('Must specify at least one of: title, projectId, tagsToAdd, tagsToRemove, or status');
         });
     });
 

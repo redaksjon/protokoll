@@ -12,9 +12,11 @@ import { registerFeedbackCommands } from './feedback';
 import { registerConfigCommands } from './config';
 import { registerInstallCommand, isInstallCommand, runInstallCLI } from './install';
 import { registerTranscriptCommands } from './transcript';
+import { registerStatusCommands } from './status';
+import { registerTaskCommands } from './task';
 
 // Context management subcommands
-const CONTEXT_SUBCOMMANDS = ['project', 'person', 'term', 'company', 'ignored', 'context', 'action', 'feedback', 'install', 'config', 'transcript'];
+const CONTEXT_SUBCOMMANDS = ['project', 'person', 'term', 'company', 'ignored', 'context', 'action', 'feedback', 'install', 'config', 'transcript', 'status', 'task'];
 
 /**
  * Check if the CLI arguments contain a context management subcommand
@@ -62,6 +64,12 @@ export const runContextCLI = async (): Promise<void> => {
     // Register transcript commands (compare, reanalyze)
     registerTranscriptCommands(program);
     
+    // Register status commands (lifecycle management)
+    registerStatusCommands(program);
+    
+    // Register task commands
+    registerTaskCommands(program);
+    
     // Add help text about main transcription
     program.addHelpText('after', `
 Setup:
@@ -106,6 +114,16 @@ Transcript tools:
   ${PROGRAM_NAME} transcript compare --raw <f>   Show only raw Whisper output
   ${PROGRAM_NAME} transcript info <file>         Show raw transcript metadata
   ${PROGRAM_NAME} transcript list <dir>          List transcripts with raw status
+
+Lifecycle management:
+  ${PROGRAM_NAME} status set <file> <status>     Set transcript status
+  ${PROGRAM_NAME} status show <file>             Show transcript status and history
+
+Task management:
+  ${PROGRAM_NAME} task add <file> "<desc>"       Add a task to a transcript
+  ${PROGRAM_NAME} task complete <file> <id>      Mark a task as done
+  ${PROGRAM_NAME} task delete <file> <id>        Remove a task
+  ${PROGRAM_NAME} task list <file>               List all tasks
 `);
     
     await program.parseAsync(process.argv);

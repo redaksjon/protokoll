@@ -14,6 +14,7 @@ import * as TranscriptTools from './transcriptTools';
 import * as SystemTools from './systemTools';
 import * as RelationshipTools from './relationshipTools';
 import * as ContentTools from './contentTools';
+import * as StatusTools from './statusTools';
 
 // Re-export all handlers for testing
 export * from './discoveryTools';
@@ -25,6 +26,7 @@ export * from './transcriptTools';
 export * from './systemTools';
 export * from './relationshipTools';
 export * from './contentTools';
+export * from './statusTools';
 export * from './shared';
 
 // ============================================================================
@@ -90,6 +92,12 @@ export const tools: Tool[] = [
     TranscriptTools.updateTranscriptContentTool,
     TranscriptTools.updateTranscriptEntityReferencesTool,
     TranscriptTools.createNoteTool,
+
+    // Lifecycle Status & Tasks
+    StatusTools.setStatusTool,
+    StatusTools.createTaskTool,
+    StatusTools.completeTaskTool,
+    StatusTools.deleteTaskTool,
 ];
 
 // ============================================================================
@@ -197,6 +205,16 @@ export async function handleToolCall(name: string, args: unknown): Promise<unkno
             return TranscriptTools.handleUpdateTranscriptEntityReferences(args as Parameters<typeof TranscriptTools.handleUpdateTranscriptEntityReferences>[0]);
         case 'protokoll_create_note':
             return TranscriptTools.handleCreateNote(args as Parameters<typeof TranscriptTools.handleCreateNote>[0]);
+
+        // Lifecycle Status & Tasks
+        case 'protokoll_set_status':
+            return StatusTools.handleSetStatus(args as Parameters<typeof StatusTools.handleSetStatus>[0]);
+        case 'protokoll_create_task':
+            return StatusTools.handleCreateTask(args as Parameters<typeof StatusTools.handleCreateTask>[0]);
+        case 'protokoll_complete_task':
+            return StatusTools.handleCompleteTask(args as Parameters<typeof StatusTools.handleCompleteTask>[0]);
+        case 'protokoll_delete_task':
+            return StatusTools.handleDeleteTask(args as Parameters<typeof StatusTools.handleDeleteTask>[0]);
 
         default:
             throw new Error(`Unknown tool: ${name}`);
