@@ -49,7 +49,7 @@
     "@google/generative-ai": "^0.24.1",
     "@kjerneverk/riotprompt": "^1.0.6",
     "@modelcontextprotocol/sdk": "^1.25.2",
-    "@redaksjon/context": "file:../redaksjon-context",
+    "@redaksjon/context": "^0.0.6",
     "@types/fluent-ffmpeg": "^2.1.28",
     "@utilarium/cardigantime": "^0.0.24",
     "@utilarium/dreadcabinet": "^0.0.16",
