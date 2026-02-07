@@ -61,8 +61,8 @@ Use "project show <id>" or "project show <#>" to see full details for any entry.
 
 The table uses fixed column widths and truncates long paths intelligently. For full details including descriptions, trigger phrases, and all configuration, use either the ID or row number:
 ```bash
-protokoll project show walmart    # By ID
-protokoll project show 6          # By row number from list
+protokoll project show acme    # By ID
+protokoll project show 6       # By row number from list
 ```
 
 Or for verbose output with full YAML details:

@@ -57,14 +57,14 @@ When you notice a term or abbreviation was transcribed incorrectly:
 
 ```bash
 protokoll feedback /path/to/transcript.md
-# "Everywhere it says WCMP, that should be WCNP - Walmart's Native Cloud Platform"
+# "Everywhere it says WCMP, that should be WCNP - Acme's Native Cloud Platform"
 ```
 
 **What happens:**
 1. Replaces "WCMP" with "WCNP" throughout the transcript
 2. Adds "WCNP" to your context vocabulary with:
    - The correct spelling
-   - The full expansion ("Walmart's Native Cloud Platform")
+   - The full expansion ("Acme's Native Cloud Platform")
    - Phonetic variants so it won't be misheard again
 
 ### 2. Fix Names
@@ -175,7 +175,7 @@ For comprehensive corrections, the system typically:
 
 ### Example: Complete Term Correction
 
-When you provide feedback: *"WCMP should be WCNP - Walmart's Native Cloud Platform"*
+When you provide feedback: *"WCMP should be WCNP - Acme's Native Cloud Platform"*
 
 The model executes:
 
@@ -183,7 +183,7 @@ The model executes:
 1. correct_text(find="WCMP", replace="WCNP", replace_all=true)
    → Replaced 3 occurrences
 
-2. add_term(term="WCNP", definition="Walmart's Native Cloud Platform", 
+2. add_term(term="WCNP", definition="Acme's Native Cloud Platform", 
             sounds_like=["WCMP", "W C M P", "double-u see em pee"])
    → Added term to context
 
@@ -202,7 +202,7 @@ When the feedback system adds entities to your context, they're stored in your `
 id: wcnp
 name: WCNP
 type: term
-expansion: "Walmart's Native Cloud Platform"
+expansion: "Acme's Native Cloud Platform"
 sounds_like:
   - WCMP
   - W C M P
@@ -320,7 +320,7 @@ Try being more explicit:
 
 1. **Be specific**: "Replace X with Y" is clearer than "fix X"
 
-2. **Include context**: "WCNP is Walmart's Native Cloud Platform" helps the model add useful metadata
+2. **Include context**: "WCNP is Acme's Native Cloud Platform" helps the model add useful metadata
 
 3. **Use --dry-run first**: Preview changes before applying them
 

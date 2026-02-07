@@ -326,7 +326,7 @@ A technical term was transcribed incorrectly.
 ```bash
 # The transcript has "WCMP" but should be "WCNP"
 protokoll feedback ~/notes/2026/01/15-1412-meeting.md \
-  -f "Everywhere it says WCMP, that should be WCNP - Walmart's Native Cloud Platform"
+  -f "Everywhere it says WCMP, that should be WCNP - Acme's Native Cloud Platform"
 ```
 
 Result:
