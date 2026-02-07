@@ -70,6 +70,7 @@ export default defineConfig({
                 'dotenv',
                 'fluent-ffmpeg',
                 'glob',
+                'gray-matter',
                 'js-yaml',
                 'luxon',
                 'moment-timezone',
@@ -83,6 +84,10 @@ export default defineConfig({
                 main: 'src/main.ts',
                 'mcp/server': 'src/mcp/server.ts',
                 'mcp/server-http': 'src/mcp/server-http.ts',
+                'scripts/fix-duplicate-delimiters': 'scripts/fix-duplicate-delimiters.ts',
+                'scripts/migrate-titles-to-frontmatter': 'scripts/migrate-titles-to-frontmatter.ts',
+                'scripts/migrate-transcripts-2025': 'scripts/migrate-transcripts-2025.ts',
+                'scripts/verify-migration-2025': 'scripts/verify-migration-2025.ts',
             },
             output: {
                 format: 'esm',

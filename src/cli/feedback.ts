@@ -396,7 +396,7 @@ export const executeTool = async (
 
 You can teach me about abbreviations, acronyms, and technical terms:
 
-- "Everywhere it says WCMP, that should be WCNP - Walmart's Native Cloud Platform"
+- "Everywhere it says WCMP, that should be WCNP - Acme's Native Cloud Platform"
 - "YB should be spelled Wibey"
 - "API should be written as A.P.I. in this context"
 

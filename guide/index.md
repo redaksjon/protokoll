@@ -23,6 +23,7 @@ Protokoll transforms audio recordings into intelligent, context-enhanced transcr
 - [**Reasoning**](./reasoning.md): Reasoning model integration
 - [**Transcript Listing**](./transcript-listing.md): Browse, search, and filter transcripts
 - [**Transcript Actions**](./action.md): Edit, combine, and manage transcripts
+- [**Lifecycle & Tasks**](./lifecycle.md): Track transcript status and follow-up tasks
 - [**Feedback**](./feedback.md): Intelligent feedback for corrections
 
 
@@ -134,6 +135,22 @@ protokoll action --title "Sprint Planning" --project my-project --combine "/path
 # Preview without making changes
 protokoll action --title "New Title" /path/to/file.md --dry-run --verbose
 ```
+
+### Lifecycle & Tasks
+
+```bash
+# Set transcript status
+protokoll status set <path> <status>
+protokoll status show <path>
+
+# Manage tasks
+protokoll task add <path> "<description>"
+protokoll task complete <path> <task-id>
+protokoll task delete <path> <task-id>
+protokoll task list <path>
+```
+
+Valid statuses: `initial`, `enhanced`, `reviewed`, `in_progress`, `closed`, `archived`
 
 ### Feedback
 

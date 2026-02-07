@@ -16,6 +16,7 @@ import * as os from 'node:os';
 import * as Context from '../context';
 import * as Routing from '../routing';
 import * as Metadata from '../util/metadata';
+import * as Frontmatter from '../util/frontmatter';
 import { Project } from '../context/types';
 import { findProjectResilient } from '../utils/entityFinder';
 
@@ -388,9 +389,31 @@ export const combineTranscripts = async (
         contentParts.push('');
     }
     
-    // Build final document
-    const metadataSection = formatMetadataMarkdown(combinedTitle, baseMetadata, targetProject);
-    const finalContent = metadataSection + contentParts.join('\n');
+    // Build full metadata for frontmatter
+    const fullMetadata: Metadata.TranscriptMetadata = {
+        title: combinedTitle,
+        date: baseMetadata.date ? new Date(baseMetadata.date) : undefined,
+        recordingTime: baseMetadata.time,
+        project: targetProject?.name || baseMetadata.project,
+        projectId: targetProject?.id || baseMetadata.projectId,
+        tags: baseMetadata.tags,
+        duration: baseMetadata.duration,
+        entities: targetProject ? {
+            people: [],
+            projects: [{
+                id: targetProject.id,
+                name: targetProject.name,
+                type: 'project' as const,
+            }],
+            terms: [],
+            companies: [],
+        } : undefined,
+        status: 'reviewed' as const,
+    };
+    
+    // Use frontmatter stringification for proper YAML format
+    const combinedContent = contentParts.join('\n');
+    const finalContent = Frontmatter.stringifyTranscript(fullMetadata, combinedContent);
     
     // Determine output path
     let outputPath: string;
@@ -668,8 +691,9 @@ export const editTranscript = async (
         updatedMetadata.tags = Array.from(currentTags).sort();
     }
     
-    // Parse existing Entity References from the original content
-    const existingEntities = Metadata.parseEntityMetadata(transcript.rawText);
+    // Parse existing Entity References from the original content using frontmatter parser
+    const parsed = Frontmatter.parseTranscriptContent(transcript.rawText);
+    const existingEntities = parsed.metadata.entities;
     
     // Update Entity References if project changed
     let updatedEntities = existingEntities;
@@ -726,21 +750,36 @@ export const editTranscript = async (
         contentWithoutEntityRefs = transcript.content;
     }
     
-    // Build the updated document with new Entity References
-    const metadataSection = formatMetadataMarkdown(newTitle, updatedMetadata, targetProject);
+    // Build the updated document using frontmatter format
+    // Merge old-format metadata (from parseTranscript) with frontmatter metadata (from parseTranscriptContent)
+    // This ensures we preserve metadata from old-format files during migration
+    const fullMetadata: Metadata.TranscriptMetadata = {
+        ...parsed.metadata,
+        title: newTitle,
+        entities: entitiesToInclude,
+        // Preserve old-format metadata if not already in frontmatter
+        date: parsed.metadata.date || (updatedMetadata.date ? new Date(updatedMetadata.date) : undefined),
+        recordingTime: parsed.metadata.recordingTime || updatedMetadata.time,
+        project: parsed.metadata.project || updatedMetadata.project,
+        projectId: parsed.metadata.projectId || updatedMetadata.projectId,
+        tags: parsed.metadata.tags || updatedMetadata.tags,
+        duration: parsed.metadata.duration || updatedMetadata.duration,
+        status: parsed.metadata.status || 'reviewed',
+    };
     
-    // Format Entity References section if we have entities to include
-    // Include Entity References if they exist (either existing or updated)
-    let entityRefsSection = '';
-    if (entitiesToInclude) {
-        // Create a minimal TranscriptMetadata object with just entities for formatting
-        const entityMetadata: Metadata.TranscriptMetadata = {
-            entities: entitiesToInclude,
-        };
-        entityRefsSection = Metadata.formatEntityMetadataMarkdown(entityMetadata);
+    // Apply project updates if changed
+    if (targetProject) {
+        fullMetadata.project = targetProject.name;
+        fullMetadata.projectId = targetProject.id;
     }
     
-    const finalContent = metadataSection + contentWithoutEntityRefs + entityRefsSection;
+    // Apply tag updates if changed
+    if (options.tagsToAdd || options.tagsToRemove) {
+        fullMetadata.tags = updatedMetadata.tags;
+    }
+    
+    // Use frontmatter stringification for proper YAML format
+    const finalContent = Frontmatter.stringifyTranscript(fullMetadata, contentWithoutEntityRefs);
     
     // Determine output path
     let outputPath: string;

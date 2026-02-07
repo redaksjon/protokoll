@@ -1,5 +1,45 @@
 import * as Routing from '@/routing';
 
+// ============================================================================
+// Lifecycle Types
+// ============================================================================
+
+/**
+ * Transcript lifecycle status
+ * - initial: Whisper transcription complete
+ * - enhanced: Context-aware enhancement complete
+ * - reviewed: User has reviewed the transcript
+ * - in_progress: Has outstanding tasks to complete
+ * - closed: All work complete, no pending tasks
+ * - archived: Archived for long-term storage
+ */
+export type TranscriptStatus = 'initial' | 'enhanced' | 'reviewed' | 'in_progress' | 'closed' | 'archived';
+
+/**
+ * Record of a status transition with timestamp
+ */
+export interface StatusTransition {
+    from: TranscriptStatus;
+    to: TranscriptStatus;
+    at: string; // ISO 8601 timestamp
+}
+
+/**
+ * A follow-up task associated with a transcript
+ */
+export interface Task {
+    id: string; // generated unique ID (e.g., task-1234567890-abc123)
+    description: string;
+    status: 'open' | 'done';
+    created: string; // ISO 8601 timestamp
+    changed?: string; // ISO 8601 timestamp - when last modified
+    completed?: string; // ISO 8601 timestamp - when marked done
+}
+
+// ============================================================================
+// Entity Types
+// ============================================================================
+
 export interface EntityReference {
     id: string;
     name: string;
@@ -7,6 +47,7 @@ export interface EntityReference {
 }
 
 export interface TranscriptMetadata {
+    // Core fields
     title?: string;
     project?: string;
     projectId?: string;
@@ -16,6 +57,11 @@ export interface TranscriptMetadata {
     recordingTime?: string;
     confidence?: number;
     duration?: string;
+    
+    // Lifecycle fields
+    status?: TranscriptStatus;
+    history?: StatusTransition[];
+    tasks?: Task[];
     
     // Entity references - entities mentioned/used in this transcript
     entities?: {
@@ -248,12 +294,6 @@ export const parseEntityMetadata = (content: string): TranscriptMetadata['entiti
         const nextSection = afterSection.search(/\n###/);
         const sectionText = nextSection === -1 ? afterSection : afterSection.substring(0, nextSection);
         
-        // Debug logging for Projects parsing (remove after fixing)
-        if (type === 'Projects' && sectionText.length > 0) {
-            // eslint-disable-next-line no-console
-            console.log(`   [DEBUG] Parsing Projects section, text length: ${sectionText.length}, first 100 chars: ${sectionText.substring(0, 100).replace(/\n/g, '\\n')}`);
-        }
-        
         // Extract items - match format: "- `id`: name"
         // Match bullet point with backticked ID and name
         const items: EntityReference[] = [];
@@ -269,11 +309,6 @@ export const parseEntityMetadata = (content: string): TranscriptMetadata['entiti
                     name: match[2].trim(),
                     type: entityType,
                 });
-                // Debug logging
-                if (type === 'Projects') {
-                    // eslint-disable-next-line no-console
-                    console.log(`   [DEBUG] Found project: id="${match[1]}", name="${match[2].trim()}"`);
-                }
             }
         }
         
@@ -356,6 +391,144 @@ export const extractTagsFromSignals = (signals: Routing.ClassificationSignal[]):
     
     // Deduplicate tags using Set
     return Array.from(new Set(tags));
+};
+
+// ============================================================================
+// Lifecycle Utilities
+// ============================================================================
+
+/**
+ * Valid transcript statuses for validation
+ */
+export const VALID_STATUSES: TranscriptStatus[] = [
+    'initial', 'enhanced', 'reviewed', 'in_progress', 'closed', 'archived'
+];
+
+/**
+ * Check if a string is a valid TranscriptStatus
+ */
+export const isValidStatus = (status: string): status is TranscriptStatus => {
+    return VALID_STATUSES.includes(status as TranscriptStatus);
+};
+
+/**
+ * Generate a unique task ID
+ */
+export const generateTaskId = (): string => {
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substring(2, 8);
+    return `task-${timestamp}-${random}`;
+};
+
+/**
+ * Create a new task
+ */
+export const createTask = (description: string): Task => {
+    return {
+        id: generateTaskId(),
+        description,
+        status: 'open',
+        created: new Date().toISOString(),
+    };
+};
+
+/**
+ * Update transcript status and record the transition in history
+ * Returns unchanged metadata if status is the same (no duplicate history)
+ */
+export const updateStatus = (
+    metadata: TranscriptMetadata,
+    newStatus: TranscriptStatus
+): TranscriptMetadata => {
+    const oldStatus = metadata.status;
+    
+    // Don't add duplicate history if status unchanged
+    if (oldStatus === newStatus) {
+        return metadata;
+    }
+    
+    const transition: StatusTransition = {
+        from: oldStatus || 'reviewed',
+        to: newStatus,
+        at: new Date().toISOString(),
+    };
+    
+    return {
+        ...metadata,
+        status: newStatus,
+        history: [...(metadata.history || []), transition],
+    };
+};
+
+/**
+ * Apply default lifecycle fields to metadata
+ * Used during lazy migration of old-format transcripts
+ */
+export const applyLifecycleDefaults = (metadata: TranscriptMetadata): TranscriptMetadata => {
+    return {
+        ...metadata,
+        status: metadata.status ?? 'reviewed',
+        history: metadata.history ?? [],
+        tasks: metadata.tasks ?? [],
+    };
+};
+
+/**
+ * Complete a task by ID
+ */
+export const completeTask = (metadata: TranscriptMetadata, taskId: string): TranscriptMetadata => {
+    const tasks = metadata.tasks || [];
+    const taskIndex = tasks.findIndex(t => t.id === taskId);
+    
+    if (taskIndex === -1) {
+        throw new Error(`Task not found: ${taskId}`);
+    }
+    
+    const now = new Date().toISOString();
+    const updatedTasks = [...tasks];
+    updatedTasks[taskIndex] = {
+        ...updatedTasks[taskIndex],
+        status: 'done',
+        changed: now,
+        completed: now,
+    };
+    
+    return {
+        ...metadata,
+        tasks: updatedTasks,
+    };
+};
+
+/**
+ * Delete a task by ID
+ */
+export const deleteTask = (metadata: TranscriptMetadata, taskId: string): TranscriptMetadata => {
+    const tasks = metadata.tasks || [];
+    const taskIndex = tasks.findIndex(t => t.id === taskId);
+    
+    if (taskIndex === -1) {
+        throw new Error(`Task not found: ${taskId}`);
+    }
+    
+    return {
+        ...metadata,
+        tasks: tasks.filter(t => t.id !== taskId),
+    };
+};
+
+/**
+ * Add a task to metadata
+ */
+export const addTask = (metadata: TranscriptMetadata, description: string): { metadata: TranscriptMetadata; task: Task } => {
+    const task = createTask(description);
+    
+    return {
+        metadata: {
+            ...metadata,
+            tasks: [...(metadata.tasks || []), task],
+        },
+        task,
+    };
 };
 
 

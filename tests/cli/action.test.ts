@@ -435,7 +435,8 @@ describe('combineTranscripts', () => {
 
         const result = await combineTranscripts([file1, file2]);
 
-        expect(result.content).toContain('# Meeting Notes Part 1 (Combined)');
+        // Title should be in frontmatter, not as H1
+        expect(result.content).toMatch(/^---\n[\s\S]*?title: Meeting Notes Part 1 \(Combined\)/);
         expect(result.content).toContain('## Meeting Notes Part 1');
         expect(result.content).toContain('## Meeting Notes Part 2');
         expect(result.content).toContain('This is the first part of the meeting');
@@ -453,9 +454,9 @@ describe('combineTranscripts', () => {
 
         const result = await combineTranscripts([file1, file2]);
 
-        // Should use first transcript's date/time
-        expect(result.content).toContain('**Date**: January 15, 2026');
-        expect(result.content).toContain('**Time**: 02:12 PM');
+        // Should use first transcript's date/time in frontmatter
+        expect(result.content).toMatch(/date: ['"]2026-01-15/);
+        expect(result.content).toContain("recordingTime: '02:12 PM'");
     });
 
     it('should combine durations', async () => {
@@ -467,8 +468,8 @@ describe('combineTranscripts', () => {
 
         const result = await combineTranscripts([file1, file2]);
 
-        // 5m 30s + 3m 15s = 8m 45s
-        expect(result.content).toContain('**Duration**: 8m 45s');
+        // 5m 30s + 3m 15s = 8m 45s (in frontmatter)
+        expect(result.content).toContain('duration: 8m 45s');
     });
 
     it('should deduplicate tags', async () => {
@@ -481,8 +482,8 @@ describe('combineTranscripts', () => {
         const result = await combineTranscripts([file1, file2]);
 
         // Tags from both: work, ai, safety (from 1) + work, ai (from 2)
-        // Should deduplicate to: ai, safety, work (sorted)
-        expect(result.content).toContain('**Tags**: `ai`, `safety`, `work`');
+        // Should deduplicate to: ai, safety, work (sorted) in frontmatter
+        expect(result.content).toMatch(/tags:\s*\n\s*- ai\s*\n\s*- safety\s*\n\s*- work/);
     });
 
     it('should sort transcripts by filename', async () => {
@@ -523,8 +524,9 @@ describe('combineTranscripts', () => {
 
         const result = await combineTranscripts([file1, file2], { projectId: 'personal' });
 
-        expect(result.content).toContain('**Project**: Personal Notes');
-        expect(result.content).toContain('**Project ID**: `personal`');
+        // Project should be in frontmatter
+        expect(result.content).toContain('project: Personal Notes');
+        expect(result.content).toContain('projectId: personal');
     });
 
     it('should generate output path based on first transcript', async () => {
@@ -549,7 +551,8 @@ describe('combineTranscripts', () => {
 
         const result = await combineTranscripts([file1, file2], { title: 'New Approach to Life' });
 
-        expect(result.content).toContain('# New Approach to Life');
+        // Title should be in frontmatter
+        expect(result.content).toMatch(/^---\n[\s\S]*?title: New Approach to Life/);
         expect(result.content).not.toContain('(Combined)');
     });
 
@@ -575,7 +578,8 @@ describe('combineTranscripts', () => {
         const result = await combineTranscripts([file1, file2], { title: 'Meeting: Q1 Planning & Review!' });
 
         expect(result.outputPath).toContain('15-1412-meeting-q1-planning-review.md');
-        expect(result.content).toContain('# Meeting: Q1 Planning & Review!');
+        // Title should be in frontmatter
+        expect(result.content).toMatch(/^---\n[\s\S]*?title: ['"]Meeting: Q1 Planning & Review!['"]/);
     });
 });
 
@@ -596,7 +600,8 @@ describe('editTranscript', () => {
 
         const result = await editTranscript(file, { title: 'New Amazing Title' });
 
-        expect(result.content).toContain('# New Amazing Title');
+        // Title should be in frontmatter, not as H1
+        expect(result.content).toMatch(/^---\n[\s\S]*?title: New Amazing Title/);
         expect(result.content).not.toContain('# Meeting Notes Part 1');
     });
 
@@ -615,8 +620,9 @@ describe('editTranscript', () => {
 
         const result = await editTranscript(file, { title: 'New Title' });
 
-        expect(result.content).toContain('**Date**: January 15, 2026');
-        expect(result.content).toContain('**Project**: ai-safety');
+        // Metadata should be in frontmatter
+        expect(result.content).toMatch(/^---\n[\s\S]*?title: New Title/);
+        expect(result.content).toContain('project: ai-safety');
     });
 
     it('should preserve content when editing', async () => {
@@ -735,8 +741,8 @@ describe('Integration: parseTranscript and combineTranscripts', () => {
 
         const result = await combineTranscripts([file1, file2]);
 
-        // Should use metadata from first file
-        expect(result.content).toContain('**Date**: January 15, 2026');
+        // Should use metadata from first file (in frontmatter)
+        expect(result.content).toMatch(/date: ['"]2026-01-15/);
         expect(result.content).toContain('## Meeting Notes Part 1');
         expect(result.content).toContain('## Simple Note');
     });
@@ -784,8 +790,8 @@ Content 2
 
         const result = await combineTranscripts([file1, file2]);
         
-        // 30s + 15s = 45s (no minutes)
-        expect(result.content).toContain('**Duration**: 45s');
+        // 30s + 15s = 45s (no minutes) - in frontmatter
+        expect(result.content).toContain('duration: 45s');
     });
 
     it('should format duration with only minutes (no seconds)', async () => {
@@ -819,8 +825,8 @@ Content 2
 
         const result = await combineTranscripts([file1, file2]);
         
-        // 2m + 3m = 5m (no seconds)
-        expect(result.content).toContain('**Duration**: 5m');
+        // 2m + 3m = 5m (no seconds) - in frontmatter
+        expect(result.content).toContain('duration: 5m');
     });
 
     it('should handle transcripts without duration', async () => {
@@ -1003,8 +1009,9 @@ describe('editTranscript - project routing', () => {
 
         const result = await editTranscript(file, { projectId: 'personal' });
 
-        expect(result.content).toContain('**Project**: Personal Notes');
-        expect(result.content).toContain('**Project ID**: `personal`');
+        // Project should be in frontmatter
+        expect(result.content).toContain('project: Personal Notes');
+        expect(result.content).toContain('projectId: personal');
     });
 
     it('should update both title and project simultaneously', async () => {
@@ -1016,8 +1023,9 @@ describe('editTranscript - project routing', () => {
             projectId: 'personal' 
         });
 
-        expect(result.content).toContain('# New Title Here');
-        expect(result.content).toContain('**Project**: Personal Notes');
+        // Title should be in frontmatter
+        expect(result.content).toMatch(/^---\n[\s\S]*?title: New Title Here/);
+        expect(result.content).toContain('project: Personal Notes');
         expect(result.outputPath).toContain('new-title-here.md');
     });
 
@@ -1027,8 +1035,8 @@ describe('editTranscript - project routing', () => {
 
         const result = await editTranscript(file, { projectId: 'personal' });
 
-        // Original title should be preserved
-        expect(result.content).toContain('# Meeting Notes Part 1');
+        // Original title should be preserved in frontmatter
+        expect(result.content).toMatch(/^---\n[\s\S]*?title: Meeting Notes Part 1/);
     });
 
     it('should use default title when transcript has no title', async () => {
@@ -1045,7 +1053,8 @@ Content without a title heading.
 
         const result = await editTranscript(file, { title: undefined });
 
-        expect(result.content).toContain('# Untitled');
+        // Default title should be in frontmatter
+        expect(result.content).toMatch(/^---\n[\s\S]*?title: Untitled/);
     });
 });
 
@@ -1147,7 +1156,8 @@ Content 2
 
         const result = await combineTranscripts([file1, file2]);
         
-        expect(result.content).toContain('# Combined Transcript');
+        // Default title should be in frontmatter
+        expect(result.content).toMatch(/^---\n[\s\S]*?title: Combined Transcript/);
     });
 
     it('should use Part N for sections without titles', async () => {
@@ -1391,9 +1401,9 @@ active: true
         const newPath = path.join(tempDir, '15-1412-new-title-here.md');
         expect(await fs.access(newPath).then(() => true).catch(() => false)).toBe(true);
         
-        // New file should contain updated title
+        // New file should contain updated title in frontmatter
         const content = await fs.readFile(newPath, 'utf-8');
-        expect(content).toContain('# New Title Here');
+        expect(content).toMatch(/^---\n[\s\S]*?title: New Title Here/);
     });
 
     it('should execute edit in-place when title unchanged', async () => {

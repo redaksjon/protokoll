@@ -11,7 +11,7 @@ import * as fs from 'fs/promises';
 import * as path from 'node:path';
 import { glob } from 'glob';
 import { RawTranscriptData } from '../output/types';
-import * as Metadata from '../util/metadata';
+import * as Frontmatter from '../util/frontmatter';
 
 /**
  * Get the raw transcript path for a given final transcript path
@@ -252,6 +252,9 @@ export interface TranscriptListItem {
     title: string;
     hasRawTranscript: boolean;
     createdAt: Date;
+    status?: 'initial' | 'enhanced' | 'reviewed' | 'in_progress' | 'closed' | 'archived';
+    openTasksCount?: number;
+    contentSize?: number;
     entities?: {
         people?: Array<{ id: string; name: string }>;
         projects?: Array<{ id: string; name: string }>;
@@ -358,11 +361,15 @@ export const listTranscripts = async (options: ListTranscriptsOptions): Promise<
             }
         }
         
-        const title = extractTitle(content);
         const rawData = await readRawTranscript(filePath);
         
-        // Parse entity metadata from transcript
-        const entities = Metadata.parseEntityMetadata(content);
+        // Parse entity metadata from transcript using frontmatter parser
+        // This handles both YAML frontmatter and legacy markdown format
+        const parsed = Frontmatter.parseTranscriptContent(content);
+        const entities = parsed.metadata.entities;
+        
+        // Use title from frontmatter if available, otherwise extract from content
+        const title = parsed.metadata.title || extractTitle(content);
         
         // Apply project filtering if projectId is specified
         if (projectId) {
@@ -382,6 +389,12 @@ export const listTranscripts = async (options: ListTranscriptsOptions): Promise<
             }
         }
         
+        // Calculate open tasks count
+        const openTasksCount = parsed.metadata.tasks?.filter(t => t.status === 'open').length || 0;
+        
+        // Calculate content size (in bytes)
+        const contentSize = Buffer.byteLength(content, 'utf-8');
+        
         transcripts.push({
             path: filePath,
             filename,
@@ -390,6 +403,9 @@ export const listTranscripts = async (options: ListTranscriptsOptions): Promise<
             title,
             hasRawTranscript: !!rawData,
             createdAt: stats.birthtime,
+            status: parsed.metadata.status,
+            openTasksCount,
+            contentSize,
             entities: entities ? {
                 people: entities.people?.map(e => ({ id: e.id, name: e.name })),
                 projects: entities.projects?.map(e => ({ id: e.id, name: e.name })),

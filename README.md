@@ -1069,7 +1069,7 @@ protokoll feedback /path/to/transcript.md -f "WCMP should be WCNP" --dry-run -v
 #### Fix Terms & Abbreviations
 
 ```bash
-protokoll feedback notes.md -f "WCMP should be WCNP - Walmart's Native Cloud Platform"
+protokoll feedback notes.md -f "WCMP should be WCNP - Acme's Native Cloud Platform"
 ```
 
 This will:

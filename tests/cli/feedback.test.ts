@@ -279,7 +279,7 @@ describe('executeTool: add_term', () => {
     it('should add a new term to context', async () => {
         const result = await executeTool('add_term', {
             term: 'WCNP',
-            definition: 'Walmart Native Cloud Platform',
+            definition: 'Acme Native Cloud Platform',
             sounds_like: ['WCMP', 'W C N P'],
         }, feedbackCtx);
 
@@ -604,7 +604,7 @@ describe('Integration: Multiple tool executions', () => {
         // Step 2: Add the term
         await executeTool('add_term', {
             term: 'WCNP',
-            definition: 'Walmart Native Cloud Platform',
+            definition: 'Acme Native Cloud Platform',
             sounds_like: ['WCMP'],
         }, feedbackCtx);
 

@@ -210,7 +210,7 @@ export const listTranscriptsTool: Tool = {
 export const editTranscriptTool: Tool = {
     name: 'protokoll_edit_transcript',
     description:
-        'Edit an existing transcript\'s title, project assignment, and/or tags. ' +
+        'Edit an existing transcript\'s title, project assignment, tags, and/or status. ' +
         'Path is relative to the configured output directory. ' +
         'IMPORTANT: When you change the title, this tool RENAMES THE FILE to match the new title (slugified). ' +
         'Always use this tool instead of directly editing transcript files when changing titles. ' +
@@ -243,12 +243,49 @@ export const editTranscriptTool: Tool = {
                 items: { type: 'string' },
                 description: 'Tags to remove from the transcript',
             },
+            status: {
+                type: 'string',
+                enum: ['initial', 'enhanced', 'reviewed', 'in_progress', 'closed', 'archived'],
+                description: 'New lifecycle status. Status transitions are recorded in history.',
+            },
             contextDirectory: {
                 type: 'string',
                 description: 'Optional: Path to the .protokoll context directory',
             },
         },
         required: ['transcriptPath'],
+    },
+};
+
+export const changeTranscriptDateTool: Tool = {
+    name: 'protokoll_change_transcript_date',
+    description:
+        'Change the date of an existing transcript. ' +
+        'This will move the transcript file to a new location based on the new date and the project\'s routing configuration. ' +
+        'The file will be moved to the appropriate YYYY/MM/ directory structure. ' +
+        'Path is relative to the configured output directory. ' +
+        'WARNING: This may remove the transcript from the current view if it moves to a different date folder.',
+    inputSchema: {
+        type: 'object',
+        properties: {
+            transcriptPath: {
+                type: 'string',
+                description: 
+                    'Relative path to the transcript from the output directory. ' +
+                    'Examples: "meeting-notes.md", "2026/2/01-1325-02012026091511.md"',
+            },
+            newDate: {
+                type: 'string',
+                description: 
+                    'New date for the transcript in ISO 8601 format (YYYY-MM-DD or full ISO datetime). ' +
+                    'Examples: "2026-01-15", "2026-01-15T10:30:00Z"',
+            },
+            contextDirectory: {
+                type: 'string',
+                description: 'Optional: Path to the .protokoll context directory',
+            },
+        },
+        required: ['transcriptPath', 'newDate'],
     },
 };
 
@@ -565,6 +602,7 @@ export async function handleEditTranscript(args: {
     projectId?: string;
     tagsToAdd?: string[];
     tagsToRemove?: string[];
+    status?: string;
     contextDirectory?: string;
 }) {
     // Get the output directory first to ensure consistent validation
@@ -573,44 +611,244 @@ export async function handleEditTranscript(args: {
     // Find the transcript (returns absolute path for file operations)
     const absolutePath = await findTranscript(args.transcriptPath, args.contextDirectory);
 
-    if (!args.title && !args.projectId && !args.tagsToAdd && !args.tagsToRemove) {
-        throw new Error('Must specify at least one of: title, projectId, tagsToAdd, or tagsToRemove');
+    // Validate status if provided
+    if (args.status && !Metadata.isValidStatus(args.status)) {
+        throw new Error(
+            `Invalid status "${args.status}". ` +
+            `Valid statuses are: ${Metadata.VALID_STATUSES.join(', ')}`
+        );
     }
 
-    const result = await editTranscript(absolutePath, {
-        title: args.title,
-        projectId: args.projectId,
-        tagsToAdd: args.tagsToAdd,
-        tagsToRemove: args.tagsToRemove,
-        contextDirectory: args.contextDirectory,
-    });
-
-    // Validate that the output path stays within the output directory
-    // Use the same output directory that was used to find the transcript
-    // This prevents project routing from writing files outside the allowed directory
-    validatePathWithinDirectory(result.outputPath, outputDirectory);
-
-    // Write the updated content
-    await mkdir(dirname(result.outputPath), { recursive: true });
-    await writeFile(result.outputPath, result.content, 'utf-8');
-
-    // Delete original if path changed
-    if (result.outputPath !== absolutePath) {
-        await unlink(absolutePath);
+    if (!args.title && !args.projectId && !args.tagsToAdd && !args.tagsToRemove && !args.status) {
+        throw new Error('Must specify at least one of: title, projectId, tagsToAdd, tagsToRemove, or status');
     }
 
-    // Convert to relative paths for response (use the same outputDirectory we got earlier)
+    let finalOutputPath = absolutePath;
+    let wasRenamed = false;
+    
+    // Handle title/project/tags changes via existing editTranscript function
+    if (args.title || args.projectId || args.tagsToAdd || args.tagsToRemove) {
+        const result = await editTranscript(absolutePath, {
+            title: args.title,
+            projectId: args.projectId,
+            tagsToAdd: args.tagsToAdd,
+            tagsToRemove: args.tagsToRemove,
+            contextDirectory: args.contextDirectory,
+        });
+
+        // Validate that the output path stays within the output directory
+        validatePathWithinDirectory(result.outputPath, outputDirectory);
+
+        // Validate the content before writing
+        try {
+            const { parseTranscriptContent } = await import('@/util/frontmatter');
+            const validation = parseTranscriptContent(result.content);
+            
+            // Check that we can extract basic metadata
+            if (!validation.metadata) {
+                throw new Error('Generated content has no parseable metadata');
+            }
+            
+            // Check that YAML frontmatter is at the start (not after title)
+            if (!result.content.trim().startsWith('---')) {
+                throw new Error('Generated content does not start with YAML frontmatter (---). Title may be placed before frontmatter.');
+            }
+            
+            // Check that there's a closing frontmatter delimiter
+            const lines = result.content.split('\n');
+            const closingDelimiterIndex = lines.findIndex((line, idx) => idx > 0 && line.trim() === '---');
+            if (closingDelimiterIndex === -1) {
+                throw new Error('Generated content is missing closing YAML frontmatter delimiter (---)');
+            }
+            
+            // Log validation success
+            // eslint-disable-next-line no-console
+            console.log('✅ Transcript content validated successfully');
+        } catch (validationError) {
+            // eslint-disable-next-line no-console
+            console.error('❌ Transcript validation failed:', validationError);
+            // eslint-disable-next-line no-console
+            console.error('Generated content (first 500 chars):', result.content.substring(0, 500));
+            throw new Error(
+                `Transcript validation failed: ${validationError instanceof Error ? validationError.message : String(validationError)}. ` +
+                `This is a bug in the transcript generation logic. The file was NOT saved to prevent corruption.`
+            );
+        }
+        
+        // Write the updated content
+        await mkdir(dirname(result.outputPath), { recursive: true });
+        await writeFile(result.outputPath, result.content, 'utf-8');
+
+        // Delete original if path changed
+        if (result.outputPath !== absolutePath) {
+            await unlink(absolutePath);
+            wasRenamed = true;
+        }
+        
+        finalOutputPath = result.outputPath;
+    }
+
+    // Handle status change using frontmatter utilities
+    let statusChanged = false;
+    let previousStatus: string | undefined;
+    
+    if (args.status) {
+        const content = await readFile(finalOutputPath, 'utf-8');
+        const { parseTranscriptContent, stringifyTranscript } = await import('@/util/frontmatter');
+        const parsed = parseTranscriptContent(content);
+        
+        previousStatus = parsed.metadata.status || 'reviewed';
+        
+        if (previousStatus !== args.status) {
+            const updatedMetadata = Metadata.updateStatus(parsed.metadata, args.status as Metadata.TranscriptStatus);
+            const updatedContent = stringifyTranscript(updatedMetadata, parsed.body);
+            
+            // Validate before writing
+            try {
+                const validation = parseTranscriptContent(updatedContent);
+                if (!validation.metadata) {
+                    throw new Error('Generated content has no parseable metadata');
+                }
+                if (!updatedContent.trim().startsWith('---')) {
+                    throw new Error('Generated content does not start with YAML frontmatter (---)');
+                }
+                // eslint-disable-next-line no-console
+                console.log('✅ Status update content validated successfully');
+            } catch (validationError) {
+                // eslint-disable-next-line no-console
+                console.error('❌ Status update validation failed:', validationError);
+                // eslint-disable-next-line no-console
+                console.error('Generated content (first 500 chars):', updatedContent.substring(0, 500));
+                throw new Error(
+                    `Status update validation failed: ${validationError instanceof Error ? validationError.message : String(validationError)}. ` +
+                    `The file was NOT saved to prevent corruption.`
+                );
+            }
+            
+            await writeFile(finalOutputPath, updatedContent, 'utf-8');
+            statusChanged = true;
+        }
+    }
+
+    // Convert to relative paths for response
     const relativeOriginalPath = await sanitizePath(absolutePath || '', outputDirectory);
-    const relativeOutputPath = await sanitizePath(result.outputPath || absolutePath || '', outputDirectory);
+    const relativeOutputPath = await sanitizePath(finalOutputPath || '', outputDirectory);
+
+    // Build message
+    const changes: string[] = [];
+    if (wasRenamed) changes.push(`moved to ${relativeOutputPath}`);
+    if (args.title) changes.push(`title updated`);
+    if (args.projectId) changes.push(`project changed`);
+    if (args.tagsToAdd?.length) changes.push(`${args.tagsToAdd.length} tag(s) added`);
+    if (args.tagsToRemove?.length) changes.push(`${args.tagsToRemove.length} tag(s) removed`);
+    if (statusChanged) changes.push(`status: ${previousStatus} → ${args.status}`);
+    if (!statusChanged && args.status) changes.push(`status unchanged (already ${args.status})`);
 
     return {
         success: true,
         originalPath: relativeOriginalPath,
         outputPath: relativeOutputPath,
-        renamed: result.outputPath !== absolutePath,
-        message: result.outputPath !== absolutePath
-            ? `Transcript updated and moved to: ${relativeOutputPath}`
-            : 'Transcript updated',
+        renamed: wasRenamed,
+        statusChanged,
+        message: changes.length > 0 ? `Transcript updated: ${changes.join(', ')}` : 'No changes made',
+    };
+}
+
+export async function handleChangeTranscriptDate(args: {
+    transcriptPath: string;
+    newDate: string;
+    contextDirectory?: string;
+}) {
+    const { readFile, writeFile, mkdir, unlink } = await import('node:fs/promises');
+    const path = await import('node:path');
+    
+    // Get the output directory
+    const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
+    
+    // Find the transcript (returns absolute path)
+    const absolutePath = await findTranscript(args.transcriptPath, args.contextDirectory);
+    
+    // Parse the new date
+    const newDate = new Date(args.newDate);
+    if (isNaN(newDate.getTime())) {
+        throw new Error(`Invalid date format: ${args.newDate}. Use ISO 8601 format (e.g., "2026-01-15" or "2026-01-15T10:30:00Z")`);
+    }
+    
+    // Read the transcript content
+    const content = await readFile(absolutePath, 'utf-8');
+    
+    // Parse the transcript to get metadata
+    const { parseTranscriptContent } = await import('@/util/frontmatter');
+    const parsed = parseTranscriptContent(content);
+    
+    if (!parsed.metadata) {
+        throw new Error('Could not parse transcript metadata');
+    }
+    
+    // Determine the new directory structure based on the date
+    // Use YYYY/M structure (month-level organization, no zero-padding to match router convention)
+    // Use UTC methods to avoid timezone issues with date-only strings
+    const year = newDate.getUTCFullYear();
+    const month = (newDate.getUTCMonth() + 1).toString(); // No zero-padding (e.g., "8" not "08")
+    const newDirPath = path.join(outputDirectory, String(year), month);
+    
+    // Get the filename from the original path
+    const filename = path.basename(absolutePath);
+    const newAbsolutePath = path.join(newDirPath, filename);
+    
+    // Check if the file would move to a different location
+    if (absolutePath === newAbsolutePath) {
+        return {
+            success: true,
+            originalPath: await sanitizePath(absolutePath, outputDirectory),
+            outputPath: await sanitizePath(newAbsolutePath, outputDirectory),
+            moved: false,
+            message: 'Transcript date matches the target directory structure. No move needed.',
+        };
+    }
+    
+    // Validate that the new path stays within the output directory
+    validatePathWithinDirectory(newAbsolutePath, outputDirectory);
+    
+    // Create the new directory if it doesn't exist
+    await mkdir(newDirPath, { recursive: true });
+    
+    // Check if a file already exists at the destination
+    try {
+        await readFile(newAbsolutePath, 'utf-8');
+        throw new Error(
+            `A file already exists at the destination: ${await sanitizePath(newAbsolutePath, outputDirectory)}. ` +
+            `Please rename the transcript first or choose a different date.`
+        );
+    } catch (error) {
+        // File doesn't exist, which is what we want
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+            throw error;
+        }
+    }
+    
+    // Update the date in the transcript's front-matter
+    const { updateTranscript } = await import('@/util/frontmatter');
+    const updatedContent = updateTranscript(content, {
+        metadata: {
+            date: newDate,
+        },
+    });
+    
+    // Move the file to the new location with updated content
+    await writeFile(newAbsolutePath, updatedContent, 'utf-8');
+    await unlink(absolutePath);
+    
+    // Convert to relative paths for response
+    const relativeOriginalPath = await sanitizePath(absolutePath, outputDirectory);
+    const relativeOutputPath = await sanitizePath(newAbsolutePath, outputDirectory);
+    
+    return {
+        success: true,
+        originalPath: relativeOriginalPath,
+        outputPath: relativeOutputPath,
+        moved: true,
+        message: `Transcript moved from ${relativeOriginalPath} to ${relativeOutputPath}`,
     };
 }
 
@@ -641,6 +879,30 @@ export async function handleCombineTranscripts(args: {
     // This prevents project routing from writing files outside the allowed directory
     await validatePathWithinOutputDirectory(result.outputPath, args.contextDirectory);
 
+    // Validate the combined content before writing
+    try {
+        const { parseTranscriptContent } = await import('@/util/frontmatter');
+        const validation = parseTranscriptContent(result.content);
+        
+        if (!validation.metadata) {
+            throw new Error('Combined content has no parseable metadata');
+        }
+        if (!result.content.trim().startsWith('---')) {
+            throw new Error('Combined content does not start with YAML frontmatter (---)');
+        }
+        // eslint-disable-next-line no-console
+        console.log('✅ Combined transcript content validated successfully');
+    } catch (validationError) {
+        // eslint-disable-next-line no-console
+        console.error('❌ Combined transcript validation failed:', validationError);
+        // eslint-disable-next-line no-console
+        console.error('Generated content (first 500 chars):', result.content.substring(0, 500));
+        throw new Error(
+            `Combined transcript validation failed: ${validationError instanceof Error ? validationError.message : String(validationError)}. ` +
+            `The file was NOT saved to prevent corruption.`
+        );
+    }
+    
     // Write the combined transcript
     await mkdir(dirname(result.outputPath), { recursive: true });
     await writeFile(result.outputPath, result.content, 'utf-8');
@@ -688,6 +950,30 @@ export async function handleUpdateTranscriptContent(args: {
 
     // Replace the content section while preserving metadata
     const updatedContent = replaceTranscriptContent(originalContent, args.content);
+
+    // Validate before writing
+    try {
+        const { parseTranscriptContent } = await import('@/util/frontmatter');
+        const validation = parseTranscriptContent(updatedContent);
+        
+        if (!validation.metadata) {
+            throw new Error('Updated content has no parseable metadata');
+        }
+        if (!updatedContent.trim().startsWith('---')) {
+            throw new Error('Updated content does not start with YAML frontmatter (---)');
+        }
+        // eslint-disable-next-line no-console
+        console.log('✅ Updated transcript content validated successfully');
+    } catch (validationError) {
+        // eslint-disable-next-line no-console
+        console.error('❌ Transcript content update validation failed:', validationError);
+        // eslint-disable-next-line no-console
+        console.error('Generated content (first 500 chars):', updatedContent.substring(0, 500));
+        throw new Error(
+            `Transcript content update validation failed: ${validationError instanceof Error ? validationError.message : String(validationError)}. ` +
+            `The file was NOT saved to prevent corruption.`
+        );
+    }
 
     // Write the updated content back to the file
     await writeFile(absolutePath, updatedContent, 'utf-8');
@@ -796,6 +1082,30 @@ export async function handleUpdateTranscriptEntityReferences(args: {
 
     // Replace Entity References section in the file
     const updatedContent = replaceEntityReferences(originalContent, metadataForFormatting);
+
+    // Validate before writing
+    try {
+        const { parseTranscriptContent } = await import('@/util/frontmatter');
+        const validation = parseTranscriptContent(updatedContent);
+        
+        if (!validation.metadata) {
+            throw new Error('Updated content has no parseable metadata');
+        }
+        if (!updatedContent.trim().startsWith('---')) {
+            throw new Error('Updated content does not start with YAML frontmatter (---)');
+        }
+        // eslint-disable-next-line no-console
+        console.log('✅ Entity references update validated successfully');
+    } catch (validationError) {
+        // eslint-disable-next-line no-console
+        console.error('❌ Entity references update validation failed:', validationError);
+        // eslint-disable-next-line no-console
+        console.error('Generated content (first 500 chars):', updatedContent.substring(0, 500));
+        throw new Error(
+            `Entity references update validation failed: ${validationError instanceof Error ? validationError.message : String(validationError)}. ` +
+            `The file was NOT saved to prevent corruption.`
+        );
+    }
 
     // Write the updated content back to the file
     await writeFile(absolutePath, updatedContent, 'utf-8');
@@ -1115,12 +1425,29 @@ export async function handleCreateNote(args: {
         }
     }
     
-    // Format the transcript content
-    const metadataSection = Metadata.formatMetadataMarkdown(metadata);
-    const contentSection = args.content || '';
-    const entityRefsSection = Metadata.formatEntityMetadataMarkdown(metadata);
+    // Build entities for frontmatter
+    const entities: Metadata.TranscriptMetadata['entities'] = {
+        people: [],
+        projects: args.projectId && metadata.project ? [{
+            id: args.projectId,
+            name: metadata.project,
+            type: 'project' as const,
+        }] : [],
+        terms: [],
+        companies: [],
+    };
     
-    const transcriptContent = metadataSection + contentSection + entityRefsSection;
+    // Build full metadata with entities
+    const fullMetadata: Metadata.TranscriptMetadata = {
+        ...metadata,
+        entities,
+        status: 'reviewed' as const, // Default status for new notes
+    };
+    
+    // Use frontmatter stringification for proper YAML format
+    const transcriptContent = await import('@/util/frontmatter').then(fm => 
+        fm.stringifyTranscript(fullMetadata, args.content || '')
+    );
     
     // Create directory if it doesn't exist
     await mkdir(dirname(absolutePath), { recursive: true });

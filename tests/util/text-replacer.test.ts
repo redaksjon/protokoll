@@ -134,10 +134,10 @@ describe('TextReplacer', () => {
                     tier: 1,
                 },
                 {
-                    soundsLike: 'wal mart',
-                    correctText: 'Walmart',
+                    soundsLike: 'acme',
+                    correctText: 'Acme',
                     entityType: 'project',
-                    entityId: 'walmart',
+                    entityId: 'acme',
                     scopedToProjects: null,
                     collisionRisk: 'none',
                     tier: 1,
@@ -145,11 +145,11 @@ describe('TextReplacer', () => {
             ];
 
             const result = replacer.applyReplacements(
-                'I worked on observasion and wal mart projects',
+                'I worked on observasion and acme projects',
                 mappings
             );
 
-            expect(result.text).toBe('I worked on Observasjon and Walmart projects');
+            expect(result.text).toBe('I worked on Observasjon and Acme projects');
             expect(result.count).toBe(2);
         });
     });

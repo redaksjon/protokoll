@@ -125,6 +125,9 @@ export async function readTranscriptsListResource(options: {
                 date: t.date,
                 time: t.time,
                 title: t.title,
+                status: t.status,
+                openTasksCount: t.openTasksCount,
+                contentSize: t.contentSize,
                 entities: t.entities,
                 hasRawTranscript: t.hasRawTranscript,
             };

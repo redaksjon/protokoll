@@ -21,6 +21,7 @@ export default defineConfig([
         "dist/**",
         "docs/**",
         "node_modules/**",
+        "coverage/**",
         "**/*.test.ts",
     ]),
     {
