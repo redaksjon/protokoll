@@ -56,15 +56,28 @@ export function parseTranscriptContent(content: string): ParsedFrontmatter {
         }
     }
     
+    // Extract title from body if not in frontmatter (old format)
+    let cleanBody = rawBody;
+    const titleMatch = rawBody.match(/^#\s+(.+)$/m);
+    
+    if (!metadata.title && titleMatch) {
+        // No title in frontmatter, extract from H1
+        metadata.title = titleMatch[1].trim();
+        cleanBody = rawBody.replace(/^#\s+.+$/m, '').trim();
+    } else if (metadata.title && titleMatch) {
+        // Title in frontmatter, remove H1 from body
+        cleanBody = rawBody.replace(/^#\s+.+$/m, '').trim();
+    }
+    
     // Apply lifecycle defaults
     metadata = applyLifecycleDefaults(metadata);
     
     // Clean the body (remove entity section if present)
-    const body = stripLegacySections(rawBody);
+    cleanBody = stripLegacySections(cleanBody);
     
     return {
         metadata,
-        body,
+        body: cleanBody,
         needsMigration,
     };
 }
@@ -164,16 +177,39 @@ export function buildFrontmatter(metadata: TranscriptMetadata): Record<string, u
 /**
  * Stringify a transcript with YAML frontmatter
  * Uses gray-matter for consistent output
+ * Ensures title is ONLY in frontmatter, never in body
  */
 export function stringifyTranscript(metadata: TranscriptMetadata, body: string): string {
     const frontmatter = buildFrontmatter(metadata);
     
     // Clean the body (remove any legacy sections)
-    const cleanBody = stripLegacySections(body);
+    let cleanBody = stripLegacySections(body);
+    
+    // Remove any leading frontmatter delimiters from the body
+    // This can happen if the body was extracted incorrectly or has leftover delimiters
+    cleanBody = cleanBody.replace(/^---\s*\n/, '').trim();
+    
+    // Remove H1 title from body if it matches the frontmatter title
+    // Title should ONLY be in frontmatter
+    if (metadata.title) {
+        // Remove exact H1 match
+        const h1Pattern = new RegExp(`^#\\s+${escapeRegex(metadata.title)}\\s*$`, 'm');
+        cleanBody = cleanBody.replace(h1Pattern, '').trim();
+        
+        // Also remove any H1 at the start of the body (common pattern)
+        cleanBody = cleanBody.replace(/^#\s+.+$/m, '').trim();
+    }
     
     // Use gray-matter to create the output
     // It handles YAML serialization, escaping, etc.
     return matter.stringify(cleanBody + '\n', frontmatter);
+}
+
+/**
+ * Escape special regex characters in a string
+ */
+function escapeRegex(str: string): string {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**

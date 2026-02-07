@@ -88,9 +88,12 @@ Just some text without frontmatter.
             
             const result = parseTranscriptContent(content);
             
+            // Should extract title from H1 and remove it from body
+            expect(result.metadata.title).toBe('Simple Note');
             expect(result.metadata.status).toBe('reviewed');
             expect(result.needsMigration).toBe(true);
-            expect(result.body).toContain('# Simple Note');
+            expect(result.body).not.toContain('# Simple Note');
+            expect(result.body).toContain('Just some text without frontmatter.');
         });
         
         it('should prefer frontmatter entities over body entities', () => {
@@ -257,6 +260,106 @@ Actual content here.
             expect(output).toContain('This is the content.');
         });
         
+        it('should NOT have duplicate opening delimiters', () => {
+            const metadata = {
+                title: 'Test',
+                status: 'reviewed' as const,
+            };
+            const body = 'Content here.';
+            
+            const output = stringifyTranscript(metadata, body);
+            
+            // Should start with single ---, not ---\n---
+            expect(output.trim().startsWith('---\n---')).toBe(false);
+            expect(output.trim().startsWith('---\n')).toBe(true);
+        });
+        
+        it('should remove leading --- from body before stringifying', () => {
+            const metadata = {
+                title: 'Test',
+                status: 'reviewed' as const,
+            };
+            // Body accidentally starts with --- (bug scenario)
+            const body = '---\nContent here.';
+            
+            const output = stringifyTranscript(metadata, body);
+            
+            // Should NOT have duplicate delimiters
+            expect(output.trim().startsWith('---\n---')).toBe(false);
+            // Should have clean frontmatter followed by content
+            const lines = output.split('\n');
+            expect(lines[0]).toBe('---');
+            expect(lines[1]).toContain('title:'); // First line after --- should be metadata
+        });
+        
+        it('should start with YAML frontmatter, not title', () => {
+            const metadata = {
+                title: 'My Title',
+                status: 'reviewed' as const,
+            };
+            const body = '# My Title\n\nContent.';
+            
+            const output = stringifyTranscript(metadata, body);
+            
+            // Must start with ---, not with # Title
+            expect(output.trim().startsWith('---')).toBe(true);
+            expect(output.trim().startsWith('# ')).toBe(false);
+        });
+        
+        it('should handle round-trip without introducing duplicate delimiters', () => {
+            const original = `---
+title: Test
+status: reviewed
+tasks:
+  - id: task-123
+    description: Test task
+    status: open
+    created: '2026-02-07T06:20:00.488Z'
+entities:
+  people: []
+  projects:
+    - id: discursive
+      name: Discursive
+      type: project
+---
+Content here.`;
+            
+            // Parse and re-stringify (simulating what happens when adding a task)
+            const parsed = parseTranscriptContent(original);
+            const output = stringifyTranscript(parsed.metadata, parsed.body);
+            
+            // Should NOT have duplicate delimiters
+            const lines = output.split('\n');
+            expect(lines[0]).toBe('---');
+            expect(lines[1]).not.toBe('---'); // Second line should be metadata, not another ---
+            expect(output.trim().startsWith('---\n---')).toBe(false);
+        });
+        
+        it('should handle multiple round-trips without corruption', () => {
+            const original = `---
+title: Multi Round Trip
+status: reviewed
+---
+Original content.`;
+            
+            // First round-trip
+            const parsed1 = parseTranscriptContent(original);
+            const output1 = stringifyTranscript(parsed1.metadata, parsed1.body);
+            
+            // Second round-trip
+            const parsed2 = parseTranscriptContent(output1);
+            const output2 = stringifyTranscript(parsed2.metadata, parsed2.body);
+            
+            // Third round-trip
+            const parsed3 = parseTranscriptContent(output2);
+            const output3 = stringifyTranscript(parsed3.metadata, parsed3.body);
+            
+            // All outputs should be identical and have no duplicate delimiters
+            expect(output1).toBe(output2);
+            expect(output2).toBe(output3);
+            expect(output3.trim().startsWith('---\n---')).toBe(false);
+        });
+        
         it('should strip legacy entity section from body', () => {
             const metadata = {
                 title: 'With Entities',
@@ -354,5 +457,86 @@ Content preserved.
             expect(reparsed.metadata.entities?.people).toHaveLength(1);
             expect(reparsed.body).toContain('Content preserved.');
         });
+    });
+});
+
+describe('Title extraction and placement', () => {
+    it('should extract H1 title from body when not in frontmatter', () => {
+        const content = `---\nstatus: reviewed\n---\n# My Title\n\nContent here.`;
+        const parsed = parseTranscriptContent(content);
+        
+        expect(parsed.metadata.title).toBe('My Title');
+        expect(parsed.body).not.toContain('# My Title');
+    });
+    
+    it('should remove H1 from body when title is in frontmatter', () => {
+        const content = `---\ntitle: My Title\nstatus: reviewed\n---\n# My Title\n\nContent here.`;
+        const parsed = parseTranscriptContent(content);
+        
+        expect(parsed.metadata.title).toBe('My Title');
+        expect(parsed.body).not.toContain('# My Title');
+        expect(parsed.body).toContain('Content here.');
+    });
+    
+    it('should ensure title is only in frontmatter when stringifying', () => {
+        const metadata = {
+            title: 'Test Title',
+            status: 'reviewed' as const,
+        };
+        const body = '# Test Title\n\nSome content.';
+        const output = stringifyTranscript(metadata, body);
+        
+        // Parse to check structure
+        const lines = output.split('\n');
+        expect(lines[0]).toBe('---');
+        expect(output).toContain('title: Test Title');
+        
+        // Body should not have H1
+        const bodyStart = output.indexOf('---', 3) + 4; // Find closing ---
+        const bodyContent = output.substring(bodyStart);
+        expect(bodyContent).not.toMatch(/^#\s+/m);
+        expect(bodyContent).toContain('Some content.');
+    });
+    
+    it('should handle files with no title gracefully', () => {
+        const content = `---\nstatus: reviewed\n---\nContent without title.`;
+        const parsed = parseTranscriptContent(content);
+        
+        expect(parsed.metadata.title).toBeUndefined();
+        expect(parsed.body).toBe('Content without title.');
+    });
+    
+    it('should extract title and remove from body in one operation', () => {
+        const content = `---\nstatus: reviewed\nproject: Test\n---\n# Video about MCP\n\nOkay, so for Toni Craise...`;
+        const parsed = parseTranscriptContent(content);
+        
+        expect(parsed.metadata.title).toBe('Video about MCP');
+        expect(parsed.metadata.status).toBe('reviewed');
+        expect(parsed.metadata.project).toBe('Test');
+        expect(parsed.body).not.toContain('# Video about MCP');
+        expect(parsed.body).toContain('Okay, so for Toni Craise');
+    });
+    
+    it('should handle round-trip with title extraction', () => {
+        const original = `---\nstatus: reviewed\n---\n# Extracted Title\n\nContent.`;
+        const parsed = parseTranscriptContent(original);
+        const output = stringifyTranscript(parsed.metadata, parsed.body);
+        const reparsed = parseTranscriptContent(output);
+        
+        expect(reparsed.metadata.title).toBe('Extracted Title');
+        expect(reparsed.body).not.toContain('# Extracted Title');
+        expect(reparsed.body).toContain('Content.');
+    });
+    
+    it('should not remove H2 or other headings from body', () => {
+        const metadata = {
+            title: 'Main Title',
+            status: 'reviewed' as const,
+        };
+        const body = '## Section One\n\nContent.\n\n### Subsection\n\nMore content.';
+        const output = stringifyTranscript(metadata, body);
+        
+        expect(output).toContain('## Section One');
+        expect(output).toContain('### Subsection');
     });
 });
