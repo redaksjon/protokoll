@@ -358,13 +358,15 @@ export const listTranscripts = async (options: ListTranscriptsOptions): Promise<
             }
         }
         
-        const title = extractTitle(content);
         const rawData = await readRawTranscript(filePath);
         
         // Parse entity metadata from transcript using frontmatter parser
         // This handles both YAML frontmatter and legacy markdown format
         const parsed = Frontmatter.parseTranscriptContent(content);
         const entities = parsed.metadata.entities;
+        
+        // Use title from frontmatter if available, otherwise extract from content
+        const title = parsed.metadata.title || extractTitle(content);
         
         // Apply project filtering if projectId is specified
         if (projectId) {
