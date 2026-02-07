@@ -31,7 +31,11 @@
     "mcp:test": "node scripts/test-mcp-compliance.js",
     "mcp:start": "node dist/mcp/server.js",
     "mcp:http": "node dist/mcp/server-http.js",
-    "mcp:http:dev": "nodemon --watch src --ext ts,yaml,json --ignore 'src/**/*.test.ts' --exec 'npm run build && npm run mcp:http'"
+    "mcp:http:dev": "nodemon --watch src --ext ts,yaml,json --ignore 'src/**/*.test.ts' --exec 'npm run build && npm run mcp:http'",
+    "fix-delimiters": "npm run build && node dist/scripts/fix-duplicate-delimiters.js",
+    "fix-delimiters:dry-run": "npm run build && node dist/scripts/fix-duplicate-delimiters.js --dry-run",
+    "migrate-titles": "npm run build && node dist/scripts/migrate-titles-to-frontmatter.js",
+    "migrate-titles:dry-run": "npm run build && node dist/scripts/migrate-titles-to-frontmatter.js --dry-run"
   },
   "keywords": [
     "focus",

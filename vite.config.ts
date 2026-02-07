@@ -83,6 +83,8 @@ export default defineConfig({
                 main: 'src/main.ts',
                 'mcp/server': 'src/mcp/server.ts',
                 'mcp/server-http': 'src/mcp/server-http.ts',
+                'scripts/fix-duplicate-delimiters': 'scripts/fix-duplicate-delimiters.ts',
+                'scripts/migrate-titles-to-frontmatter': 'scripts/migrate-titles-to-frontmatter.ts',
             },
             output: {
                 format: 'esm',
