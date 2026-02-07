@@ -344,4 +344,303 @@ Content.
             })).rejects.toThrow('Task not found');
         });
     });
+    
+    describe('Validation - Format Integrity', () => {
+        it('should ensure title is in frontmatter, not in body (handleSetStatus)', async () => {
+            const transcriptPath = path.join(transcriptsDir, 'test.md');
+            await fs.writeFile(transcriptPath, `---
+title: Test Title
+status: reviewed
+---
+
+Content here.
+`);
+            
+            await handleSetStatus({
+                transcriptPath: 'test.md',
+                status: 'closed',
+            });
+            
+            const content = await fs.readFile(transcriptPath, 'utf-8');
+            
+            // Must start with ---
+            expect(content.trim().startsWith('---')).toBe(true);
+            
+            // Must have title in frontmatter
+            expect(content).toMatch(/^---\n[\s\S]*?title: Test Title/);
+            
+            // Body must NOT have H1 title
+            const bodyStart = content.indexOf('---', 3) + 4;
+            const body = content.substring(bodyStart);
+            expect(body).not.toMatch(/^#\s+/m);
+        });
+        
+        it('should ensure no duplicate opening delimiters (handleSetStatus)', async () => {
+            const transcriptPath = path.join(transcriptsDir, 'test.md');
+            await fs.writeFile(transcriptPath, `---
+title: Test
+status: reviewed
+---
+
+Content.
+`);
+            
+            await handleSetStatus({
+                transcriptPath: 'test.md',
+                status: 'in_progress',
+            });
+            
+            const content = await fs.readFile(transcriptPath, 'utf-8');
+            const lines = content.split('\n');
+            
+            // First line must be ---
+            expect(lines[0].trim()).toBe('---');
+            // Second line must NOT be ---
+            expect(lines[1].trim()).not.toBe('---');
+        });
+        
+        it('should ensure title is in frontmatter, not in body (handleCreateTask)', async () => {
+            const transcriptPath = path.join(transcriptsDir, 'test.md');
+            await fs.writeFile(transcriptPath, `---
+title: Task Test
+status: reviewed
+---
+
+Some content.
+`);
+            
+            await handleCreateTask({
+                transcriptPath: 'test.md',
+                description: 'New task',
+            });
+            
+            const content = await fs.readFile(transcriptPath, 'utf-8');
+            
+            // Must have title in frontmatter
+            expect(content).toMatch(/^---\n[\s\S]*?title: Task Test/);
+            
+            // Body must NOT have H1 title
+            const bodyStart = content.indexOf('---', 3) + 4;
+            const body = content.substring(bodyStart);
+            expect(body).not.toMatch(/^#\s+/m);
+        });
+        
+        it('should ensure no duplicate opening delimiters (handleCreateTask)', async () => {
+            const transcriptPath = path.join(transcriptsDir, 'test.md');
+            await fs.writeFile(transcriptPath, `---
+title: Test
+---
+
+Content.
+`);
+            
+            await handleCreateTask({
+                transcriptPath: 'test.md',
+                description: 'Task',
+            });
+            
+            const content = await fs.readFile(transcriptPath, 'utf-8');
+            const lines = content.split('\n');
+            
+            expect(lines[0].trim()).toBe('---');
+            expect(lines[1].trim()).not.toBe('---');
+        });
+        
+        it('should ensure title is in frontmatter, not in body (handleCompleteTask)', async () => {
+            const transcriptPath = path.join(transcriptsDir, 'test.md');
+            await fs.writeFile(transcriptPath, `---
+title: Complete Test
+tasks:
+  - id: task-123
+    description: Test
+    status: open
+    created: "2026-02-01T10:00:00Z"
+---
+
+Content.
+`);
+            
+            await handleCompleteTask({
+                transcriptPath: 'test.md',
+                taskId: 'task-123',
+            });
+            
+            const content = await fs.readFile(transcriptPath, 'utf-8');
+            
+            // Must have title in frontmatter
+            expect(content).toMatch(/^---\n[\s\S]*?title: Complete Test/);
+            
+            // Body must NOT have H1 title
+            const bodyStart = content.indexOf('---', 3) + 4;
+            const body = content.substring(bodyStart);
+            expect(body).not.toMatch(/^#\s+/m);
+        });
+        
+        it('should ensure no duplicate opening delimiters (handleCompleteTask)', async () => {
+            const transcriptPath = path.join(transcriptsDir, 'test.md');
+            await fs.writeFile(transcriptPath, `---
+title: Test
+tasks:
+  - id: task-123
+    description: Test
+    status: open
+    created: "2026-02-01T10:00:00Z"
+---
+
+Content.
+`);
+            
+            await handleCompleteTask({
+                transcriptPath: 'test.md',
+                taskId: 'task-123',
+            });
+            
+            const content = await fs.readFile(transcriptPath, 'utf-8');
+            const lines = content.split('\n');
+            
+            expect(lines[0].trim()).toBe('---');
+            expect(lines[1].trim()).not.toBe('---');
+        });
+        
+        it('should ensure title is in frontmatter, not in body (handleDeleteTask)', async () => {
+            const transcriptPath = path.join(transcriptsDir, 'test.md');
+            await fs.writeFile(transcriptPath, `---
+title: Delete Test
+tasks:
+  - id: task-123
+    description: Test
+    status: open
+    created: "2026-02-01T10:00:00Z"
+---
+
+Content.
+`);
+            
+            await handleDeleteTask({
+                transcriptPath: 'test.md',
+                taskId: 'task-123',
+            });
+            
+            const content = await fs.readFile(transcriptPath, 'utf-8');
+            
+            // Must have title in frontmatter
+            expect(content).toMatch(/^---\n[\s\S]*?title: Delete Test/);
+            
+            // Body must NOT have H1 title
+            const bodyStart = content.indexOf('---', 3) + 4;
+            const body = content.substring(bodyStart);
+            expect(body).not.toMatch(/^#\s+/m);
+        });
+        
+        it('should ensure no duplicate opening delimiters (handleDeleteTask)', async () => {
+            const transcriptPath = path.join(transcriptsDir, 'test.md');
+            await fs.writeFile(transcriptPath, `---
+title: Test
+tasks:
+  - id: task-123
+    description: Test
+    status: open
+    created: "2026-02-01T10:00:00Z"
+---
+
+Content.
+`);
+            
+            await handleDeleteTask({
+                transcriptPath: 'test.md',
+                taskId: 'task-123',
+            });
+            
+            const content = await fs.readFile(transcriptPath, 'utf-8');
+            const lines = content.split('\n');
+            
+            expect(lines[0].trim()).toBe('---');
+            expect(lines[1].trim()).not.toBe('---');
+        });
+        
+        it('should maintain format integrity through multiple operations', async () => {
+            const transcriptPath = path.join(transcriptsDir, 'test.md');
+            await fs.writeFile(transcriptPath, `---
+title: Multi-Op Test
+status: reviewed
+---
+
+Original content.
+`);
+            
+            // Change status
+            await handleSetStatus({
+                transcriptPath: 'test.md',
+                status: 'in_progress',
+            });
+            
+            // Add task
+            await handleCreateTask({
+                transcriptPath: 'test.md',
+                description: 'Task 1',
+            });
+            
+            // Add another task
+            const task2 = await handleCreateTask({
+                transcriptPath: 'test.md',
+                description: 'Task 2',
+            });
+            
+            // Complete a task
+            await handleCompleteTask({
+                transcriptPath: 'test.md',
+                taskId: task2.task.id,
+            });
+            
+            // Change status again
+            await handleSetStatus({
+                transcriptPath: 'test.md',
+                status: 'closed',
+            });
+            
+            const content = await fs.readFile(transcriptPath, 'utf-8');
+            const lines = content.split('\n');
+            
+            // Verify format integrity
+            expect(lines[0].trim()).toBe('---');
+            expect(lines[1].trim()).not.toBe('---');
+            expect(content).toMatch(/^---\n[\s\S]*?title: Multi-Op Test/);
+            
+            // Body must NOT have H1 title
+            const bodyStart = content.indexOf('---', 3) + 4;
+            const body = content.substring(bodyStart);
+            expect(body).not.toMatch(/^#\s+/m);
+            
+            // Verify content is still there
+            expect(content).toContain('Original content');
+        });
+        
+        it('should handle files that start with H1 title and migrate correctly', async () => {
+            const transcriptPath = path.join(transcriptsDir, 'test.md');
+            // Simulate an old-format file with H1 title in body
+            await fs.writeFile(transcriptPath, `---
+status: reviewed
+---
+# Old Format Title
+
+Content here.
+`);
+            
+            await handleSetStatus({
+                transcriptPath: 'test.md',
+                status: 'closed',
+            });
+            
+            const content = await fs.readFile(transcriptPath, 'utf-8');
+            
+            // Should extract title to frontmatter
+            expect(content).toMatch(/^---\n[\s\S]*?title: Old Format Title/);
+            
+            // Should remove H1 from body
+            const bodyStart = content.indexOf('---', 3) + 4;
+            const body = content.substring(bodyStart);
+            expect(body).not.toContain('# Old Format Title');
+            expect(body).toContain('Content here');
+        });
+    });
 });

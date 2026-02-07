@@ -11,7 +11,7 @@ import * as fs from 'fs/promises';
 import * as path from 'node:path';
 import { glob } from 'glob';
 import { RawTranscriptData } from '../output/types';
-import * as Metadata from '../util/metadata';
+import * as Frontmatter from '../util/frontmatter';
 
 /**
  * Get the raw transcript path for a given final transcript path
@@ -361,8 +361,10 @@ export const listTranscripts = async (options: ListTranscriptsOptions): Promise<
         const title = extractTitle(content);
         const rawData = await readRawTranscript(filePath);
         
-        // Parse entity metadata from transcript
-        const entities = Metadata.parseEntityMetadata(content);
+        // Parse entity metadata from transcript using frontmatter parser
+        // This handles both YAML frontmatter and legacy markdown format
+        const parsed = Frontmatter.parseTranscriptContent(content);
+        const entities = parsed.metadata.entities;
         
         // Apply project filtering if projectId is specified
         if (projectId) {

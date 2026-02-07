@@ -25,6 +25,64 @@ import { resolve, isAbsolute } from 'node:path';
 // ============================================================================
 
 /**
+ * Validate transcript content before writing to disk
+ * Ensures the content is properly formatted and parseable
+ */
+async function validateTranscriptContent(content: string, operation: string): Promise<void> {
+    try {
+        // First check: Must start with ---
+        if (!content.trim().startsWith('---')) {
+            throw new Error('Content does not start with YAML frontmatter (---). Title may be placed before frontmatter.');
+        }
+        
+        // Second check: No duplicate opening delimiters
+        const lines = content.split('\n');
+        if (lines.length > 1 && lines[0].trim() === '---' && lines[1].trim() === '---') {
+            throw new Error('Content has duplicate opening frontmatter delimiters (---\\n---). This indicates a body extraction bug.');
+        }
+        
+        // Third check: Must have closing delimiter
+        const closingDelimiterIndex = lines.findIndex((line, idx) => idx > 0 && line.trim() === '---');
+        if (closingDelimiterIndex === -1) {
+            throw new Error('Content is missing closing YAML frontmatter delimiter (---)');
+        }
+        
+        // Fourth check: Must be parseable
+        const validation = parseTranscriptContent(content);
+        if (!validation.metadata) {
+            throw new Error('Content has no parseable metadata');
+        }
+        
+        // Fifth check: Title must be in frontmatter, not in body
+        const bodyAfterFrontmatter = lines.slice(closingDelimiterIndex + 1).join('\n');
+        const h1InBody = /^#\s+.+$/m.test(bodyAfterFrontmatter);
+        if (h1InBody) {
+            throw new Error('Body contains H1 title (# ...). Title must be in frontmatter only.');
+        }
+        
+        // Sixth check: After re-parsing, verify no duplicate delimiters were introduced
+        const reparsed = parseTranscriptContent(content);
+        const restringified = stringifyTranscript(reparsed.metadata, reparsed.body);
+        const restringifiedLines = restringified.split('\n');
+        if (restringifiedLines.length > 1 && restringifiedLines[0].trim() === '---' && restringifiedLines[1].trim() === '---') {
+            throw new Error('Round-trip test failed: re-stringifying produces duplicate delimiters. This indicates a bug in stringifyTranscript().');
+        }
+        
+        // eslint-disable-next-line no-console
+        console.log(`✅ ${operation} content validated successfully (format correct, parseable, round-trip clean, title in frontmatter)`);
+    } catch (validationError) {
+        // eslint-disable-next-line no-console
+        console.error(`❌ ${operation} validation failed:`, validationError);
+        // eslint-disable-next-line no-console
+        console.error('Generated content (first 500 chars):', content.substring(0, 500));
+        throw new Error(
+            `${operation} validation failed: ${validationError instanceof Error ? validationError.message : String(validationError)}. ` +
+            `This is a bug in the transcript generation logic. The file was NOT saved to prevent corruption.`
+        );
+    }
+}
+
+/**
  * Find a transcript by relative path (relative to output directory)
  * Returns absolute path for internal file operations
  */
@@ -230,6 +288,7 @@ export async function handleSetStatus(args: {
     
     // Write updated transcript
     const updatedContent = stringifyTranscript(updatedMetadata, parsed.body);
+    await validateTranscriptContent(updatedContent, 'Status change');
     await writeFile(absolutePath, updatedContent, 'utf-8');
     
     // Convert to relative path for response
@@ -273,6 +332,7 @@ export async function handleCreateTask(args: {
     
     // Write updated transcript
     const updatedContent = stringifyTranscript(updatedMetadata, parsed.body);
+    await validateTranscriptContent(updatedContent, 'Add task');
     await writeFile(absolutePath, updatedContent, 'utf-8');
     
     // Convert to relative path for response
@@ -321,6 +381,7 @@ export async function handleCompleteTask(args: {
     
     // Write updated transcript
     const updatedContent = stringifyTranscript(updatedMetadata, parsed.body);
+    await validateTranscriptContent(updatedContent, 'Complete task');
     await writeFile(absolutePath, updatedContent, 'utf-8');
     
     // Convert to relative path for response
@@ -365,6 +426,7 @@ export async function handleDeleteTask(args: {
     
     // Write updated transcript
     const updatedContent = stringifyTranscript(updatedMetadata, parsed.body);
+    await validateTranscriptContent(updatedContent, 'Delete task');
     await writeFile(absolutePath, updatedContent, 'utf-8');
     
     // Convert to relative path for response

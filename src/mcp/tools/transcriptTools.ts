@@ -607,6 +607,42 @@ export async function handleEditTranscript(args: {
         // Validate that the output path stays within the output directory
         validatePathWithinDirectory(result.outputPath, outputDirectory);
 
+        // Validate the content before writing
+        try {
+            const { parseTranscriptContent } = await import('@/util/frontmatter');
+            const validation = parseTranscriptContent(result.content);
+            
+            // Check that we can extract basic metadata
+            if (!validation.metadata) {
+                throw new Error('Generated content has no parseable metadata');
+            }
+            
+            // Check that YAML frontmatter is at the start (not after title)
+            if (!result.content.trim().startsWith('---')) {
+                throw new Error('Generated content does not start with YAML frontmatter (---). Title may be placed before frontmatter.');
+            }
+            
+            // Check that there's a closing frontmatter delimiter
+            const lines = result.content.split('\n');
+            const closingDelimiterIndex = lines.findIndex((line, idx) => idx > 0 && line.trim() === '---');
+            if (closingDelimiterIndex === -1) {
+                throw new Error('Generated content is missing closing YAML frontmatter delimiter (---)');
+            }
+            
+            // Log validation success
+            // eslint-disable-next-line no-console
+            console.log('✅ Transcript content validated successfully');
+        } catch (validationError) {
+            // eslint-disable-next-line no-console
+            console.error('❌ Transcript validation failed:', validationError);
+            // eslint-disable-next-line no-console
+            console.error('Generated content (first 500 chars):', result.content.substring(0, 500));
+            throw new Error(
+                `Transcript validation failed: ${validationError instanceof Error ? validationError.message : String(validationError)}. ` +
+                `This is a bug in the transcript generation logic. The file was NOT saved to prevent corruption.`
+            );
+        }
+        
         // Write the updated content
         await mkdir(dirname(result.outputPath), { recursive: true });
         await writeFile(result.outputPath, result.content, 'utf-8');
@@ -634,6 +670,29 @@ export async function handleEditTranscript(args: {
         if (previousStatus !== args.status) {
             const updatedMetadata = Metadata.updateStatus(parsed.metadata, args.status as Metadata.TranscriptStatus);
             const updatedContent = stringifyTranscript(updatedMetadata, parsed.body);
+            
+            // Validate before writing
+            try {
+                const validation = parseTranscriptContent(updatedContent);
+                if (!validation.metadata) {
+                    throw new Error('Generated content has no parseable metadata');
+                }
+                if (!updatedContent.trim().startsWith('---')) {
+                    throw new Error('Generated content does not start with YAML frontmatter (---)');
+                }
+                // eslint-disable-next-line no-console
+                console.log('✅ Status update content validated successfully');
+            } catch (validationError) {
+                // eslint-disable-next-line no-console
+                console.error('❌ Status update validation failed:', validationError);
+                // eslint-disable-next-line no-console
+                console.error('Generated content (first 500 chars):', updatedContent.substring(0, 500));
+                throw new Error(
+                    `Status update validation failed: ${validationError instanceof Error ? validationError.message : String(validationError)}. ` +
+                    `The file was NOT saved to prevent corruption.`
+                );
+            }
+            
             await writeFile(finalOutputPath, updatedContent, 'utf-8');
             statusChanged = true;
         }
@@ -690,6 +749,30 @@ export async function handleCombineTranscripts(args: {
     // This prevents project routing from writing files outside the allowed directory
     await validatePathWithinOutputDirectory(result.outputPath, args.contextDirectory);
 
+    // Validate the combined content before writing
+    try {
+        const { parseTranscriptContent } = await import('@/util/frontmatter');
+        const validation = parseTranscriptContent(result.content);
+        
+        if (!validation.metadata) {
+            throw new Error('Combined content has no parseable metadata');
+        }
+        if (!result.content.trim().startsWith('---')) {
+            throw new Error('Combined content does not start with YAML frontmatter (---)');
+        }
+        // eslint-disable-next-line no-console
+        console.log('✅ Combined transcript content validated successfully');
+    } catch (validationError) {
+        // eslint-disable-next-line no-console
+        console.error('❌ Combined transcript validation failed:', validationError);
+        // eslint-disable-next-line no-console
+        console.error('Generated content (first 500 chars):', result.content.substring(0, 500));
+        throw new Error(
+            `Combined transcript validation failed: ${validationError instanceof Error ? validationError.message : String(validationError)}. ` +
+            `The file was NOT saved to prevent corruption.`
+        );
+    }
+    
     // Write the combined transcript
     await mkdir(dirname(result.outputPath), { recursive: true });
     await writeFile(result.outputPath, result.content, 'utf-8');
@@ -737,6 +820,30 @@ export async function handleUpdateTranscriptContent(args: {
 
     // Replace the content section while preserving metadata
     const updatedContent = replaceTranscriptContent(originalContent, args.content);
+
+    // Validate before writing
+    try {
+        const { parseTranscriptContent } = await import('@/util/frontmatter');
+        const validation = parseTranscriptContent(updatedContent);
+        
+        if (!validation.metadata) {
+            throw new Error('Updated content has no parseable metadata');
+        }
+        if (!updatedContent.trim().startsWith('---')) {
+            throw new Error('Updated content does not start with YAML frontmatter (---)');
+        }
+        // eslint-disable-next-line no-console
+        console.log('✅ Updated transcript content validated successfully');
+    } catch (validationError) {
+        // eslint-disable-next-line no-console
+        console.error('❌ Transcript content update validation failed:', validationError);
+        // eslint-disable-next-line no-console
+        console.error('Generated content (first 500 chars):', updatedContent.substring(0, 500));
+        throw new Error(
+            `Transcript content update validation failed: ${validationError instanceof Error ? validationError.message : String(validationError)}. ` +
+            `The file was NOT saved to prevent corruption.`
+        );
+    }
 
     // Write the updated content back to the file
     await writeFile(absolutePath, updatedContent, 'utf-8');
@@ -845,6 +952,30 @@ export async function handleUpdateTranscriptEntityReferences(args: {
 
     // Replace Entity References section in the file
     const updatedContent = replaceEntityReferences(originalContent, metadataForFormatting);
+
+    // Validate before writing
+    try {
+        const { parseTranscriptContent } = await import('@/util/frontmatter');
+        const validation = parseTranscriptContent(updatedContent);
+        
+        if (!validation.metadata) {
+            throw new Error('Updated content has no parseable metadata');
+        }
+        if (!updatedContent.trim().startsWith('---')) {
+            throw new Error('Updated content does not start with YAML frontmatter (---)');
+        }
+        // eslint-disable-next-line no-console
+        console.log('✅ Entity references update validated successfully');
+    } catch (validationError) {
+        // eslint-disable-next-line no-console
+        console.error('❌ Entity references update validation failed:', validationError);
+        // eslint-disable-next-line no-console
+        console.error('Generated content (first 500 chars):', updatedContent.substring(0, 500));
+        throw new Error(
+            `Entity references update validation failed: ${validationError instanceof Error ? validationError.message : String(validationError)}. ` +
+            `The file was NOT saved to prevent corruption.`
+        );
+    }
 
     // Write the updated content back to the file
     await writeFile(absolutePath, updatedContent, 'utf-8');
@@ -1164,12 +1295,29 @@ export async function handleCreateNote(args: {
         }
     }
     
-    // Format the transcript content
-    const metadataSection = Metadata.formatMetadataMarkdown(metadata);
-    const contentSection = args.content || '';
-    const entityRefsSection = Metadata.formatEntityMetadataMarkdown(metadata);
+    // Build entities for frontmatter
+    const entities: Metadata.TranscriptMetadata['entities'] = {
+        people: [],
+        projects: args.projectId && metadata.project ? [{
+            id: args.projectId,
+            name: metadata.project,
+            type: 'project' as const,
+        }] : [],
+        terms: [],
+        companies: [],
+    };
     
-    const transcriptContent = metadataSection + contentSection + entityRefsSection;
+    // Build full metadata with entities
+    const fullMetadata: Metadata.TranscriptMetadata = {
+        ...metadata,
+        entities,
+        status: 'reviewed' as const, // Default status for new notes
+    };
+    
+    // Use frontmatter stringification for proper YAML format
+    const transcriptContent = await import('@/util/frontmatter').then(fm => 
+        fm.stringifyTranscript(fullMetadata, args.content || '')
+    );
     
     // Create directory if it doesn't exist
     await mkdir(dirname(absolutePath), { recursive: true });
