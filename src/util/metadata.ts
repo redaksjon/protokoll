@@ -294,12 +294,6 @@ export const parseEntityMetadata = (content: string): TranscriptMetadata['entiti
         const nextSection = afterSection.search(/\n###/);
         const sectionText = nextSection === -1 ? afterSection : afterSection.substring(0, nextSection);
         
-        // Debug logging for Projects parsing (remove after fixing)
-        if (type === 'Projects' && sectionText.length > 0) {
-            // eslint-disable-next-line no-console
-            console.log(`   [DEBUG] Parsing Projects section, text length: ${sectionText.length}, first 100 chars: ${sectionText.substring(0, 100).replace(/\n/g, '\\n')}`);
-        }
-        
         // Extract items - match format: "- `id`: name"
         // Match bullet point with backticked ID and name
         const items: EntityReference[] = [];
@@ -315,11 +309,6 @@ export const parseEntityMetadata = (content: string): TranscriptMetadata['entiti
                     name: match[2].trim(),
                     type: entityType,
                 });
-                // Debug logging
-                if (type === 'Projects') {
-                    // eslint-disable-next-line no-console
-                    console.log(`   [DEBUG] Found project: id="${match[1]}", name="${match[2].trim()}"`);
-                }
             }
         }
         

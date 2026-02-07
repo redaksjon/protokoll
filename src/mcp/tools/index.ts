@@ -87,6 +87,7 @@ export const tools: Tool[] = [
     TranscriptTools.readTranscriptTool,
     TranscriptTools.listTranscriptsTool,
     TranscriptTools.editTranscriptTool,
+    TranscriptTools.changeTranscriptDateTool,
     TranscriptTools.combineTranscriptsTool,
     TranscriptTools.provideFeedbackTool,
     TranscriptTools.updateTranscriptContentTool,
@@ -195,6 +196,8 @@ export async function handleToolCall(name: string, args: unknown): Promise<unkno
             return TranscriptTools.handleListTranscripts(args as Parameters<typeof TranscriptTools.handleListTranscripts>[0]);
         case 'protokoll_edit_transcript':
             return TranscriptTools.handleEditTranscript(args as Parameters<typeof TranscriptTools.handleEditTranscript>[0]);
+        case 'protokoll_change_transcript_date':
+            return TranscriptTools.handleChangeTranscriptDate(args as Parameters<typeof TranscriptTools.handleChangeTranscriptDate>[0]);
         case 'protokoll_combine_transcripts':
             return TranscriptTools.handleCombineTranscripts(args as Parameters<typeof TranscriptTools.handleCombineTranscripts>[0]);
         case 'protokoll_provide_feedback':

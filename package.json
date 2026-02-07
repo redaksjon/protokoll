@@ -35,7 +35,11 @@
     "fix-delimiters": "npm run build && node dist/scripts/fix-duplicate-delimiters.js",
     "fix-delimiters:dry-run": "npm run build && node dist/scripts/fix-duplicate-delimiters.js --dry-run",
     "migrate-titles": "npm run build && node dist/scripts/migrate-titles-to-frontmatter.js",
-    "migrate-titles:dry-run": "npm run build && node dist/scripts/migrate-titles-to-frontmatter.js --dry-run"
+    "migrate-titles:dry-run": "npm run build && node dist/scripts/migrate-titles-to-frontmatter.js --dry-run",
+    "migrate:2025": "npm run build && node dist/scripts/migrate-transcripts-2025.js",
+    "migrate:2025:dry-run": "npm run build && node dist/scripts/migrate-transcripts-2025.js --dry-run",
+    "migrate:2025:test": "npm run build && node dist/scripts/migrate-transcripts-2025.js --dry-run --limit 10 --verbose",
+    "migrate:2025:verify": "npm run build && node dist/scripts/verify-migration-2025.js"
   },
   "keywords": [
     "focus",

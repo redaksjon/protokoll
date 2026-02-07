@@ -252,6 +252,9 @@ export interface TranscriptListItem {
     title: string;
     hasRawTranscript: boolean;
     createdAt: Date;
+    status?: 'initial' | 'enhanced' | 'reviewed' | 'in_progress' | 'closed' | 'archived';
+    openTasksCount?: number;
+    contentSize?: number;
     entities?: {
         people?: Array<{ id: string; name: string }>;
         projects?: Array<{ id: string; name: string }>;
@@ -386,6 +389,12 @@ export const listTranscripts = async (options: ListTranscriptsOptions): Promise<
             }
         }
         
+        // Calculate open tasks count
+        const openTasksCount = parsed.metadata.tasks?.filter(t => t.status === 'open').length || 0;
+        
+        // Calculate content size (in bytes)
+        const contentSize = Buffer.byteLength(content, 'utf-8');
+        
         transcripts.push({
             path: filePath,
             filename,
@@ -394,6 +403,9 @@ export const listTranscripts = async (options: ListTranscriptsOptions): Promise<
             title,
             hasRawTranscript: !!rawData,
             createdAt: stats.birthtime,
+            status: parsed.metadata.status,
+            openTasksCount,
+            contentSize,
             entities: entities ? {
                 people: entities.people?.map(e => ({ id: e.id, name: e.name })),
                 projects: entities.projects?.map(e => ({ id: e.id, name: e.name })),

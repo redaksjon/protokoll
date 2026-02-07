@@ -257,6 +257,38 @@ export const editTranscriptTool: Tool = {
     },
 };
 
+export const changeTranscriptDateTool: Tool = {
+    name: 'protokoll_change_transcript_date',
+    description:
+        'Change the date of an existing transcript. ' +
+        'This will move the transcript file to a new location based on the new date and the project\'s routing configuration. ' +
+        'The file will be moved to the appropriate YYYY/MM/ directory structure. ' +
+        'Path is relative to the configured output directory. ' +
+        'WARNING: This may remove the transcript from the current view if it moves to a different date folder.',
+    inputSchema: {
+        type: 'object',
+        properties: {
+            transcriptPath: {
+                type: 'string',
+                description: 
+                    'Relative path to the transcript from the output directory. ' +
+                    'Examples: "meeting-notes.md", "2026/2/01-1325-02012026091511.md"',
+            },
+            newDate: {
+                type: 'string',
+                description: 
+                    'New date for the transcript in ISO 8601 format (YYYY-MM-DD or full ISO datetime). ' +
+                    'Examples: "2026-01-15", "2026-01-15T10:30:00Z"',
+            },
+            contextDirectory: {
+                type: 'string',
+                description: 'Optional: Path to the .protokoll context directory',
+            },
+        },
+        required: ['transcriptPath', 'newDate'],
+    },
+};
+
 export const combineTranscriptsTool: Tool = {
     name: 'protokoll_combine_transcripts',
     description:
@@ -719,6 +751,104 @@ export async function handleEditTranscript(args: {
         renamed: wasRenamed,
         statusChanged,
         message: changes.length > 0 ? `Transcript updated: ${changes.join(', ')}` : 'No changes made',
+    };
+}
+
+export async function handleChangeTranscriptDate(args: {
+    transcriptPath: string;
+    newDate: string;
+    contextDirectory?: string;
+}) {
+    const { readFile, writeFile, mkdir, unlink } = await import('node:fs/promises');
+    const path = await import('node:path');
+    
+    // Get the output directory
+    const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
+    
+    // Find the transcript (returns absolute path)
+    const absolutePath = await findTranscript(args.transcriptPath, args.contextDirectory);
+    
+    // Parse the new date
+    const newDate = new Date(args.newDate);
+    if (isNaN(newDate.getTime())) {
+        throw new Error(`Invalid date format: ${args.newDate}. Use ISO 8601 format (e.g., "2026-01-15" or "2026-01-15T10:30:00Z")`);
+    }
+    
+    // Read the transcript content
+    const content = await readFile(absolutePath, 'utf-8');
+    
+    // Parse the transcript to get metadata
+    const { parseTranscriptContent } = await import('@/util/frontmatter');
+    const parsed = parseTranscriptContent(content);
+    
+    if (!parsed.metadata) {
+        throw new Error('Could not parse transcript metadata');
+    }
+    
+    // Determine the new directory structure based on the date
+    // Use YYYY/M structure (month-level organization, no zero-padding to match router convention)
+    // Use UTC methods to avoid timezone issues with date-only strings
+    const year = newDate.getUTCFullYear();
+    const month = (newDate.getUTCMonth() + 1).toString(); // No zero-padding (e.g., "8" not "08")
+    const newDirPath = path.join(outputDirectory, String(year), month);
+    
+    // Get the filename from the original path
+    const filename = path.basename(absolutePath);
+    const newAbsolutePath = path.join(newDirPath, filename);
+    
+    // Check if the file would move to a different location
+    if (absolutePath === newAbsolutePath) {
+        return {
+            success: true,
+            originalPath: await sanitizePath(absolutePath, outputDirectory),
+            outputPath: await sanitizePath(newAbsolutePath, outputDirectory),
+            moved: false,
+            message: 'Transcript date matches the target directory structure. No move needed.',
+        };
+    }
+    
+    // Validate that the new path stays within the output directory
+    validatePathWithinDirectory(newAbsolutePath, outputDirectory);
+    
+    // Create the new directory if it doesn't exist
+    await mkdir(newDirPath, { recursive: true });
+    
+    // Check if a file already exists at the destination
+    try {
+        await readFile(newAbsolutePath, 'utf-8');
+        throw new Error(
+            `A file already exists at the destination: ${await sanitizePath(newAbsolutePath, outputDirectory)}. ` +
+            `Please rename the transcript first or choose a different date.`
+        );
+    } catch (error) {
+        // File doesn't exist, which is what we want
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+            throw error;
+        }
+    }
+    
+    // Update the date in the transcript's front-matter
+    const { updateTranscript } = await import('@/util/frontmatter');
+    const updatedContent = updateTranscript(content, {
+        metadata: {
+            date: newDate,
+        },
+    });
+    
+    // Move the file to the new location with updated content
+    await writeFile(newAbsolutePath, updatedContent, 'utf-8');
+    await unlink(absolutePath);
+    
+    // Convert to relative paths for response
+    const relativeOriginalPath = await sanitizePath(absolutePath, outputDirectory);
+    const relativeOutputPath = await sanitizePath(newAbsolutePath, outputDirectory);
+    
+    return {
+        success: true,
+        originalPath: relativeOriginalPath,
+        outputPath: relativeOutputPath,
+        moved: true,
+        message: `Transcript moved from ${relativeOriginalPath} to ${relativeOutputPath}`,
     };
 }
 
