@@ -196,20 +196,21 @@ describe('Pipeline Orchestrator', () => {
                 hash: 'abc123def456',
             });
       
-            // Read the output file and verify it contains metadata
+            // Read the output file and verify it contains metadata in YAML frontmatter format
             const outputContent = await fs.readFile(result.outputPath, 'utf-8');
             
-            // Should have metadata section
-            expect(outputContent).toContain('## Metadata');
-            expect(outputContent).toContain('**Date**:');
+            // Should use YAML frontmatter format (new format)
+            expect(outputContent).toMatch(/^---\n/); // Starts with frontmatter delimiter
+            expect(outputContent).toContain('date:');
             
-            // Should have routing section
-            expect(outputContent).toContain('### Routing');
-            expect(outputContent).toContain('**Destination**:');
-            expect(outputContent).toContain('**Confidence**:');
+            // Should have routing info in frontmatter
+            expect(outputContent).toContain('routing:');
+            expect(outputContent).toContain('destination:');
+            expect(outputContent).toContain('confidence:');
             
-            // Should have the actual transcript content after the metadata
-            expect(outputContent).toContain('# Formatted Transcript');
+            // Should have the actual transcript content after the frontmatter
+            // The content comes from the mocked transcription service
+            expect(outputContent).toContain('test transcription');
         });
     });
   

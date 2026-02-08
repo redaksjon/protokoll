@@ -244,15 +244,16 @@ describe('Output Manager', () => {
       
             const written = await fs.readFile(finalPath, 'utf-8');
             
-            // Metadata should be at the beginning
-            expect(written).toContain('# Team Meeting');
-            expect(written).toContain('## Metadata');
-            expect(written).toContain('**Project**: Project Alpha');
-            expect(written).toContain('**Tags**: `meeting`, `Q1-planning`');
+            // Should use YAML frontmatter format (new format)
+            expect(written).toMatch(/^---\n/); // Starts with frontmatter delimiter
+            expect(written).toContain('title: Team Meeting');
+            expect(written).toContain('project: Project Alpha');
+            expect(written).toContain('projectId: proj-alpha');
+            expect(written).toContain('- meeting');
+            expect(written).toContain('- Q1-planning');
             
-            // Original content should be after metadata
-            expect(written).toContain('---');
-            expect(written).toContain('# Meeting Notes');
+            // Original content should be after frontmatter
+            expect(written).toContain('This is the transcript.');
         });
 
         it('should include routing metadata in transcript', async () => {
@@ -292,11 +293,14 @@ describe('Output Manager', () => {
       
             const written = await fs.readFile(finalPath, 'utf-8');
             
-            expect(written).toContain('### Routing');
-            expect(written).toContain('**Destination**: /home/user/work/notes');
-            expect(written).toContain('**Confidence**: 95.0%');
-            expect(written).toContain('**Classification Signals**:');
-            expect(written).toContain('explicit phrase');
+            // Should use YAML frontmatter format with routing info
+            expect(written).toMatch(/^---\n/); // Starts with frontmatter delimiter
+            expect(written).toContain('title: Work Meeting');
+            expect(written).toContain('routing:');
+            expect(written).toContain('destination: /home/user/work/notes');
+            expect(written).toContain('confidence: 0.95');
+            expect(written).toContain('type: explicit_phrase');
+            expect(written).toContain('value: work meeting');
         });
     });
   

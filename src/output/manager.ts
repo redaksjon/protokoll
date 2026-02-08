@@ -10,6 +10,8 @@ import * as fs from 'fs/promises';
 import { OutputConfig, IntermediateFiles, OutputPaths, RawTranscriptData } from './types';
 import * as Logging from '../logging';
 import * as Metadata from '../util/metadata';
+import * as Frontmatter from '../util/frontmatter';
+import { validateOrThrow } from '../util/validation';
 
 export interface ManagerInstance {
     createOutputPaths(
@@ -133,18 +135,27 @@ export const create = (config: OutputConfig): ManagerInstance => {
         content: string,
         metadata?: Metadata.TranscriptMetadata
     ): Promise<string> => {
-        let finalContent = content;
+        let finalContent: string;
         
         if (metadata) {
-            // Prepend header metadata
-            const metadataSection = Metadata.formatMetadataMarkdown(metadata);
-            finalContent = metadataSection + content;
+            // Use YAML frontmatter format (same as MCP server)
+            // This ensures consistency between CLI and MCP server output
+            finalContent = Frontmatter.stringifyTranscript(metadata, content);
             
-            // Append entity metadata at the end
-            const entitySection = Metadata.formatEntityMetadataMarkdown(metadata);
-            if (entitySection) {
-                finalContent = finalContent + entitySection;
+            // Validate before writing (same validation as MCP server)
+            // This prevents corrupted files from being written
+            try {
+                validateOrThrow(finalContent);
+                logger.debug('Transcript content validated successfully');
+            } catch (validationError) {
+                logger.error('Transcript validation failed', { 
+                    error: validationError instanceof Error ? validationError.message : String(validationError),
+                    contentPreview: finalContent.substring(0, 500),
+                });
+                throw validationError;
             }
+        } else {
+            finalContent = content;
         }
         
         await fs.writeFile(paths.final, finalContent, 'utf-8');

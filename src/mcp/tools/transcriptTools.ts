@@ -15,6 +15,7 @@ import { DEFAULT_MODEL } from '@/constants';
 
 import { fileExists, getConfiguredDirectory, sanitizePath, validatePathWithinDirectory, validatePathWithinOutputDirectory } from './shared.js';
 import * as Metadata from '@/util/metadata';
+import { validateOrThrow } from '@/util/validation';
 
 // ============================================================================
 // Helper Functions
@@ -639,29 +640,9 @@ export async function handleEditTranscript(args: {
         // Validate that the output path stays within the output directory
         validatePathWithinDirectory(result.outputPath, outputDirectory);
 
-        // Validate the content before writing
+        // Validate the content before writing (using shared validation utility)
         try {
-            const { parseTranscriptContent } = await import('@/util/frontmatter');
-            const validation = parseTranscriptContent(result.content);
-            
-            // Check that we can extract basic metadata
-            if (!validation.metadata) {
-                throw new Error('Generated content has no parseable metadata');
-            }
-            
-            // Check that YAML frontmatter is at the start (not after title)
-            if (!result.content.trim().startsWith('---')) {
-                throw new Error('Generated content does not start with YAML frontmatter (---). Title may be placed before frontmatter.');
-            }
-            
-            // Check that there's a closing frontmatter delimiter
-            const lines = result.content.split('\n');
-            const closingDelimiterIndex = lines.findIndex((line, idx) => idx > 0 && line.trim() === '---');
-            if (closingDelimiterIndex === -1) {
-                throw new Error('Generated content is missing closing YAML frontmatter delimiter (---)');
-            }
-            
-            // Log validation success
+            validateOrThrow(result.content);
             // eslint-disable-next-line no-console
             console.log('✅ Transcript content validated successfully');
         } catch (validationError) {
