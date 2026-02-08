@@ -5,7 +5,6 @@
  
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import * as Context from '@/context';
-import * as ProjectAssist from '@/cli/project-assist';
 import type { Person, Project, Term, Company, Entity, EntityRelationship } from '@/context/types';
 import { 
     findPersonResilient, 
@@ -793,14 +792,18 @@ export async function handleAddProject(args: {
     const smartConfig = context.getSmartAssistanceConfig();
     const useSmartAssist = args.useSmartAssist !== false && smartConfig.enabled;
 
-    let soundsLike = args.sounds_like || [];
-    let triggerPhrases = args.explicit_phrases || [];
-    let topics = args.topics || [];
-    let description = args.description;
-    let suggestedName: string | undefined;
+    const soundsLike = args.sounds_like || [];
+    const triggerPhrases = args.explicit_phrases || [];
+    const topics = args.topics || [];
+    const description = args.description;
+    const suggestedName: string | undefined = undefined;
 
     if (useSmartAssist) {
-        const assist = ProjectAssist.create(smartConfig);
+        // ProjectAssist temporarily unavailable - needs extraction from CLI
+        throw new Error('Smart assistance temporarily unavailable');
+        
+        /* Unreachable code - commented out until ProjectAssist is re-implemented
+        // const assist = ProjectAssist.create(smartConfig);
 
         // Analyze source if provided
         if (args.source) {
@@ -831,6 +834,7 @@ export async function handleAddProject(args: {
                 triggerPhrases = await assist.generateTriggerPhrases(args.name);
             }
         }
+        */
     }
 
     const project: Project = {
@@ -860,7 +864,7 @@ export async function handleAddProject(args: {
         message: `Project "${args.name}" added successfully`,
         entity: formatEntity(project),
         smartAssistUsed: useSmartAssist,
-        ...(suggestedName && { suggestedName }),
+        ...(suggestedName ? { suggestedName } : {}),
         generated: {
             soundsLike,
             triggerPhrases,
@@ -1133,7 +1137,12 @@ export async function handleUpdateProject(args: {
         throw new Error('Smart assistance is disabled in configuration.');
     }
 
-    const assist = ProjectAssist.create(smartConfig);
+    // ProjectAssist temporarily unavailable - needs extraction from CLI
+    throw new Error('Smart assistance temporarily unavailable');
+    
+    /* Unreachable code - commented out until ProjectAssist is re-implemented
+    // const assist = ProjectAssist.create(smartConfig);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const projectName = args.name || existingProject.name;
 
     // Analyze source for new metadata
@@ -1166,6 +1175,7 @@ export async function handleUpdateProject(args: {
             description: suggestions.description,
         },
     };
+    */
 }
 
 export async function handleAddTerm(args: {
@@ -1338,6 +1348,10 @@ export async function handleUpdateTerm(args: {
         throw new Error('Term smart assistance is disabled in configuration.');
     }
 
+    // ContentFetcher, TermAssist, TermContext temporarily unavailable
+    throw new Error('Term assistance temporarily unavailable - business logic needs extraction from CLI');
+    
+    /* Unreachable code - commented out until modules are re-implemented
     // Fetch content from source
     const ContentFetcher = await import('@/cli/content-fetcher');
     const contentFetcher = ContentFetcher.create();
@@ -1354,6 +1368,7 @@ export async function handleUpdateTerm(args: {
     const termAssist = TermAssist.create(smartConfig);
     const termContextHelper = TermContext.create(context);
 
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const internalContext = termContextHelper.gatherInternalContext(
         existingTerm.name,
         args.expansion || existingTerm.expansion
@@ -1383,7 +1398,7 @@ export async function handleUpdateTerm(args: {
     let suggestedProjects: string[] = [];
     if (suggestions.topics.length > 0) {
         const projects = termContextHelper.findProjectsByTopic(suggestions.topics);
-        suggestedProjects = projects.map(p => p.id);
+        suggestedProjects = projects.map((p: any) => p.id);
     }
 
     await context.saveEntity(updatedTerm, true);
@@ -1400,6 +1415,7 @@ export async function handleUpdateTerm(args: {
             suggestedProjects,
         },
     };
+    */
 }
 
 /* c8 ignore start */

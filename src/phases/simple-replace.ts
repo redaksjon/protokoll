@@ -9,7 +9,7 @@
  */
 
 import * as Dreadcabinet from '@utilarium/dreadcabinet';
-import { Config } from '@/protokoll';
+import { Config } from '@/types';
 import * as Logging from '@/logging';
 import * as Storage from '@/util/storage';
 import * as SoundsLikeDatabase from '@/util/sounds-like-database';

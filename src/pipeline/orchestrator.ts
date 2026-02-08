@@ -11,7 +11,6 @@
 import { PipelineConfig, PipelineInput, PipelineResult, PipelineState } from './types';
 import * as Context from '../context';
 import * as Routing from '../routing';
-import * as Interactive from '../interactive';
 import * as Output from '../output';
 import * as Reflection from '../reflection';
 import * as Transcription from '../transcription';
@@ -85,10 +84,11 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
     const routing = Routing.create(routingConfig, context);
     logger.debug('Routing system initialized');
   
-    const interactive = Interactive.create(
-        { enabled: config.interactive, defaultToSuggestion: true, silent: config.silent },
-        context
-    );
+    // Interactive moved to protokoll-cli
+    // const interactive = Interactive.create(
+    //     { enabled: config.interactive, defaultToSuggestion: true, silent: config.silent },
+    //     context
+    // );
   
     const output = Output.create({
         intermediateDir: config.intermediateDir || './output/protokoll',
@@ -236,15 +236,17 @@ Rules:
         }
     
         // Start interactive session if enabled
-        if (config.interactive) {
-            interactive.startSession();
-            log('debug', 'Interactive session started');
-        }
+        // Interactive moved to protokoll-cli
+        // if (config.interactive) {
+        //     interactive.startSession();
+        //     log('debug', 'Interactive session started');
+        // }
     
         try {
-            // Step 1: Check onboarding needs
+            // Step 1: Check onboarding needs (moved to protokoll-cli)
             log('debug', 'Checking onboarding state...');
-            const onboardingState = interactive.checkNeedsOnboarding();
+            // const onboardingState = interactive.checkNeedsOnboarding();
+            const onboardingState = { needsOnboarding: false }; // Stub
             if (onboardingState.needsOnboarding) {
                 log('debug', 'First-run detected - onboarding may be triggered');
             }
@@ -333,8 +335,8 @@ Rules:
                 contextInstance: context,
                 routingInstance: routing,
                 interactiveMode: config.interactive,
-                // Always pass interactive handler - it will handle enabled/disabled internally
-                interactiveInstance: interactive,
+                // Interactive moved to protokoll-cli
+                // interactiveInstance: interactive,
             };
             
             const executor = Agentic.create(reasoning, toolContext);
@@ -541,18 +543,17 @@ Rules:
                 }
             }
       
-            // Step 8: End interactive session
+            // Step 8: End interactive session (moved to protokoll-cli)
             log('debug', 'Finalizing session...');
-            let session: Interactive.InteractiveSession | undefined;
-            if (config.interactive) {
-                session = interactive.endSession();
-                log('debug', 'Interactive session ended: %d clarifications', session.responses.length);
-        
-                // Save session if path available
-                if (paths.intermediate.session) {
-                    await output.writeIntermediate(paths, 'session', session);
-                }
-            }
+            // let session: Interactive.InteractiveSession | undefined;
+            // if (config.interactive) {
+            //     session = interactive.endSession();
+            //     log('debug', 'Interactive session ended: %d clarifications', session.responses.length);
+            //     // Save session if path available
+            //     if (paths.intermediate.session) {
+            //         await output.writeIntermediate(paths, 'session', session);
+            //     }
+            // }
       
             // Step 9: Cleanup if needed
             if (!config.keepIntermediates && !config.debug) {
@@ -593,7 +594,7 @@ Rules:
                 correctionsApplied: agenticResult.state.resolvedEntities.size,
                 processedAudioPath,
                 reflection: reflectionReport,
-                session,
+                // session, // Interactive moved to protokoll-cli
                 intermediatePaths: paths,
             };
       

@@ -8,13 +8,12 @@ import { resolve, dirname, relative, isAbsolute } from 'node:path';
 import { readFile, writeFile, mkdir, unlink } from 'node:fs/promises';
 import * as Context from '@/context';
 import * as Reasoning from '@/reasoning';
-import { parseTranscript, combineTranscripts, editTranscript } from '@/cli/action';
-import { listTranscripts } from '@/cli/transcript';
-import { processFeedback, applyChanges, type FeedbackContext } from '@/cli/feedback';
 import { DEFAULT_MODEL } from '@/constants';
+import * as Transcript from '@/transcript';
 
 import { fileExists, getConfiguredDirectory, sanitizePath, validatePathWithinDirectory, validatePathWithinOutputDirectory } from './shared.js';
 import * as Metadata from '@/util/metadata';
+import { validateOrThrow } from '@/util/validation';
 
 // ============================================================================
 // Helper Functions
@@ -88,7 +87,7 @@ async function findTranscript(
         ? normalizedPath.split('/').pop() || normalizedPath
         : normalizedPath;
     
-    const result = await listTranscripts({
+    const result = await Transcript.listTranscripts({
         directory: outputDirectory,
         search: searchTerm,
         limit: 10,
@@ -520,7 +519,7 @@ export async function handleReadTranscript(args: {
     // Find the transcript (returns absolute path for file operations)
     const absolutePath = await findTranscript(args.transcriptPath, args.contextDirectory);
 
-    const parsed = await parseTranscript(absolutePath);
+    const parsed = await Transcript.parseTranscript(absolutePath);
 
     // Convert to relative path for response
     const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
@@ -554,7 +553,7 @@ export async function handleListTranscripts(args: {
         throw new Error(`Directory not found: ${directory}`);
     }
 
-    const result = await listTranscripts({
+    const result = await Transcript.listTranscripts({
         directory,
         limit: args.limit ?? 50,
         offset: args.offset ?? 0,
@@ -628,7 +627,7 @@ export async function handleEditTranscript(args: {
     
     // Handle title/project/tags changes via existing editTranscript function
     if (args.title || args.projectId || args.tagsToAdd || args.tagsToRemove) {
-        const result = await editTranscript(absolutePath, {
+        const result = await Transcript.editTranscript(absolutePath, {
             title: args.title,
             projectId: args.projectId,
             tagsToAdd: args.tagsToAdd,
@@ -639,29 +638,9 @@ export async function handleEditTranscript(args: {
         // Validate that the output path stays within the output directory
         validatePathWithinDirectory(result.outputPath, outputDirectory);
 
-        // Validate the content before writing
+        // Validate the content before writing (using shared validation utility)
         try {
-            const { parseTranscriptContent } = await import('@/util/frontmatter');
-            const validation = parseTranscriptContent(result.content);
-            
-            // Check that we can extract basic metadata
-            if (!validation.metadata) {
-                throw new Error('Generated content has no parseable metadata');
-            }
-            
-            // Check that YAML frontmatter is at the start (not after title)
-            if (!result.content.trim().startsWith('---')) {
-                throw new Error('Generated content does not start with YAML frontmatter (---). Title may be placed before frontmatter.');
-            }
-            
-            // Check that there's a closing frontmatter delimiter
-            const lines = result.content.split('\n');
-            const closingDelimiterIndex = lines.findIndex((line, idx) => idx > 0 && line.trim() === '---');
-            if (closingDelimiterIndex === -1) {
-                throw new Error('Generated content is missing closing YAML frontmatter delimiter (---)');
-            }
-            
-            // Log validation success
+            validateOrThrow(result.content);
             // eslint-disable-next-line no-console
             console.log('✅ Transcript content validated successfully');
         } catch (validationError) {
@@ -869,7 +848,7 @@ export async function handleCombineTranscripts(args: {
         absolutePaths.push(absolute);
     }
 
-    const result = await combineTranscripts(absolutePaths, {
+    const result = await Transcript.combineTranscripts(absolutePaths, {
         title: args.title,
         projectId: args.projectId,
         contextDirectory: args.contextDirectory,
@@ -1334,7 +1313,7 @@ export async function handleProvideFeedback(args: {
     });
     const reasoning = Reasoning.create({ model: args.model || DEFAULT_MODEL });
 
-    const feedbackCtx: FeedbackContext = {
+    const feedbackCtx: Transcript.FeedbackContext = {
         transcriptPath: absolutePath,
         transcriptContent,
         originalContent: transcriptContent,
@@ -1344,11 +1323,11 @@ export async function handleProvideFeedback(args: {
         dryRun: false,
     };
 
-    await processFeedback(args.feedback, feedbackCtx, reasoning);
+    await Transcript.processFeedback(args.feedback, feedbackCtx, reasoning);
 
     let result: { newPath: string; moved: boolean } | null = null;
     if (feedbackCtx.changes.length > 0) {
-        result = await applyChanges(feedbackCtx);
+        result = await Transcript.applyChanges(feedbackCtx);
     }
 
     // Convert to relative path for response

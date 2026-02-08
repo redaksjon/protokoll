@@ -45,7 +45,8 @@ import { tools, handleToolCall } from './tools';
 import * as ServerConfig from './serverConfig';
 import * as Roots from './roots';
 import type { McpRoot } from './types';
-import { ConfigSchema } from '../protokoll';
+// ConfigSchema moved to types module
+// import { ConfigSchema } from '../types';
 import { DEFAULT_CONFIG_DIR } from '../constants';
 
 // ============================================================================
@@ -60,7 +61,7 @@ const cardigantime = Cardigantime.create({
     defaults: {
         configDirectory: DEFAULT_CONFIG_DIR,
     },
-    configShape: ConfigSchema.shape,
+    configShape: {}, // Minimal config shape - full schema in types module
 });
 
 /**
@@ -365,13 +366,13 @@ async function handlePost(req: IncomingMessage, res: ServerResponse) {
         // eslint-disable-next-line no-console
         console.log(`📚 Context Dirs:      ${contextDirsDisplay}`);
         // eslint-disable-next-line no-console
-        console.log(`🤖 AI Model:          ${cardigantimeConfig.model || 'default'}`);
+        console.log(`🤖 AI Model:          ${(cardigantimeConfig as any).model || 'default'}`);
         // eslint-disable-next-line no-console
-        console.log(`🎤 Transcribe Model:  ${cardigantimeConfig.transcriptionModel || 'default'}`);
+        console.log(`🎤 Transcribe Model:  ${(cardigantimeConfig as any).transcriptionModel || 'default'}`);
         // eslint-disable-next-line no-console
-        console.log(`🐛 Debug Mode:        ${cardigantimeConfig.debug ? 'ON' : 'OFF'}`);
+        console.log(`🐛 Debug Mode:        ${(cardigantimeConfig as any).debug ? 'ON' : 'OFF'}`);
         // eslint-disable-next-line no-console
-        console.log(`📢 Verbose Mode:      ${cardigantimeConfig.verbose ? 'ON' : 'OFF'}`);
+        console.log(`📢 Verbose Mode:      ${(cardigantimeConfig as any).verbose ? 'ON' : 'OFF'}`);
         // eslint-disable-next-line no-console
         console.log('=================================================================\n');
         

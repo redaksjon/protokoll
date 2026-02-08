@@ -6,7 +6,6 @@
  */
 
 import { ReflectionReport } from '../reflection/types';
-import { InteractiveSession } from '../interactive/types';
 import { OutputPaths } from '../output/types';
 
 export interface PipelineConfig {
@@ -63,7 +62,7 @@ export interface PipelineResult {
   
     // Optional outputs
     reflection?: ReflectionReport;
-    session?: InteractiveSession;
+    // session?: InteractiveSession; // Interactive moved to protokoll-cli
     intermediatePaths?: OutputPaths;
 }
 

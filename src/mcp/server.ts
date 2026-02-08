@@ -30,6 +30,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
+import { realpath } from 'node:fs/promises';
 import * as Resources from './resources';
 import * as Prompts from './prompts';
 import { tools, handleToolCall } from './tools';
@@ -156,18 +157,31 @@ async function main() {
 }
 
 // ES module equivalent of CommonJS `require.main === module`
-// Use resolve() to normalize both paths before comparison to handle
-// relative paths, symlinks, and path resolution differences
-const isMainModule = import.meta.url.startsWith('file:') &&
-    resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
-
-if (isMainModule) {
-    main().catch((error) => {
-        // eslint-disable-next-line no-console
-        console.error(error);
-        process.exit(1);
-    });
+// Use realpath() to resolve symlinks before comparison
+async function checkIsMainModule(): Promise<boolean> {
+    if (!import.meta.url.startsWith('file:') || !process.argv[1]) {
+        return false;
+    }
+    
+    try {
+        const argvPath = await realpath(resolve(process.argv[1]));
+        const modulePath = await realpath(fileURLToPath(import.meta.url));
+        return argvPath === modulePath;
+    } catch {
+        return false;
+    }
 }
+
+// Start the server if this is the main module
+checkIsMainModule().then((isMain) => {
+    if (isMain) {
+        main().catch((error) => {
+            // eslint-disable-next-line no-console
+            console.error(error);
+            process.exit(1);
+        });
+    }
+});
 
 // ============================================================================
 // Exports for Testing

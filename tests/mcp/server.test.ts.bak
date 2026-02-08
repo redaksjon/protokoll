@@ -378,7 +378,6 @@ routing:
                 name: 'List Test Project',
                 destination: '/tmp/list-test',
                 sounds_like: [],  // Bypass smart assistance
-                useSmartAssist: false,
                 explicit_phrases: [],
                 contextDirectory: protokollDir
             });
@@ -395,7 +394,6 @@ routing:
                 name: 'Active Project',
                 destination: '/tmp/active',
                 sounds_like: [],  // Bypass smart assistance
-                useSmartAssist: false,
                 explicit_phrases: [],
                 contextDirectory: protokollDir
             });
@@ -418,7 +416,6 @@ routing:
                 name: 'Include Test Project',
                 destination: '/tmp/include-test',
                 sounds_like: [],  // Bypass smart assistance
-                useSmartAssist: false,
                 explicit_phrases: [],
                 contextDirectory: protokollDir
             });
@@ -532,7 +529,6 @@ routing:
                 name: 'Get Test Project',
                 destination: '/tmp/get-test',
                 sounds_like: [],  // Bypass smart assistance
-                useSmartAssist: false,
                 explicit_phrases: [],
                 contextDirectory: protokollDir
             });
@@ -585,7 +581,6 @@ routing:
                 name: 'New Project',
                 destination: '/tmp/new-project',
                 sounds_like: [],  // Bypass smart assistance
-                useSmartAssist: false,
                 explicit_phrases: [],
                 contextDirectory: protokollDir
             });
@@ -602,7 +597,6 @@ routing:
                 destination: '/tmp/classified',
                 explicit_phrases: ['classified', 'secret'],
                 sounds_like: [],  // Bypass smart assistance
-                useSmartAssist: false,
                 topics: ['security'],
                 contextType: 'work',
                 contextDirectory: protokollDir
@@ -616,7 +610,6 @@ routing:
                 name: 'Protokoll',
                 destination: '/tmp/protokoll',
                 sounds_like: ['protocol', 'pro to call', 'proto call'],
-                useSmartAssist: false,
                 contextDirectory: protokollDir
             });
 
@@ -637,7 +630,6 @@ routing:
                 sounds_like: ['chronology', 'crono logy', 'crow no logy'],
                 topics: ['timeline', 'history'],
                 contextType: 'work',
-                useSmartAssist: false,
                 contextDirectory: protokollDir
             });
 
@@ -657,7 +649,6 @@ routing:
                 name: 'Empty Sounds Like',
                 destination: '/tmp/empty-sounds',
                 sounds_like: [],
-                useSmartAssist: false,
                 contextDirectory: protokollDir
             });
 
@@ -673,7 +664,6 @@ routing:
                 explicit_phrases: ['observasjon note', 'observation project'],
                 sounds_like: ['observation', 'observe asian', 'obs er vah shun'],
                 contextType: 'work',
-                useSmartAssist: false,
                 contextDirectory: protokollDir
             });
 
@@ -689,7 +679,6 @@ routing:
                 name: 'Redaksjon',
                 destination: '/tmp/redaksjon',
                 sounds_like: ['redaction', 'red action', 'red ox on'],
-                useSmartAssist: false,
                 contextDirectory: protokollDir
             });
 
@@ -930,7 +919,6 @@ routing:
                 destination: '/tmp/protokoll',
                 sounds_like: ['protocol'],
                 explicit_phrases: [],
-                useSmartAssist: false,
                 contextDirectory: protokollDir
             });
 
@@ -954,7 +942,6 @@ routing:
                 destination: '/tmp/old-path',
                 sounds_like: [],
                 explicit_phrases: [],
-                useSmartAssist: false,
                 contextDirectory: protokollDir
             });
 
@@ -977,7 +964,6 @@ routing:
                 destination: '/tmp/phrases',
                 sounds_like: [],
                 explicit_phrases: ['existing phrase'],
-                useSmartAssist: false,
                 contextDirectory: protokollDir
             });
 
@@ -1001,7 +987,6 @@ routing:
                 destination: '/tmp/active',
                 sounds_like: [],
                 explicit_phrases: [],
-                useSmartAssist: false,
                 contextDirectory: protokollDir
             });
 
@@ -1231,7 +1216,6 @@ Content from part 2.
                 name: 'Duplicate Project',
                 destination: '/tmp/dup',
                 sounds_like: [],  // Bypass smart assistance
-                useSmartAssist: false,
                 explicit_phrases: [],
                 contextDirectory: protokollDir
             });
@@ -1242,7 +1226,6 @@ Content from part 2.
                 name: 'Duplicate Project Again',
                 destination: '/tmp/dup2',
                 sounds_like: [],  // Bypass smart assistance
-                useSmartAssist: false,
                 explicit_phrases: [],
                 contextDirectory: protokollDir
             })).rejects.toThrow('already exists');

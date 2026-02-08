@@ -8,7 +8,6 @@
 import { z } from 'zod';
 import * as Context from '../context';
 import * as Routing from '../routing';
-import * as Interactive from '../interactive';
 
 // ============================================================================
 // Zod Schemas for Structured Outputs
@@ -90,7 +89,7 @@ export interface ToolContext {
     contextInstance: Context.ContextInstance;
     routingInstance: Routing.RoutingInstance;
     interactiveMode: boolean;
-    interactiveInstance?: Interactive.InteractiveInstance;
+    // interactiveInstance?: Interactive.InteractiveInstance; // Interactive moved to protokoll-cli
     resolvedEntities?: Map<string, string>;  // Entities resolved during this session
 }
 
