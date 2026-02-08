@@ -3,10 +3,9 @@ import * as TranscribePhase from '@/phases/transcribe';
 import * as SimpleReplacePhase from '@/phases/simple-replace';
 import * as LocatePhase from '@/phases/locate';
 import * as Dreadcabinet from '@utilarium/dreadcabinet';
-import { Config } from '@/protokoll';
-import * as Interactive from '@/interactive';
 import * as Context from '@/context';
 import * as Routing from '@/routing';
+import { Config } from '@/types';
 
 export interface Transcription {
     text: string;
@@ -19,12 +18,14 @@ export interface Instance {
 
 /**
  * Analyze transcript for potential unknown entities that need clarification
+ * NOTE: Interactive functionality moved to protokoll-cli
  */
+/* eslint-disable @typescript-eslint/no-unused-vars */
 const analyzeTranscriptForUnknowns = (
     transcriptText: string, 
     context: Context.ContextInstance
-): Array<{ term: string; context: string; type: Interactive.ClarificationType }> => {
-    const unknowns: Array<{ term: string; context: string; type: Interactive.ClarificationType }> = [];
+): Array<{ term: string; context: string; type: string }> => {
+    const unknowns: Array<{ term: string; context: string; type: string }> = [];
     
     // Extract potential names (capitalized words that aren't at sentence start)
     const namePattern = /(?<=[.!?]\s+|\n|^)(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/g;
@@ -132,8 +133,8 @@ export const create = (config: Config, operator: Dreadcabinet.Operator): Instanc
     const locatePhase: LocatePhase.Instance = LocatePhase.create(config, operator);
     const simpleReplacePhase: SimpleReplacePhase.Instance = SimpleReplacePhase.create(config, operator);
 
-    // Initialize interactive system if enabled
-    let interactive: Interactive.InteractiveInstance | null = null;
+    // Initialize systems
+    // NOTE: Interactive functionality moved to protokoll-cli
     let context: Context.ContextInstance | null = null;
     let routing: Routing.RoutingInstance | null = null;
     let transcribePhase: TranscribePhase.Instance | null = null;
@@ -192,18 +193,11 @@ export const create = (config: Config, operator: Dreadcabinet.Operator): Instanc
             logger.info('Agentic transcription ready - model will query context via tools');
         }
 
-        if (config.interactive && !interactive && context) {
-            interactive = Interactive.create(
-                { 
-                    enabled: true, 
-                    defaultToSuggestion: true,
-                },
-                context
-            );
-            
-            interactive.startSession();
-            logger.info('Interactive session started');
-        }
+        // Interactive functionality moved to protokoll-cli
+        // if (config.interactive && context) {
+        //     // Interactive session would be started here
+        //     logger.info('Interactive mode not available in core library');
+        // }
     };
 
     const process = async (audioFile: string) => {
@@ -227,7 +221,9 @@ export const create = (config: Config, operator: Dreadcabinet.Operator): Instanc
 
         // ISSUE #2: Check routing confidence and ask for confirmation if low
         let routeDecision: Routing.RouteDecision | null = null;
-        if (routing && context && config.interactive && interactive) {
+        // Interactive functionality moved to protokoll-cli
+        // eslint-disable-next-line no-constant-condition
+        if (routing && context && config.interactive && false) {
             logger.info('Determining routing and checking confidence...');
 
             const routingContext: Routing.RoutingContext = {
@@ -237,16 +233,16 @@ export const create = (config: Config, operator: Dreadcabinet.Operator): Instanc
                 hash,
             };
 
-            routeDecision = routing.route(routingContext);
+            routeDecision = routing?.route(routingContext) ?? null;
 
             // Apply simple-replace phase if we have a project classification
-            if (routeDecision.projectId) {
-                logger.debug('Applying simple-replace for project %s', routeDecision.projectId);
+            if (routeDecision && routeDecision!.projectId) {
+                logger.debug('Applying simple-replace for project %s', routeDecision!.projectId);
                 const simpleReplaceResult = await simpleReplacePhase.replace(
                     transcription.text,
                     {
-                        project: routeDecision.projectId,
-                        confidence: routeDecision.confidence,
+                        project: routeDecision!.projectId || undefined,
+                        confidence: routeDecision!.confidence || 0,
                     },
                     interimPath,
                     hash
@@ -266,27 +262,28 @@ export const create = (config: Config, operator: Dreadcabinet.Operator): Instanc
             }
             
             // If confidence is low, ask user to confirm routing
-            if (routeDecision.confidence < 0.7) {
+            if (routeDecision && routeDecision!.confidence < 0.7 && routeDecision!.signals && routeDecision!.destination) {
                 logger.info('Routing confidence is %.1f%% - asking for confirmation', 
-                    routeDecision.confidence * 100);
+                    routeDecision!.confidence * 100);
                 
-                const signalSummary = routeDecision.signals.length > 0
-                    ? routeDecision.signals.map(s => `${s.value}`).join(', ')
+                const signalSummary = routeDecision!.signals!.length > 0
+                    ? routeDecision!.signals!.map(s => `${s.value}`).join(', ')
                     : 'none detected';
                 
-                const routingRequest: Interactive.ClarificationRequest = {
-                    type: 'low_confidence_routing',
-                    term: `${(routeDecision.confidence * 100).toFixed(0)}%`,
-                    context: `This note seems like it should go to:\n"${routeDecision.destination.path}"\n\nDetected signals: ${signalSummary}\n\nReasoning: ${routeDecision.reasoning}`,
-                };
-                
-                await interactive.handleClarification(routingRequest);
-                logger.debug('Routing confirmation handled');
+                // Interactive routing confirmation moved to protokoll-cli
+                // const routingRequest = {
+                //     type: 'low_confidence_routing',
+                //     term: `${(routeDecision.confidence * 100).toFixed(0)}%`,
+                //     context: `This note seems like it should go to:\n"${routeDecision.destination.path}"\n\nDetected signals: ${signalSummary}\n\nReasoning: ${routeDecision.reasoning}`,
+                // };
+                // await interactive.handleClarification(routingRequest);
+                logger.debug('Routing confirmation (interactive mode not available in core)');
             }
         }
 
-        // Interactive clarification phase
-        if (config.interactive && interactive && context) {
+        // Interactive clarification phase moved to protokoll-cli
+        /*
+        if (config.interactive && context) {
             logger.info('Analyzing transcript for potential clarifications...');
             
             const unknowns = analyzeTranscriptForUnknowns(transcription.text, context);
@@ -297,72 +294,35 @@ export const create = (config: Config, operator: Dreadcabinet.Operator): Instanc
                 const corrections = new Map<string, string>();
                 
                 for (const unknown of unknowns) {
-                    const request: Interactive.ClarificationRequest = {
+                    const request = {
                         type: unknown.type,
                         term: unknown.term,
                         context: unknown.context,
                     };
                     
-                    const response = await interactive.handleClarification(request);
-                    
-                    if (response.response && response.response !== unknown.term) {
-                        corrections.set(unknown.term, response.response);
-                        logger.debug('Correction recorded', { 
-                            original: unknown.term, 
-                            corrected: response.response 
-                        });
-                        
-                        // If user wants to remember this, save to context
-                        if (response.shouldRemember && context) {
-                            try {
-                                await context.saveEntity({
-                                    type: unknown.type === 'new_person' ? 'person' : unknown.type === 'new_project' ? 'project' : 'term',
-                                    id: response.response.toLowerCase().replace(/\s+/g, '-'),
-                                    name: response.response,
-                                    soundsLike: [unknown.term],
-                                } as Context.Person | Context.Project);
-                                // ISSUE #1: Provide user feedback on successful save
-                                // eslint-disable-next-line no-console
-                                console.log(`\n✓ Remembered! "${response.response}" will be recognized in future transcripts.\n`);
-                                logger.info('Saved new entity to context', { name: response.response });
-                            } catch (err) {
-                                // ISSUE #1: Inform user of save failure
-                                // eslint-disable-next-line no-console
-                                console.log(`\n⚠ Could not save "${response.response}" - check file permissions\n`);
-                                logger.warn('Could not save entity to context', { error: err });
-                            }
-                        }
-                    }
+                    // Interactive handling moved to protokoll-cli
+                    // const response = await interactive.handleClarification(request);
+                    // ... corrections logic ...
                 }
                 
                 // Apply corrections to transcript if any were made
-                if (corrections.size > 0) {
-                    const correctedText = applyCorrections(transcription.text, corrections);
-                    logger.info(`Applied ${corrections.size} corrections to transcript`);
-                    // Note: The corrections are applied in memory but the existing
-                    // transcription files are already written. The markdown file
-                    // would need to be regenerated with corrections for them to persist.
-                    // This is a limitation of the current architecture.
-                    logger.debug('Corrected transcript preview', { 
-                        preview: correctedText.substring(0, 200) 
-                    });
-                }
+                // if (corrections.size > 0) {
+                //     const correctedText = applyCorrections(transcription.text, corrections);
+                //     logger.info(`Applied ${corrections.size} corrections to transcript`);
+                // }
             } else {
                 logger.info('No unknown entities detected - transcript looks good');
             }
         }
+        */
 
         logger.info('Transcription complete for file %s', audioFile);
         logger.info('Transcription saved to: %s', transcriptionFilename);
         
-        // End interactive session if active
-        if (interactive && config.interactive) {
-            const session = interactive.endSession();
-            logger.debug('Interactive session summary', {
-                questions: session.requests.length,
-                responses: session.responses.length,
-            });
-        }
+        // Interactive session handling moved to protokoll-cli
+        // if (config.interactive) {
+        //     // End session logic here
+        // }
         
         return;
     }

@@ -3,7 +3,7 @@ import * as Media from '@/util/media';
 import * as Storage from '@/util/storage';
 import * as Dreadcabinet from '@utilarium/dreadcabinet';
 import * as Dates from '@/util/dates';
-import { Config } from '@/protokoll';
+import { Config } from '@/types';
 import { DEFAULT_INTERMEDIATE_DIRECTORY } from '@/constants';
 import path from 'node:path';
 

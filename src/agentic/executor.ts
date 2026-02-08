@@ -256,8 +256,10 @@ Remember: preserve ALL content, only fix transcription errors.`;
                         logger.debug('Tool %s result: %s', toolCall.name, result.success ? 'success' : 'failed');
           
                         // Handle results that need user input
-                        // Check if interactive handler is available (not gated by interactiveMode flag)
-                        if (result.needsUserInput && ctx.interactiveInstance) {
+                        // Interactive functionality moved to protokoll-cli
+                        /* 
+                        // eslint-disable-next-line no-constant-condition
+                        if (result.needsUserInput && false) {
                             logger.info('Interactive: %s requires clarification', toolCall.name);
                             
                             const termName = String(toolCall.arguments.name || toolCall.arguments.term || '');
@@ -808,6 +810,7 @@ Remember: preserve ALL content, only fix transcription errors.`;
                                 }
                             }
                         }
+                        */ // End of commented interactive code
           
                         // Update state based on tool results
                         if (result.data?.person) {

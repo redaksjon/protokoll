@@ -8,7 +8,7 @@ import type { McpResourceContents } from '../types';
 import { buildTranscriptUri, buildTranscriptsListUri } from '../uri';
 import { readFile } from 'node:fs/promises';
 import { resolve, relative } from 'node:path';
-import { listTranscripts } from '@/cli/transcript';
+import { listTranscripts } from '@/transcript';
 import * as ServerConfig from '../serverConfig';
 import { sanitizePath } from '../tools/shared';
 
@@ -113,7 +113,7 @@ export async function readTranscriptsListResource(options: {
     // Convert absolute paths to relative paths (relative to outputDirectory)
     // Use sanitizePath to ensure no absolute paths are exposed
     const transcriptsWithUris = await Promise.all(
-        result.transcripts.map(async (t) => {
+        result.transcripts.map(async (t: { path: string; filename: string; date: string; time?: string; title: string; hasRawTranscript: boolean; createdAt: Date; status?: string; openTasksCount?: number; contentSize?: number; entities?: any }) => {
             // Convert absolute path to relative path
             // Guard against undefined path - use filename as fallback
             const relativePath = await sanitizePath(t.path || t.filename || '', outputDirectory);

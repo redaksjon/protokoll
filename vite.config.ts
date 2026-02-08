@@ -65,7 +65,6 @@ export default defineConfig({
                 '@utilarium/cardigantime',
                 '@utilarium/dreadcabinet',
                 '@types/fluent-ffmpeg',
-                'commander',
                 'dayjs',
                 'dotenv',
                 'fluent-ffmpeg',
@@ -81,7 +80,7 @@ export default defineConfig({
                 /^node:/,
             ],
             input: {
-                main: 'src/main.ts',
+                index: 'src/index.ts',
                 'mcp/server': 'src/mcp/server.ts',
                 'mcp/server-http': 'src/mcp/server-http.ts',
                 'scripts/fix-duplicate-delimiters': 'scripts/fix-duplicate-delimiters.ts',

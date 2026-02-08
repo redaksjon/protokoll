@@ -5,10 +5,6 @@
  
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import * as Context from '@/context';
-import * as ProjectAssist from '@/cli/project-assist';
-import * as TermAssist from '@/cli/term-assist';
-import * as TermContext from '@/cli/term-context';
-import * as ContentFetcher from '@/cli/content-fetcher';
 
 // ============================================================================
 // Tool Definitions
@@ -89,7 +85,11 @@ export async function handleSuggestProjectMetadata(args: {
         throw new Error('Smart assistance is disabled in configuration.');
     }
 
-    const assist = ProjectAssist.create(smartConfig);
+    // ProjectAssist moved to separate module - needs to be re-implemented
+    throw new Error('Project assistance temporarily unavailable - business logic needs extraction from CLI');
+    
+    /* Unreachable code - commented out until ProjectAssist is re-implemented
+    // const assist = ProjectAssist.create(smartConfig);
 
     const result: {
         soundsLike?: string[];
@@ -127,6 +127,7 @@ export async function handleSuggestProjectMetadata(args: {
         success: true,
         data: result,
     };
+    */
 }
 
 export async function handleSuggestTermMetadata(args: {
@@ -145,9 +146,13 @@ export async function handleSuggestTermMetadata(args: {
         throw new Error('Term smart assistance is disabled in configuration.');
     }
 
-    const termAssist = TermAssist.create(smartConfig);
-    const termContextHelper = TermContext.create(context);
-    const contentFetcher = ContentFetcher.create();
+    // TermAssist, TermContext, ContentFetcher moved to separate modules - need re-implementation
+    throw new Error('Term assistance temporarily unavailable - business logic needs extraction from CLI');
+    
+    /* Unreachable code - commented out until TermAssist is re-implemented
+    // const termAssist = TermAssist.create(smartConfig);
+    // const termContextHelper = TermContext.create(context);
+    // const contentFetcher = ContentFetcher.create();
 
     // Gather internal context
     const internalContext = termContextHelper.gatherInternalContext(args.term, args.expansion);
@@ -173,7 +178,7 @@ export async function handleSuggestTermMetadata(args: {
     let suggestedProjects: string[] = [];
     if (suggestions.topics && suggestions.topics.length > 0) {
         const projects = termContextHelper.findProjectsByTopic(suggestions.topics);
-        suggestedProjects = projects.map(p => p.id);
+        suggestedProjects = projects.map((p: any) => p.id);
     }
 
     return {
@@ -186,4 +191,5 @@ export async function handleSuggestTermMetadata(args: {
             suggestedProjects,
         },
     };
+    */
 }

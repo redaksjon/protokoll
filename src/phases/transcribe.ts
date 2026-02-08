@@ -1,5 +1,5 @@
 import * as Dreadcabinet from '@utilarium/dreadcabinet';
-import { Config } from '@/protokoll';
+import { Config } from '@/types';
 import * as Logging from '@/logging';
 import * as Storage from '@/util/storage';
 import * as Media from '@/util/media';
@@ -33,7 +33,7 @@ export const create = (config: Config, operator: Dreadcabinet.Operator, deps?: T
     const media = Media.create(logger);
     
     // Create reasoning instance for agentic processing
-    const reasoning = Reasoning.create({ model: config.model });
+    const reasoning = Reasoning.create({ model: config.model || 'gpt-4' });
 
     const transcribe = async (creation: Date, outputPath: string, contextPath: string, interimPath: string, filename: string, hash: string, audioFile: string): Promise<Transcription> => {
         if (!outputPath) {
@@ -78,7 +78,8 @@ export const create = (config: Config, operator: Dreadcabinet.Operator, deps?: T
 
         // Convert audio file to a supported format if necessary
         // Always convert if file is close to or over the size limit to ensure compression
-        const needsConversion = originalFileSize > (config.maxAudioSize * 0.95); // Convert if within 5% of limit
+        const maxAudioSize = typeof config.maxAudioSize === 'number' ? config.maxAudioSize : 25 * 1024 * 1024;
+        const needsConversion = originalFileSize > (maxAudioSize * 0.95); // Convert if within 5% of limit
         const convertedAudioFile = needsConversion 
             ? await media.convertToSupportedFormat(audioFile, interimPath, true) // Force conversion
             : await media.convertToSupportedFormat(audioFile, interimPath);
@@ -88,20 +89,20 @@ export const create = (config: Config, operator: Dreadcabinet.Operator, deps?: T
         const fileSize = await media.getFileSize(convertedAudioFile);
         const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(1);
         logger.info('Step 1/2: Transcribing audio (%s MB)...', fileSizeMB);
-        logger.debug(`Audio file size: ${fileSize} bytes, max size: ${config.maxAudioSize} bytes`);
+        logger.debug(`Audio file size: ${fileSize} bytes, max size: ${maxAudioSize} bytes`);
 
         let transcription: OpenAI.Transcription;
 
-        if (fileSize > config.maxAudioSize) {
-            logger.info(`Audio file exceeds maximum size (${fileSize} > ${config.maxAudioSize} bytes), splitting into chunks`);
+        if (fileSize > maxAudioSize) {
+            logger.info(`Audio file exceeds maximum size (${fileSize} > ${maxAudioSize} bytes), splitting into chunks`);
 
             // Create a temporary directory for the audio chunks
-            const tempDir = path.join(config.tempDirectory, `split_audio_${hash}`);
+            const tempDir = path.join(config.tempDirectory || '/tmp', `split_audio_${hash}`);
             await storage.createDirectory(tempDir);
 
             try {
                 // Split the audio file into chunks (use converted file)
-                const audioChunks = await media.splitAudioFile(convertedAudioFile, tempDir, config.maxAudioSize);
+                const audioChunks = await media.splitAudioFile(convertedAudioFile, tempDir, maxAudioSize);
                 logger.info(`Split audio file into ${audioChunks.length} chunks`);
 
                 // Transcribe each chunk
