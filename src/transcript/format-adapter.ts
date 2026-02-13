@@ -1,242 +1,165 @@
 /**
- * Format Adapter
+ * Format Adapter for Transcript Files
  * 
- * Provides transparent access to both .md (markdown) and .pkl (SQLite) transcript formats.
- * Detects file type and routes to appropriate implementation.
+ * Provides a unified interface for working with both:
+ * - Legacy .md (Markdown with YAML frontmatter) transcripts
+ * - New .pkl (SQLite-based) transcripts
+ * 
+ * The adapter detects file type by extension and routes to the appropriate implementation.
  */
 
 import * as path from 'node:path';
 import * as fs from 'fs/promises';
-// Note: @redaksjon/protokoll-format will be available after npm link
-// For now, we use dynamic imports to avoid build-time errors
-import * as Frontmatter from '../util/frontmatter';
-import type { ParsedTranscript, TranscriptListItem } from './operations';
-
-// Type definitions for protokoll-format (to avoid build-time dependency)
-interface PklMetadata {
-    title?: string;
-    date?: Date;
-    recordingTime?: string;
-    duration?: string;
-    project?: string;
-    projectId?: string;
-    tags?: string[];
-    status?: 'initial' | 'enhanced' | 'reviewed' | 'in_progress' | 'closed' | 'archived';
-    routing?: {
-        destination?: string;
-        confidence?: number;
-        signals?: string[];
-        reasoning?: string;
-    };
-    tasks?: Array<{ status: string }>;
-    entities?: {
-        people?: Array<{ id: string; name: string; type: string }>;
-        projects?: Array<{ id: string; name: string; type: string }>;
-        terms?: Array<{ id: string; name: string; type: string }>;
-        companies?: Array<{ id: string; name: string; type: string }>;
-    };
-}
-
-interface PklTranscriptInstance {
-    metadata: PklMetadata;
-    content: string;
-    hasRawTranscript: boolean;
-    close(): void;
-}
-
-// Dynamic import for protokoll-format
-let PklTranscript: {
-    open(path: string, config?: { readOnly?: boolean }): Promise<PklTranscriptInstance>;
-} | null = null;
-
-async function getPklTranscript(): Promise<typeof PklTranscript> {
-    if (!PklTranscript) {
-        try {
-            // Use string concatenation to prevent TypeScript from resolving the module at compile time
-            const moduleName = '@redaksjon/' + 'protokoll-format';
-            const mod = await import(/* @vite-ignore */ moduleName);
-            PklTranscript = mod.PklTranscript as typeof PklTranscript;
-        } catch {
-            // Package not available
-            return null;
-        }
-    }
-    return PklTranscript;
-}
+import type { ParsedTranscript, TranscriptMetadata } from './operations';
 
 /**
- * Check if a file is a .pkl format
+ * Check if a file is a .pkl (SQLite) transcript
  */
-export function isPklFormat(filePath: string): boolean {
+export function isPklFile(filePath: string): boolean {
     return path.extname(filePath).toLowerCase() === '.pkl';
 }
 
 /**
- * Check if a file is a .md format
+ * Check if a file is a .md (Markdown) transcript
  */
-export function isMarkdownFormat(filePath: string): boolean {
+export function isMdFile(filePath: string): boolean {
     return path.extname(filePath).toLowerCase() === '.md';
 }
 
 /**
- * Parse a transcript file (either .md or .pkl)
+ * Check if a file is a supported transcript format
  */
-export async function parseTranscriptWithAdapter(filePath: string): Promise<ParsedTranscript> {
-    if (isPklFormat(filePath)) {
-        return parsePklTranscript(filePath);
-    } else {
-        return parseMarkdownTranscript(filePath);
-    }
+export function isTranscriptFile(filePath: string): boolean {
+    return isPklFile(filePath) || isMdFile(filePath);
+}
+
+/**
+ * Get the glob pattern for finding transcript files
+ */
+export function getTranscriptGlobPattern(): string {
+    return '**/*.{md,pkl}';
 }
 
 /**
  * Parse a .pkl transcript file
+ * 
+ * Note: This is a placeholder that will be implemented when protokoll-format
+ * is added as a dependency. For now, it throws an error indicating .pkl
+ * support is not yet available.
  */
-async function parsePklTranscript(filePath: string): Promise<ParsedTranscript> {
-    const PklTranscriptClass = await getPklTranscript();
-    if (!PklTranscriptClass) {
-        throw new Error('protokoll-format package not available');
-    }
-    const transcript = await PklTranscriptClass.open(filePath, { readOnly: true });
-    
+export async function parsePklTranscript(filePath: string): Promise<ParsedTranscript> {
+    // TODO: Implement when protokoll-format is added as dependency
+    // const { PklTranscript } = await import('@redaksjon/protokoll-format');
+    // const transcript = PklTranscript.open(filePath, { readOnly: true });
+    // ... convert to ParsedTranscript format
+  
+    throw new Error(
+        `PKL format support not yet implemented. File: ${filePath}. ` +
+    'Install @redaksjon/protokoll-format and update this adapter.'
+    );
+}
+
+/**
+ * Check if .pkl format support is available
+ * 
+ * Note: This uses a dynamic require to avoid TypeScript compile-time errors
+ * when the package is not installed.
+ */
+export async function isPklSupportAvailable(): Promise<boolean> {
     try {
-        const metadata = transcript.metadata;
-        
-        const result: ParsedTranscript = {
-            filePath,
-            title: metadata.title,
-            metadata: {
-                date: metadata.date?.toISOString().split('T')[0],
-                time: metadata.recordingTime,
-                project: metadata.project,
-                projectId: metadata.projectId,
-                destination: metadata.routing?.destination,
-                confidence: metadata.routing?.confidence?.toString(),
-                signals: metadata.routing?.signals,
-                reasoning: metadata.routing?.reasoning,
-                tags: metadata.tags,
-                duration: metadata.duration,
-            },
-            content: transcript.content,
-            // For .pkl files, we reconstruct a "raw text" representation
-            rawText: reconstructRawText(metadata, transcript.content),
-        };
-        
-        return result;
-    } finally {
-        transcript.close();
-    }
-}
-
-/**
- * Parse a .md transcript file
- */
-async function parseMarkdownTranscript(filePath: string): Promise<ParsedTranscript> {
-    const rawText = await fs.readFile(filePath, 'utf-8');
-    const parsed = Frontmatter.parseTranscriptContent(rawText);
-    
-    return {
-        filePath,
-        title: parsed.metadata.title,
-        metadata: {
-            date: parsed.metadata.date?.toISOString().split('T')[0],
-            time: parsed.metadata.recordingTime,
-            project: parsed.metadata.project,
-            projectId: parsed.metadata.projectId,
-            destination: parsed.metadata.routing?.destination,
-            confidence: parsed.metadata.routing?.confidence?.toString(),
-            signals: parsed.metadata.routing?.signals?.map(s => 
-                `${s.type}: ${s.value} (weight: ${s.weight})`
-            ),
-            reasoning: parsed.metadata.routing?.reasoning,
-            tags: parsed.metadata.tags,
-            duration: parsed.metadata.duration,
-        },
-        content: parsed.body,
-        rawText,
-    };
-}
-
-/**
- * Reconstruct a raw text representation from .pkl metadata and content
- * This is used for compatibility with code that expects rawText
- */
-function reconstructRawText(metadata: PklMetadata, content: string): string {
-    // Build a YAML-like representation
-    const lines: string[] = ['---'];
-    
-    if (metadata.title) lines.push(`title: "${metadata.title}"`);
-    if (metadata.date) lines.push(`date: '${metadata.date.toISOString()}'`);
-    if (metadata.recordingTime) lines.push(`recordingTime: "${metadata.recordingTime}"`);
-    if (metadata.project) lines.push(`project: "${metadata.project}"`);
-    if (metadata.projectId) lines.push(`projectId: "${metadata.projectId}"`);
-    if (metadata.status) lines.push(`status: ${metadata.status}`);
-    if (metadata.duration) lines.push(`duration: "${metadata.duration}"`);
-    if (metadata.tags && metadata.tags.length > 0) {
-        lines.push('tags:');
-        for (const tag of metadata.tags) {
-            lines.push(`  - "${tag}"`);
-        }
-    }
-    
-    lines.push('---');
-    lines.push('');
-    lines.push(content);
-    
-    return lines.join('\n');
-}
-
-/**
- * Get list item from a .pkl file
- */
-export async function getPklListItem(filePath: string): Promise<TranscriptListItem | null> {
-    try {
-        const PklTranscriptClass = await getPklTranscript();
-        if (!PklTranscriptClass) {
-            return null;
-        }
-        const transcript = await PklTranscriptClass.open(filePath, { readOnly: true });
-        const stats = await fs.stat(filePath);
-        
-        try {
-            const metadata = transcript.metadata;
-            
-            return {
-                path: filePath,
-                filename: path.basename(filePath),
-                date: metadata.date?.toISOString().split('T')[0] || '',
-                time: metadata.recordingTime,
-                title: metadata.title || 'Untitled',
-                hasRawTranscript: transcript.hasRawTranscript,
-                createdAt: stats.birthtime,
-                status: metadata.status,
-                openTasksCount: metadata.tasks?.filter(t => t.status === 'open').length || 0,
-                contentSize: transcript.content.length,
-                entities: metadata.entities ? {
-                    people: metadata.entities.people?.map(p => ({ id: p.id, name: p.name })),
-                    projects: metadata.entities.projects?.map(p => ({ id: p.id, name: p.name })),
-                    terms: metadata.entities.terms?.map(t => ({ id: t.id, name: t.name })),
-                    companies: metadata.entities.companies?.map(c => ({ id: c.id, name: c.name })),
-                } : undefined,
-            };
-        } finally {
-            transcript.close();
-        }
+        // Use dynamic import with a variable to avoid TypeScript checking
+        const moduleName = '@redaksjon/protokoll-format';
+        await import(/* @vite-ignore */ moduleName);
+        return true;
     } catch {
-        return null;
+        return false;
     }
 }
 
 /**
- * Get the glob pattern for all transcript files
+ * Convert a .md path to its equivalent .pkl path
  */
-export function getTranscriptGlobPattern(directory: string): string {
-    return path.join(directory, '**/*.{md,pkl}');
+export function mdToPklPath(mdPath: string): string {
+    return mdPath.replace(/\.md$/, '.pkl');
 }
 
 /**
- * Get the ignore patterns for transcript listing
+ * Convert a .pkl path to its equivalent .md path
  */
-export function getTranscriptIgnorePatterns(): string[] {
-    return ['**/node_modules/**', '**/.transcript/**'];
+export function pklToMdPath(pklPath: string): string {
+    return pklPath.replace(/\.pkl$/, '.md');
+}
+
+/**
+ * Check if a transcript file exists (either .md or .pkl)
+ */
+export async function transcriptExists(basePath: string): Promise<{ exists: boolean; format: 'md' | 'pkl' | null; path: string | null }> {
+    // If path already has extension, check that specific file
+    if (isPklFile(basePath)) {
+        try {
+            await fs.access(basePath);
+            return { exists: true, format: 'pkl', path: basePath };
+        } catch {
+            return { exists: false, format: null, path: null };
+        }
+    }
+  
+    if (isMdFile(basePath)) {
+        try {
+            await fs.access(basePath);
+            return { exists: true, format: 'md', path: basePath };
+        } catch {
+            return { exists: false, format: null, path: null };
+        }
+    }
+  
+    // No extension - check both formats, prefer .pkl
+    const pklPath = basePath + '.pkl';
+    const mdPath = basePath + '.md';
+  
+    try {
+        await fs.access(pklPath);
+        return { exists: true, format: 'pkl', path: pklPath };
+    } catch {
+        try {
+            await fs.access(mdPath);
+            return { exists: true, format: 'md', path: mdPath };
+        } catch {
+            return { exists: false, format: null, path: null };
+        }
+    }
+}
+
+/**
+ * Get the preferred output format for new transcripts
+ * 
+ * This can be configured via environment variable or config file.
+ * Default is 'md' for backward compatibility.
+ */
+export function getPreferredOutputFormat(): 'md' | 'pkl' {
+    const envFormat = process.env.PROTOKOLL_OUTPUT_FORMAT?.toLowerCase();
+    if (envFormat === 'pkl') {
+        return 'pkl';
+    }
+    return 'md';
+}
+
+/**
+ * Metadata conversion utilities
+ */
+export function convertPklMetadataToTranscriptMetadata(
+    pklMetadata: Record<string, unknown>
+): TranscriptMetadata {
+    return {
+        date: pklMetadata.date instanceof Date 
+            ? pklMetadata.date.toISOString().split('T')[0] 
+            : pklMetadata.date as string | undefined,
+        time: pklMetadata.recordingTime as string | undefined,
+        project: pklMetadata.project as string | undefined,
+        projectId: pklMetadata.projectId as string | undefined,
+        destination: (pklMetadata.routing as Record<string, unknown>)?.destination as string | undefined,
+        confidence: (pklMetadata.routing as Record<string, unknown>)?.confidence?.toString(),
+        tags: pklMetadata.tags as string[] | undefined,
+        duration: pklMetadata.duration as string | undefined,
+    };
 }

@@ -38,6 +38,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
+import { realpath } from 'node:fs/promises';
 import * as Resources from './resources';
 import * as Prompts from './prompts';
 import { tools, handleToolCall } from './tools';
@@ -50,7 +51,31 @@ import { initializeWorkingDirectoryFromArgsAndConfig, loadCardigantimeConfig, DE
 // Configuration
 // ============================================================================
 
-const MCP_PORT = process.env.MCP_PORT ? Number.parseInt(process.env.MCP_PORT, 10) : 3000;
+// Port priority: MCP_PORT > PROTOKOLL_MCP_PORT > PORT > 3000
+function getPortConfig(): { port: number; source: string } {
+    if (process.env.MCP_PORT) {
+        const port = Number.parseInt(process.env.MCP_PORT, 10);
+        if (!Number.isNaN(port) && port > 0 && port < 65536) {
+            return { port, source: 'MCP_PORT' };
+        }
+    }
+    if (process.env.PROTOKOLL_MCP_PORT) {
+        const port = Number.parseInt(process.env.PROTOKOLL_MCP_PORT, 10);
+        if (!Number.isNaN(port) && port > 0 && port < 65536) {
+            return { port, source: 'PROTOKOLL_MCP_PORT' };
+        }
+    }
+    if (process.env.PORT) {
+        const port = Number.parseInt(process.env.PORT, 10);
+        if (!Number.isNaN(port) && port > 0 && port < 65536) {
+            return { port, source: 'PORT' };
+        }
+    }
+    return { port: 3000, source: 'default' };
+}
+
+const PORT_CONFIG = getPortConfig();
+const MCP_PORT = PORT_CONFIG.port;
 const HOST = '127.0.0.1'; // Localhost only for security
 
 // ============================================================================
@@ -99,7 +124,13 @@ function createMcpServer(): Server {
                 'Process audio files through a pipeline that transcribes with Whisper, ' +
                 'then enhances using LLMs with knowledge of your people, projects, and terminology. ' +
                 'Manage context entities (people, projects, terms) to improve recognition. ' +
-                'Edit and combine existing transcripts.',
+                'Edit and combine existing transcripts. ' +
+                '\n\n**IMPORTANT FOR AI ASSISTANTS**: When working with transcripts, you MUST use the ' +
+                'Protokoll MCP tools (protokoll_*) to read and modify transcript files. ' +
+                'DO NOT use direct file editing tools like Read, Write, or StrReplace on transcript files. ' +
+                'Use protokoll_read_transcript to read, protokoll_edit_transcript to change title/project/tags/status, ' +
+                'protokoll_provide_feedback for content corrections, and protokoll_change_transcript_date for date changes. ' +
+                'The transcript files are accessed via protokoll:// URIs through this MCP server.',
         },
         {
             capabilities: {
@@ -305,7 +336,7 @@ async function handlePost(req: IncomingMessage, res: ServerResponse) {
         }];
         
         Roots.setRoots(initialRoots);
-        await ServerConfig.initializeServerConfig(initialRoots);
+        await ServerConfig.initializeServerConfig(initialRoots, 'remote');
         
         // Get the full initialized config from ServerConfig
         const serverConfig = ServerConfig.getServerConfig();
@@ -727,9 +758,29 @@ async function handleDelete(req: IncomingMessage, res: ServerResponse) {
 
 async function main() {
     await initializeWorkingDirectoryFromArgsAndConfig();
+    
+    // Load config to display in startup banner
+    const cardigantimeConfig = await loadCardigantimeConfig();
+    const resolvedConfigDirs = (cardigantimeConfig as any).resolvedConfigDirs as unknown;
+    const configRoot = Array.isArray(resolvedConfigDirs) && resolvedConfigDirs.length > 0
+        ? resolvedConfigDirs[0]
+        : (process.env.WORKSPACE_ROOT || process.cwd());
+    const configPathDisplay = resolve(configRoot, DEFAULT_CONFIG_FILE);
+    
+    // Extract directory settings from config
+    const inputDir = (cardigantimeConfig as any).inputDirectory || 'NOT SET';
+    const outputDir = (cardigantimeConfig as any).outputDirectory || 'NOT SET';
+    const contextDirs = (cardigantimeConfig as any).contextDirectories;
+    const contextDirsDisplay = Array.isArray(contextDirs) && contextDirs.length > 0 
+        ? contextDirs.join(', ') 
+        : 'NOT SET';
+    
     const server = createServer(handleRequest);
 
     server.listen(MCP_PORT, HOST, () => {
+        const portSource = PORT_CONFIG.source === 'default' 
+            ? '(default)' 
+            : `(from ${PORT_CONFIG.source})`;
         // eslint-disable-next-line no-console
         console.log('\n=================================================================');
         // eslint-disable-next-line no-console
@@ -737,7 +788,7 @@ async function main() {
         // eslint-disable-next-line no-console
         console.log('=================================================================');
         // eslint-disable-next-line no-console
-        console.log(`🌐 Server URL:        http://${HOST}:${MCP_PORT}`);
+        console.log(`🌐 Server URL:        http://${HOST}:${MCP_PORT} ${portSource}`);
         // eslint-disable-next-line no-console
         console.log(`💚 Health Check:      http://${HOST}:${MCP_PORT}/health`);
         // eslint-disable-next-line no-console
@@ -745,9 +796,15 @@ async function main() {
         // eslint-disable-next-line no-console
         console.log(`📁 Working Directory: ${process.cwd()}`);
         // eslint-disable-next-line no-console
-        console.log(`⚙️  Config Discovery:  Will look for protokoll-config.yaml in CWD and parent dirs`);
+        console.log(`⚙️  Config File:       ${configPathDisplay}`);
         // eslint-disable-next-line no-console
-        console.log(`🔧 Config via:        CardiganTime (files + environment variables)`);
+        console.log('-----------------------------------------------------------------');
+        // eslint-disable-next-line no-console
+        console.log(`📥 Input Directory:   ${inputDir}`);
+        // eslint-disable-next-line no-console
+        console.log(`📤 Output Directory:  ${outputDir}`);
+        // eslint-disable-next-line no-console
+        console.log(`📚 Context Dirs:      ${contextDirsDisplay}`);
         // eslint-disable-next-line no-console
         console.log('=================================================================');
         // eslint-disable-next-line no-console
@@ -1061,15 +1118,30 @@ function sendNotificationToSession(session: SessionData, notification: {
 export { notifySubscribedClients, notifyAllClients };
 
 // ES module equivalent of CommonJS `require.main === module`
-const isMainModule = import.meta.url.startsWith('file:') &&
-    resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
-
-if (isMainModule) {
-    main().catch((error) => {
-        // eslint-disable-next-line no-console
-        console.error(error);
-        process.exit(1);
-    });
+// Use realpath() to resolve symlinks before comparison
+async function checkIsMainModule(): Promise<boolean> {
+    if (!import.meta.url.startsWith('file:') || !process.argv[1]) {
+        return false;
+    }
+    
+    try {
+        const argvPath = await realpath(resolve(process.argv[1]));
+        const modulePath = await realpath(fileURLToPath(import.meta.url));
+        return argvPath === modulePath;
+    } catch {
+        return false;
+    }
 }
+
+// Start the server if this is the main module
+checkIsMainModule().then((isMain) => {
+    if (isMain) {
+        main().catch((error) => {
+            // eslint-disable-next-line no-console
+            console.error(error);
+            process.exit(1);
+        });
+    }
+});
 
 export { main };

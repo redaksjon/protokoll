@@ -1,51 +1,55 @@
-# Review and Improve Transcript
+I want to review and improve the transcript: ${transcriptPath}
 
-I want to review and improve the transcript at: ${transcriptPath}
+Focus area: ${focusArea}
 
-I'll help you review "${transcriptPath}".
+## Instructions for AI Assistant
 
-**Focus areas:**
-- ${focusArea}
+**CRITICAL: Use ONLY Protokoll MCP tools to modify transcripts. NEVER use StrReplace, Write, or direct file editing.**
 
-## User Input Expected
+### Step 1: Read the Transcript
+First, call `protokoll_read_transcript` to see the current state:
+- transcriptPath: "${transcriptPath}"
 
-**This prompt is typically invoked with additional freeform feedback from the user.** The user may provide instructions like:
-- "Change the title to 'XYZ' and the project to '123'"
-- "Fix the speaker names"
-- "Update the timestamp to 2pm"
-- "Correct technical terms related to [topic]"
-- Any other specific changes or improvements they want to make
+### Step 2: Make the Requested Changes
 
-**Use the user's feedback to guide which tools to call and what changes to make.** The instructions below explain how to make those changes properly.
+The user will tell you what to change. Use the appropriate tool:
 
-## CRITICAL: Use ONLY Protokoll MCP Tools to Alter Transcripts
+**For title changes:**
+Use `protokoll_edit_transcript`:
+- transcriptPath: "${transcriptPath}"
+- title: "New Title Here"
 
-**YOU MUST use Protokoll MCP tools to make ANY changes to the transcript. NEVER directly edit transcript files.**
+(This automatically renames the file to match the new title)
 
-You are free to use other tools for research, web searches, or gathering context to inform your suggestions. However, when it comes time to actually modify the transcript file itself, you MUST route all changes through Protokoll MCP tools.
+**For project assignment:**
+Use `protokoll_edit_transcript`:
+- transcriptPath: "${transcriptPath}"
+- projectId: "project-id"
 
-### For Content Corrections (typos, names, terms):
-1. Call `protokoll_feedback_analyze` to analyze the transcript
-2. Review suggested corrections
-3. Apply corrections using `protokoll_feedback_apply`
+**For date changes:**
+Use `protokoll_change_transcript_date`:
+- transcriptPath: "${transcriptPath}"
+- newDate: "2026-02-13T14:30:00Z"
 
-### For Title Changes:
-- **DO NOT** edit the file directly to change the title
-- **DO** use `protokoll_transcript_rename` to change both the filename and title together
-- This ensures the file is properly renamed and the title metadata is updated
+**For tags:**
+Use `protokoll_edit_transcript`:
+- transcriptPath: "${transcriptPath}"
+- tagsToAdd: ["tag1", "tag2"]
+- tagsToRemove: ["tag3"]
 
-### For Metadata Changes (Project, Time, etc.):
-- **DO NOT** edit the file directly
-- **DO** use `protokoll_transcript_update` to update metadata fields
+**For status:**
+Use `protokoll_edit_transcript`:
+- transcriptPath: "${transcriptPath}"
+- status: "reviewed"
 
-### What NOT to Do:
-❌ Do NOT use StrReplace, Write, or any file editing tools to modify the transcript
-❌ Do NOT directly edit the transcript markdown file
-❌ Do NOT bypass Protokoll tools when changing the transcript
+**For content corrections (typos, names, terms):**
+Use `protokoll_provide_feedback`:
+- transcriptPath: "${transcriptPath}"
+- feedback: "Description of corrections needed"
 
-### What TO Do:
-✅ Use any tools needed for research, web searches, or gathering context
-✅ Always use `protokoll_feedback_analyze` to review transcript content
-✅ Always use `protokoll_feedback_apply` to apply content corrections to the transcript
-✅ Always use `protokoll_transcript_rename` to change the transcript title/filename
-✅ Always use `protokoll_transcript_update` to change transcript metadata
+### Rules:
+- ❌ NEVER use StrReplace, Write, or file editing tools on transcripts
+- ✅ ALWAYS use the Protokoll MCP tools listed above
+- ✅ Read the transcript first if you need to see the current state
+- ✅ Make the changes immediately when the user requests them
+- ✅ Keep responses brief - just make the change and confirm it's done

@@ -6,3 +6,4 @@
 
 export * from './operations';
 export * from './feedback';
+export * from './format-adapter';

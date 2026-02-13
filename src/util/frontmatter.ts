@@ -134,7 +134,8 @@ export function parseTranscriptContent(content: string): ParsedFrontmatter {
     
     // Build metadata from frontmatter
     let metadata: TranscriptMetadata = {
-        title: frontmatter.title,
+        // Ensure title is properly trimmed and normalized (remove extra whitespace/newlines)
+        title: frontmatter.title ? String(frontmatter.title).trim().replace(/\s+/g, ' ') : undefined,
         date: frontmatter.date ? new Date(frontmatter.date) : undefined,
         recordingTime: frontmatter.recordingTime,
         duration: frontmatter.duration,
@@ -297,7 +298,10 @@ export function buildFrontmatter(metadata: TranscriptMetadata): Record<string, u
     const fm: Record<string, unknown> = {};
     
     // Core fields
-    if (metadata.title) fm.title = metadata.title;
+    // Ensure title is properly trimmed and has no newlines/extra whitespace
+    if (metadata.title) {
+        fm.title = metadata.title.trim().replace(/\s+/g, ' ');
+    }
     if (metadata.date) fm.date = metadata.date.toISOString();
     if (metadata.recordingTime) fm.recordingTime = metadata.recordingTime;
     if (metadata.duration) fm.duration = metadata.duration;

@@ -87,6 +87,8 @@ export interface CreateOptions {
     startingDir?: string;
     configDirName?: string;
     configFileName?: string;
+    /** Explicit context directories to load entities from (bypasses .protokoll discovery) */
+    contextDirectories?: string[];
 }
 
 /**
@@ -134,7 +136,20 @@ export const create = async (options: CreateOptions = {}): Promise<ContextInstan
     };
 
     const loadContext = async (): Promise<void> => {
-        discoveryResult = await Overcontext.loadHierarchicalConfig(discoveryOptions);
+        // If explicit contextDirectories are provided, use them directly
+        if (options.contextDirectories && options.contextDirectories.length > 0) {
+            discoveryResult = {
+                config: {},
+                discoveredDirs: options.contextDirectories.map((dir, index) => ({
+                    path: dir,
+                    level: index,
+                })),
+                contextDirs: options.contextDirectories,
+            };
+        } else {
+            // Otherwise, use .protokoll directory discovery
+            discoveryResult = await Overcontext.loadHierarchicalConfig(discoveryOptions);
+        }
         storage.clear();
         await storage.load(discoveryResult.contextDirs);
     };

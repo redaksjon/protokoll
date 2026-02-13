@@ -23,6 +23,8 @@ export interface PipelineConfig {
   
     // Paths
     contextDirectory?: string;
+    /** Explicit context directories (from protokoll-config.yaml) */
+    contextDirectories?: string[];
     intermediateDir: string;
     keepIntermediates: boolean;
     processedDirectory?: string;

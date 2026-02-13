@@ -7,9 +7,50 @@
  */
 
 import * as Cardigantime from '@utilarium/cardigantime';
+import type { Logger } from '@utilarium/cardigantime';
 import { resolve, dirname, basename } from 'node:path';
 
 export const DEFAULT_CONFIG_FILE = 'protokoll-config.yaml';
+
+/**
+ * Check if debug mode is enabled via environment or will be via config
+ */
+function isDebugEnabled(): boolean {
+    return process.env.PROTOKOLL_DEBUG === 'true' || process.env.DEBUG === 'true';
+}
+
+/**
+ * Create a quiet logger that only outputs when debug is enabled
+ * and formats messages in a cleaner way
+ */
+function createQuietLogger(): Logger {
+    const debugEnabled = isDebugEnabled();
+    
+    const noop = () => { /* intentionally empty */ };
+    
+    const debugLog = debugEnabled 
+        ? (message: string, ...args: unknown[]) => {
+            // Format the message more cleanly
+            // eslint-disable-next-line no-console
+            console.error(`[config] ${message}`, ...args);
+        }
+        : noop;
+    
+    return {
+        debug: noop, // Suppress verbose debug messages
+        info: noop,  // Suppress info messages during discovery
+        warn: (message: string, ...args: unknown[]) => {
+            // eslint-disable-next-line no-console
+            console.error(`[config:warn] ${message}`, ...args);
+        },
+        error: (message: string, ...args: unknown[]) => {
+            // eslint-disable-next-line no-console
+            console.error(`[config:error] ${message}`, ...args);
+        },
+        verbose: debugLog,
+        silly: noop,
+    };
+}
 
 /**
  * Parse a CLI argument value from argv
@@ -38,6 +79,7 @@ export async function readCardigantimeConfigFromDirectory(
         },
         configShape: {},
         features,
+        logger: createQuietLogger(),
     });
 
     const previousCwd = process.cwd();

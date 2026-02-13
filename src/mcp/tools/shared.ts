@@ -88,6 +88,43 @@ export async function getConfiguredDirectory(
 }
 
 /**
+ * Get context directories from server configuration
+ * Returns the contextDirectories array from protokoll-config.yaml if available
+ */
+export async function getContextDirectories(): Promise<string[] | undefined> {
+    // Import here to avoid circular dependencies
+    const ServerConfig = await import('../serverConfig');
+    
+    const config = ServerConfig.getServerConfig();
+    return config.configFile?.contextDirectories as string[] | undefined;
+}
+
+/**
+ * Validate that contextDirectory parameter is not provided in remote mode
+ * In remote mode, the server is pre-configured with workspace directories
+ * and tools should not accept directory parameters.
+ * 
+ * @param contextDirectory - The contextDirectory parameter from tool args
+ * @throws Error if contextDirectory is provided in remote mode
+ */
+export async function validateNotRemoteMode(contextDirectory?: string): Promise<void> {
+    if (!contextDirectory) {
+        return; // No directory parameter provided, OK
+    }
+    
+    // Import here to avoid circular dependencies
+    const ServerConfig = await import('../serverConfig');
+    
+    if (ServerConfig.isRemoteMode()) {
+        throw new Error(
+            'Directory parameters are not accepted in remote mode. ' +
+            'This server is pre-configured with workspace directories from protokoll-config.yaml. ' +
+            'Use the protokoll_info tool to check server configuration.'
+        );
+    }
+}
+
+/**
  * Validate that a resolved path stays within a base directory
  * This prevents path traversal attacks using ../ sequences
  * 

@@ -11,7 +11,7 @@ import * as Reasoning from '@/reasoning';
 import { DEFAULT_MODEL } from '@/constants';
 import * as Transcript from '@/transcript';
 
-import { fileExists, getConfiguredDirectory, sanitizePath, validatePathWithinDirectory, validatePathWithinOutputDirectory } from './shared.js';
+import { fileExists, getConfiguredDirectory, getContextDirectories, sanitizePath, validatePathWithinDirectory, validatePathWithinOutputDirectory, validateNotRemoteMode } from './shared.js';
 import * as Metadata from '@/util/metadata';
 import { validateOrThrow } from '@/util/validation';
 
@@ -604,6 +604,9 @@ export async function handleEditTranscript(args: {
     status?: string;
     contextDirectory?: string;
 }) {
+    // Validate that contextDirectory is not provided in remote mode
+    await validateNotRemoteMode(args.contextDirectory);
+    
     // Get the output directory first to ensure consistent validation
     const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
     
@@ -627,12 +630,16 @@ export async function handleEditTranscript(args: {
     
     // Handle title/project/tags changes via existing editTranscript function
     if (args.title || args.projectId || args.tagsToAdd || args.tagsToRemove) {
+        // Get context directories from server config (from protokoll-config.yaml)
+        const contextDirectories = await getContextDirectories();
+        
         const result = await Transcript.editTranscript(absolutePath, {
             title: args.title,
             projectId: args.projectId,
             tagsToAdd: args.tagsToAdd,
             tagsToRemove: args.tagsToRemove,
             contextDirectory: args.contextDirectory,
+            contextDirectories,
         });
 
         // Validate that the output path stays within the output directory
@@ -837,6 +844,9 @@ export async function handleCombineTranscripts(args: {
     projectId?: string;
     contextDirectory?: string;
 }) {
+    // Validate that contextDirectory is not provided in remote mode
+    await validateNotRemoteMode(args.contextDirectory);
+    
     if (args.transcriptPaths.length < 2) {
         throw new Error('At least 2 transcript files are required');
     }
@@ -848,10 +858,14 @@ export async function handleCombineTranscripts(args: {
         absolutePaths.push(absolute);
     }
 
+    // Get context directories from server config (from protokoll-config.yaml)
+    const contextDirectories = await getContextDirectories();
+    
     const result = await Transcript.combineTranscripts(absolutePaths, {
         title: args.title,
         projectId: args.projectId,
         contextDirectory: args.contextDirectory,
+        contextDirectories,
     });
 
     // Validate that the output path stays within the output directory
@@ -1308,8 +1322,10 @@ export async function handleProvideFeedback(args: {
     const absolutePath = await findTranscript(args.transcriptPath, args.contextDirectory);
 
     const transcriptContent = await readFile(absolutePath, 'utf-8');
+    const contextDirectories = await getContextDirectories();
     const context = await Context.create({
         startingDir: args.contextDirectory || dirname(absolutePath),
+        contextDirectories,
     });
     const reasoning = Reasoning.create({ model: args.model || DEFAULT_MODEL });
 
@@ -1390,10 +1406,12 @@ export async function handleCreateNote(args: {
     };
     
     // If projectId is provided, try to get project name from context
-    if (args.projectId && args.contextDirectory) {
+    if (args.projectId) {
         try {
+            const contextDirectories = await getContextDirectories();
             const context = await Context.create({
-                startingDir: args.contextDirectory,
+                startingDir: args.contextDirectory || process.cwd(),
+                contextDirectories,
             });
             const project = await context.getProject(args.projectId);
             if (project) {

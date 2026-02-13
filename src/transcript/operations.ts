@@ -14,6 +14,7 @@ import * as Metadata from '../util/metadata';
 import * as Frontmatter from '../util/frontmatter';
 import { Project } from '../context/types';
 import { findProjectResilient } from '../utils/entityFinder';
+import { isPklFile, isMdFile, getTranscriptGlobPattern } from './format-adapter';
 
 /**
  * Parsed transcript structure
@@ -204,6 +205,8 @@ export const combineTranscripts = async (
         dryRun?: boolean;
         verbose?: boolean;
         contextDirectory?: string;
+        /** Explicit context directories (from protokoll-config.yaml) */
+        contextDirectories?: string[];
     } = {}
 ): Promise<{ outputPath: string; content: string }> => {
     if (filePaths.length === 0) {
@@ -229,8 +232,10 @@ export const combineTranscripts = async (
     const firstTranscript = transcripts[0];
     const baseMetadata = { ...firstTranscript.metadata };
     
+    // Use explicit contextDirectories from options if provided (from protokoll-config.yaml)
     const context = await Context.create({
         startingDir: options.contextDirectory || path.dirname(firstTranscript.filePath),
+        contextDirectories: options.contextDirectories,
     });
     let targetProject: Project | undefined;
     
@@ -367,12 +372,16 @@ export const editTranscript = async (
         dryRun?: boolean;
         verbose?: boolean;
         contextDirectory?: string;
+        /** Explicit context directories (from protokoll-config.yaml) */
+        contextDirectories?: string[];
     }
 ): Promise<{ outputPath: string; content: string }> => {
     const transcript = await parseTranscript(filePath);
     
+    // Use explicit contextDirectories from options if provided (from protokoll-config.yaml)
     const context = await Context.create({
         startingDir: options.contextDirectory || path.dirname(filePath),
+        contextDirectories: options.contextDirectories,
     });
     let targetProject: Project | undefined;
     
@@ -651,13 +660,26 @@ export const listTranscripts = async (options: ListTranscriptsOptions): Promise<
         ? directory 
         : path.resolve(process.cwd(), directory);
     
-    const pattern = path.join(absoluteDir, '**/*.md');
+    // Find both .md and .pkl transcript files
+    const pattern = path.join(absoluteDir, getTranscriptGlobPattern());
     const files = await glob(pattern, { ignore: ['**/node_modules/**', '**/.transcript/**'] });
     
     const transcripts: TranscriptListItem[] = [];
     
     for (const file of files) {
         try {
+            // Skip .pkl files for now - they require protokoll-format package
+            // TODO: Add .pkl support when protokoll-format is integrated
+            if (isPklFile(file)) {
+                // .pkl files will be supported when protokoll-format is added as dependency
+                continue;
+            }
+            
+            // Handle .md files with existing logic
+            if (!isMdFile(file)) {
+                continue;
+            }
+            
             const content = await fs.readFile(file, 'utf-8');
             const stats = await fs.stat(file);
             const parsed = Frontmatter.parseTranscriptContent(content);

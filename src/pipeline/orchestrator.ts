@@ -39,8 +39,10 @@ export const create = async (config: OrchestratorConfig): Promise<OrchestratorIn
     logger.debug('Initializing intelligent transcription pipeline...');
   
     // Initialize context system (async)
+    // Use explicit contextDirectories from config if provided (from protokoll-config.yaml)
     const context = await Context.create({
         startingDir: config.contextDirectory || currentWorkingDir,
+        contextDirectories: config.contextDirectories,
     });
     logger.debug('Context system initialized - ready to query entities via tools');
   

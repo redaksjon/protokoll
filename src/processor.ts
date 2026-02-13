@@ -144,8 +144,10 @@ export const create = (config: Config, operator: Dreadcabinet.Operator): Instanc
             logger.info('Initializing agentic systems...');
             
             // Initialize context system for entity lookup via tools
+            // Use explicit contextDirectories from config if provided (from protokoll-config.yaml)
             context = await Context.create({
                 startingDir: currentWorkingDir,
+                contextDirectories: config.contextDirectories,
             });
             logger.info('Context system initialized - %d entities loaded', 
                 context.search('').length); // Quick way to count
