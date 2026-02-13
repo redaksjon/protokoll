@@ -50,6 +50,8 @@ vi.mock('../../src/mcp/tools/shared', async () => {
             const outputDirectory = await mockGetConfiguredDirectory('outputDirectory', _contextDirectory);
             actualModule.validatePathWithinDirectory(resolvedPath, outputDirectory);
         },
+        // Mock getContextDirectories to return undefined (no server config in tests)
+        getContextDirectories: vi.fn().mockResolvedValue(undefined),
     };
 });
 
