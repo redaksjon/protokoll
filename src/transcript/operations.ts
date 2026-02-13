@@ -15,6 +15,7 @@ import * as Frontmatter from '../util/frontmatter';
 import { Project } from '../context/types';
 import { findProjectResilient } from '../utils/entityFinder';
 import { isPklFile, isMdFile, getTranscriptGlobPattern } from './format-adapter';
+import { PklTranscript } from '@redaksjon/protokoll-format';
 
 /**
  * Parsed transcript structure
@@ -668,10 +669,51 @@ export const listTranscripts = async (options: ListTranscriptsOptions): Promise<
     
     for (const file of files) {
         try {
-            // Skip .pkl files for now - they require protokoll-format package
-            // TODO: Add .pkl support when protokoll-format is integrated
+            const stats = await fs.stat(file);
+            
+            // Handle .pkl files
             if (isPklFile(file)) {
-                // .pkl files will be supported when protokoll-format is added as dependency
+                const transcript = PklTranscript.open(file, { readOnly: true });
+                try {
+                    const pklMetadata = transcript.metadata;
+                    const content = transcript.content;
+                    
+                    const dateTime = extractDateTimeFromFilename(path.basename(file));
+                    const date = dateTime?.date || (pklMetadata.date instanceof Date 
+                        ? pklMetadata.date.toISOString().split('T')[0] 
+                        : '') || '';
+                    
+                    if (startDate && date < startDate) continue;
+                    if (endDate && date > endDate) continue;
+                    
+                    if (projectId && pklMetadata.projectId !== projectId) continue;
+                    
+                    if (search) {
+                        const searchLower = search.toLowerCase();
+                        const title = (pklMetadata.title || '').toLowerCase();
+                        if (!title.includes(searchLower) && !content.toLowerCase().includes(searchLower)) {
+                            continue;
+                        }
+                    }
+                    
+                    const openTasks = pklMetadata.tasks?.filter(t => t.status === 'open').length || 0;
+                    
+                    transcripts.push({
+                        path: file,
+                        filename: path.basename(file),
+                        date,
+                        time: dateTime?.time || pklMetadata.recordingTime,
+                        title: pklMetadata.title || extractTitle(content),
+                        hasRawTranscript: transcript.hasRawTranscript,
+                        createdAt: stats.birthtime,
+                        status: pklMetadata.status,
+                        openTasksCount: openTasks,
+                        contentSize: content.length,
+                        entities: pklMetadata.entities,
+                    });
+                } finally {
+                    transcript.close();
+                }
                 continue;
             }
             
@@ -681,7 +723,6 @@ export const listTranscripts = async (options: ListTranscriptsOptions): Promise<
             }
             
             const content = await fs.readFile(file, 'utf-8');
-            const stats = await fs.stat(file);
             const parsed = Frontmatter.parseTranscriptContent(content);
             
             const dateTime = extractDateTimeFromFilename(path.basename(file));

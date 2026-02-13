@@ -6,17 +6,24 @@
 
 import type { McpResourceContents } from '../types';
 import { buildTranscriptUri, buildTranscriptsListUri } from '../uri';
-import { readFile } from 'node:fs/promises';
 import { resolve, relative } from 'node:path';
 import { listTranscripts } from '@/transcript';
 import * as ServerConfig from '../serverConfig';
 import { sanitizePath } from '../tools/shared';
+import { 
+    resolveTranscriptPath, 
+    readTranscriptContent, 
+    stripTranscriptExtension 
+} from '@/transcript/format-adapter';
 
 /**
  * Read a single transcript resource
  * 
- * transcriptPath should be relative to the configured output directory
- * (e.g., "2026/1/29-2027-riot-doc-voice-and-tone.md")
+ * transcriptPath can be:
+ * - A path without extension (e.g., "2026/1/29-2027-meeting") - will resolve to .pkl or .md
+ * - A path with extension (e.g., "2026/1/29-2027-meeting.md") - will use that specific file
+ * 
+ * The server prefers .pkl format when no extension is provided.
  */
 export async function readTranscriptResource(transcriptPath: string): Promise<McpResourceContents> {
     // Guard against undefined/null paths
@@ -27,28 +34,39 @@ export async function readTranscriptResource(transcriptPath: string): Promise<Mc
     // Get the configured output directory
     const outputDirectory = ServerConfig.getOutputDirectory();
     
-    // Resolve the transcript path relative to the output directory
+    // Resolve the transcript path - handles extension resolution
     // If it's already absolute, use it directly (for backwards compatibility)
-    const fullPath = transcriptPath.startsWith('/')
+    const basePath = transcriptPath.startsWith('/')
         ? transcriptPath
         : resolve(outputDirectory, transcriptPath);
 
+    // Resolve to actual file (checks .pkl first, then .md)
+    const resolved = await resolveTranscriptPath(basePath);
+    
+    if (!resolved.exists || !resolved.path) {
+        throw new Error(`Transcript not found: ${basePath} (checked .pkl and .md)`);
+    }
+
     try {
-        const content = await readFile(fullPath, 'utf-8');
+        // Read content using the format adapter
+        const { content, mimeType } = await readTranscriptContent(resolved.path);
         
-        // Always return URI with relative path (even if input was absolute)
-        const relativePath = transcriptPath.startsWith('/')
-            ? relative(outputDirectory, transcriptPath)
+        // Build the URI without extension (extension-agnostic identifier)
+        const relativePath = resolved.path.startsWith('/')
+            ? relative(outputDirectory, resolved.path)
             : transcriptPath;
         
+        // Strip extension from the URI - the identifier should be extension-agnostic
+        const identifierPath = stripTranscriptExtension(relativePath);
+        
         return {
-            uri: buildTranscriptUri(relativePath),
-            mimeType: 'text/markdown',
+            uri: buildTranscriptUri(identifierPath),
+            mimeType,
             text: content,
         };
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-            throw new Error(`Transcript not found: ${fullPath}`);
+            throw new Error(`Transcript not found: ${resolved.path}`);
         }
         throw error;
     }
@@ -112,15 +130,19 @@ export async function readTranscriptsListResource(options: {
     // Convert to resource format with URIs
     // Convert absolute paths to relative paths (relative to outputDirectory)
     // Use sanitizePath to ensure no absolute paths are exposed
+    // Strip file extensions from URIs - identifiers should be extension-agnostic
     const transcriptsWithUris = await Promise.all(
         result.transcripts.map(async (t: { path: string; filename: string; date: string; time?: string; title: string; hasRawTranscript: boolean; createdAt: Date; status?: string; openTasksCount?: number; contentSize?: number; entities?: any }) => {
             // Convert absolute path to relative path
             // Guard against undefined path - use filename as fallback
             const relativePath = await sanitizePath(t.path || t.filename || '', outputDirectory);
             
+            // Strip extension from the identifier - URIs should be extension-agnostic
+            const identifierPath = stripTranscriptExtension(relativePath);
+            
             return {
-                uri: buildTranscriptUri(relativePath),
-                path: relativePath, // Use sanitized relative path, not absolute
+                uri: buildTranscriptUri(identifierPath),
+                path: identifierPath, // Use extension-less path as the identifier
                 filename: t.filename,
                 date: t.date,
                 time: t.time,

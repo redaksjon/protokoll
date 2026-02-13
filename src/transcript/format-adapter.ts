@@ -10,6 +10,8 @@
 
 import * as path from 'node:path';
 import * as fs from 'fs/promises';
+import { PklTranscript } from '@redaksjon/protokoll-format';
+import type { TranscriptMetadata as PklMetadata } from '@redaksjon/protokoll-format';
 import type { ParsedTranscript, TranscriptMetadata } from './operations';
 
 /**
@@ -41,39 +43,78 @@ export function getTranscriptGlobPattern(): string {
 }
 
 /**
+ * Strip file extension from a transcript path
+ * Used for creating extension-agnostic identifiers
+ */
+export function stripTranscriptExtension(filePath: string): string {
+    return filePath.replace(/\.(md|pkl)$/i, '');
+}
+
+/**
  * Parse a .pkl transcript file
- * 
- * Note: This is a placeholder that will be implemented when protokoll-format
- * is added as a dependency. For now, it throws an error indicating .pkl
- * support is not yet available.
  */
 export async function parsePklTranscript(filePath: string): Promise<ParsedTranscript> {
-    // TODO: Implement when protokoll-format is added as dependency
-    // const { PklTranscript } = await import('@redaksjon/protokoll-format');
-    // const transcript = PklTranscript.open(filePath, { readOnly: true });
-    // ... convert to ParsedTranscript format
-  
-    throw new Error(
-        `PKL format support not yet implemented. File: ${filePath}. ` +
-    'Install @redaksjon/protokoll-format and update this adapter.'
-    );
+    const transcript = PklTranscript.open(filePath, { readOnly: true });
+    
+    try {
+        const pklMetadata = transcript.metadata;
+        const content = transcript.content;
+        
+        const result: ParsedTranscript = {
+            filePath,
+            title: pklMetadata.title,
+            metadata: convertPklMetadataToTranscriptMetadata(pklMetadata),
+            content,
+            rawText: content, // For pkl files, content is the enhanced text
+        };
+        
+        return result;
+    } finally {
+        transcript.close();
+    }
+}
+
+/**
+ * Read transcript content from either .md or .pkl file
+ * Returns the content and metadata in a unified format
+ */
+export async function readTranscriptContent(filePath: string): Promise<{
+    content: string;
+    mimeType: string;
+    metadata: TranscriptMetadata;
+    title?: string;
+}> {
+    if (isPklFile(filePath)) {
+        const transcript = PklTranscript.open(filePath, { readOnly: true });
+        try {
+            const pklMetadata = transcript.metadata;
+            return {
+                content: transcript.content,
+                mimeType: 'text/plain', // pkl content is plain text (enhanced transcript)
+                metadata: convertPklMetadataToTranscriptMetadata(pklMetadata),
+                title: pklMetadata.title,
+            };
+        } finally {
+            transcript.close();
+        }
+    } else {
+        // .md file - read as raw text
+        const content = await fs.readFile(filePath, 'utf-8');
+        return {
+            content,
+            mimeType: 'text/markdown',
+            metadata: {}, // Metadata parsing is done elsewhere for md files
+            title: undefined,
+        };
+    }
 }
 
 /**
  * Check if .pkl format support is available
- * 
- * Note: This uses a dynamic require to avoid TypeScript compile-time errors
- * when the package is not installed.
  */
 export async function isPklSupportAvailable(): Promise<boolean> {
-    try {
-        // Use dynamic import with a variable to avoid TypeScript checking
-        const moduleName = '@redaksjon/protokoll-format';
-        await import(/* @vite-ignore */ moduleName);
-        return true;
-    } catch {
-        return false;
-    }
+    // Now that protokoll-format is a dependency, it's always available
+    return true;
 }
 
 /**
@@ -91,7 +132,34 @@ export function pklToMdPath(pklPath: string): string {
 }
 
 /**
+ * Resolve a transcript identifier to an actual file path
+ * 
+ * The identifier can be:
+ * - A path with extension (.md or .pkl) - checks that specific file
+ * - A path without extension - checks .pkl first, then .md
+ * 
+ * @param identifier The transcript identifier (with or without extension)
+ * @param baseDirectory Optional base directory to resolve relative paths
+ * @returns The resolved file info, or null if not found
+ */
+export async function resolveTranscriptPath(
+    identifier: string,
+    baseDirectory?: string
+): Promise<{ exists: boolean; format: 'md' | 'pkl' | null; path: string | null }> {
+    // Resolve the base path
+    let basePath = identifier;
+    if (baseDirectory && !path.isAbsolute(identifier)) {
+        basePath = path.resolve(baseDirectory, identifier);
+    }
+    
+    return transcriptExists(basePath);
+}
+
+/**
  * Check if a transcript file exists (either .md or .pkl)
+ * 
+ * If the path has an extension, checks that specific file.
+ * If no extension, checks .pkl first (preferred), then .md.
  */
 export async function transcriptExists(basePath: string): Promise<{ exists: boolean; format: 'md' | 'pkl' | null; path: string | null }> {
     // If path already has extension, check that specific file
@@ -145,21 +213,21 @@ export function getPreferredOutputFormat(): 'md' | 'pkl' {
 }
 
 /**
- * Metadata conversion utilities
+ * Convert PklTranscript metadata to the legacy TranscriptMetadata format
  */
 export function convertPklMetadataToTranscriptMetadata(
-    pklMetadata: Record<string, unknown>
+    pklMetadata: PklMetadata
 ): TranscriptMetadata {
     return {
         date: pklMetadata.date instanceof Date 
             ? pklMetadata.date.toISOString().split('T')[0] 
-            : pklMetadata.date as string | undefined,
-        time: pklMetadata.recordingTime as string | undefined,
-        project: pklMetadata.project as string | undefined,
-        projectId: pklMetadata.projectId as string | undefined,
-        destination: (pklMetadata.routing as Record<string, unknown>)?.destination as string | undefined,
-        confidence: (pklMetadata.routing as Record<string, unknown>)?.confidence?.toString(),
-        tags: pklMetadata.tags as string[] | undefined,
-        duration: pklMetadata.duration as string | undefined,
+            : undefined,
+        time: pklMetadata.recordingTime,
+        project: pklMetadata.project,
+        projectId: pklMetadata.projectId,
+        destination: pklMetadata.routing?.destination,
+        confidence: pklMetadata.routing?.confidence?.toString(),
+        tags: pklMetadata.tags,
+        duration: pklMetadata.duration,
     };
 }
