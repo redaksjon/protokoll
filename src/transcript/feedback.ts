@@ -292,12 +292,32 @@ export const executeTool = async (
         case 'change_title': {
             const newTitle = String(args.new_title);
             
-            const titleRegex = /^# .+$/m;
-            if (titleRegex.test(feedbackCtx.transcriptContent)) {
+            // Update title in YAML frontmatter
+            const frontmatterRegex = /^---\s*\n([\s\S]*?)\n---/;
+            const frontmatterMatch = feedbackCtx.transcriptContent.match(frontmatterRegex);
+            
+            if (frontmatterMatch) {
+                const frontmatter = frontmatterMatch[1];
+                // Replace existing title or add it if missing
+                let updatedFrontmatter: string;
+                if (/^title:/m.test(frontmatter)) {
+                    // Replace existing title (handles both quoted and unquoted values)
+                    updatedFrontmatter = frontmatter.replace(
+                        /^title:.*$/m,
+                        `title: '${newTitle.replace(/'/g, "''")}'`
+                    );
+                } else {
+                    // Add title as first field after opening ---
+                    updatedFrontmatter = `title: '${newTitle.replace(/'/g, "''")}'\n${frontmatter}`;
+                }
                 feedbackCtx.transcriptContent = feedbackCtx.transcriptContent.replace(
-                    titleRegex,
-                    `# ${newTitle}`
+                    frontmatterRegex,
+                    `---\n${updatedFrontmatter}\n---`
                 );
+            } else {
+                // No frontmatter exists - this shouldn't happen with new format
+                // but handle gracefully by adding frontmatter
+                feedbackCtx.transcriptContent = `---\ntitle: '${newTitle.replace(/'/g, "''")}'\\n---\n\n${feedbackCtx.transcriptContent}`;
             }
             
             feedbackCtx.changes.push({

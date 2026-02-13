@@ -38,16 +38,13 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
-import * as Cardigantime from '@utilarium/cardigantime';
 import * as Resources from './resources';
 import * as Prompts from './prompts';
 import { tools, handleToolCall } from './tools';
 import * as ServerConfig from './serverConfig';
 import * as Roots from './roots';
 import type { McpRoot } from './types';
-// ConfigSchema moved to types module
-// import { ConfigSchema } from '../types';
-import { DEFAULT_CONFIG_DIR } from '../constants';
+import { initializeWorkingDirectoryFromArgsAndConfig, loadCardigantimeConfig, DEFAULT_CONFIG_FILE } from './configDiscovery';
 
 // ============================================================================
 // Configuration
@@ -55,31 +52,6 @@ import { DEFAULT_CONFIG_DIR } from '../constants';
 
 const MCP_PORT = process.env.MCP_PORT ? Number.parseInt(process.env.MCP_PORT, 10) : 3000;
 const HOST = '127.0.0.1'; // Localhost only for security
-
-// Initialize CardiganTime for configuration loading
-const cardigantime = Cardigantime.create({
-    defaults: {
-        configDirectory: DEFAULT_CONFIG_DIR,
-    },
-    configShape: {}, // Minimal config shape - full schema in types module
-});
-
-/**
- * Load configuration using CardiganTime
- * This respects environment variables and hierarchical config files
- */
-async function loadCardigantimeConfig() {
-    // Create minimal args object for CardiganTime
-    // It will use CWD and environment variables
-    const args = {
-        configDirectory: process.env.PROTOKOLL_CONFIG_DIR || DEFAULT_CONFIG_DIR,
-    };
-    
-    // Read configuration from files and environment
-    const config = await cardigantime.read(args);
-    
-    return config;
-}
 
 // ============================================================================
 // Session Management
@@ -315,12 +287,18 @@ async function handlePost(req: IncomingMessage, res: ServerResponse) {
         // Initialize configuration using CardiganTime
         // This will:
         // 1. Use CWD as starting point
-        // 2. Walk up directory tree to find .protokoll/ directories
+        // 2. Walk up directory tree to find protokoll-config.yaml
         // 3. Merge configs hierarchically (like CLI does)
         // 4. Respect environment variables (PROTOKOLL_*)
         const cardigantimeConfig = await loadCardigantimeConfig();
+
+        const resolvedConfigDirs = (cardigantimeConfig as any).resolvedConfigDirs as unknown;
+        const configRoot = Array.isArray(resolvedConfigDirs) && resolvedConfigDirs.length > 0
+            ? resolvedConfigDirs[0]
+            : (process.env.WORKSPACE_ROOT || process.cwd());
+        const configPathDisplay = resolve(configRoot, DEFAULT_CONFIG_FILE);
         
-        const workspaceRoot = process.cwd();
+        const workspaceRoot = process.env.WORKSPACE_ROOT || process.cwd();
         const initialRoots: McpRoot[] = [{
             uri: `file://${workspaceRoot}`,
             name: 'Workspace',
@@ -352,7 +330,7 @@ async function handlePost(req: IncomingMessage, res: ServerResponse) {
         // eslint-disable-next-line no-console
         console.log(`Working Directory: ${workspaceRoot}`);
         // eslint-disable-next-line no-console
-        console.log(`Config Directory: ${cardigantimeConfig.configDirectory || DEFAULT_CONFIG_DIR}`);
+        console.log(`Config File:       ${configPathDisplay}`);
         // eslint-disable-next-line no-console
         console.log('\nCONFIGURATION LOADED:');
         // eslint-disable-next-line no-console
@@ -748,6 +726,7 @@ async function handleDelete(req: IncomingMessage, res: ServerResponse) {
 // ============================================================================
 
 async function main() {
+    await initializeWorkingDirectoryFromArgsAndConfig();
     const server = createServer(handleRequest);
 
     server.listen(MCP_PORT, HOST, () => {
@@ -766,7 +745,7 @@ async function main() {
         // eslint-disable-next-line no-console
         console.log(`📁 Working Directory: ${process.cwd()}`);
         // eslint-disable-next-line no-console
-        console.log(`⚙️  Config Discovery:  Will look for .protokoll/ in CWD and parent dirs`);
+        console.log(`⚙️  Config Discovery:  Will look for protokoll-config.yaml in CWD and parent dirs`);
         // eslint-disable-next-line no-console
         console.log(`🔧 Config via:        CardiganTime (files + environment variables)`);
         // eslint-disable-next-line no-console

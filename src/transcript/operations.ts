@@ -41,109 +41,34 @@ export interface TranscriptMetadata {
 
 /**
  * Parse a transcript file into its components
+ * Now uses YAML frontmatter format instead of legacy ## Metadata format
  */
 export const parseTranscript = async (filePath: string): Promise<ParsedTranscript> => {
     const rawText = await fs.readFile(filePath, 'utf-8');
-    const lines = rawText.split('\n');
+    
+    // Use the frontmatter parser which handles both new and legacy formats
+    const parsed = Frontmatter.parseTranscriptContent(rawText);
     
     const result: ParsedTranscript = {
         filePath,
-        metadata: {},
-        content: '',
+        title: parsed.metadata.title,
+        metadata: {
+            date: parsed.metadata.date?.toISOString().split('T')[0],
+            time: parsed.metadata.recordingTime,
+            project: parsed.metadata.project,
+            projectId: parsed.metadata.projectId,
+            destination: parsed.metadata.routing?.destination,
+            confidence: parsed.metadata.routing?.confidence?.toString(),
+            signals: parsed.metadata.routing?.signals?.map(s => 
+                `${s.type}: ${s.value} (weight: ${s.weight})`
+            ),
+            reasoning: parsed.metadata.routing?.reasoning,
+            tags: parsed.metadata.tags,
+            duration: parsed.metadata.duration,
+        },
+        content: parsed.body,
         rawText,
     };
-    
-    let inMetadata = false;
-    let inRouting = false;
-    let contentStartIndex = 0;
-    
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const trimmed = line.trim();
-        
-        // Title detection (first # heading)
-        if (!result.title && trimmed.startsWith('# ') && !trimmed.startsWith('## ')) {
-            result.title = trimmed.slice(2).trim();
-            continue;
-        }
-        
-        // Metadata section start
-        if (trimmed === '## Metadata') {
-            inMetadata = true;
-            continue;
-        }
-        
-        // Routing subsection
-        if (trimmed === '### Routing') {
-            inRouting = true;
-            continue;
-        }
-        
-        // End of metadata section (horizontal rule)
-        if (trimmed === '---' && inMetadata) {
-            contentStartIndex = i + 1;
-            inMetadata = false;
-            inRouting = false;
-            continue;
-        }
-        
-        // Parse metadata fields
-        if (inMetadata && trimmed.startsWith('**')) {
-            const match = trimmed.match(/^\*\*([^*]+)\*\*:\s*(.*)$/);
-            if (match) {
-                const [, key, value] = match;
-                const normalizedKey = key.toLowerCase().replace(/\s+/g, '');
-                
-                switch (normalizedKey) {
-                    case 'date':
-                        result.metadata.date = value;
-                        break;
-                    case 'time':
-                        result.metadata.time = value;
-                        break;
-                    case 'project':
-                        result.metadata.project = value;
-                        break;
-                    case 'projectid':
-                        result.metadata.projectId = value.replace(/`/g, '');
-                        break;
-                    case 'destination':
-                        result.metadata.destination = value;
-                        break;
-                    case 'confidence':
-                        result.metadata.confidence = value;
-                        break;
-                    case 'reasoning':
-                        result.metadata.reasoning = value;
-                        break;
-                    case 'tags':
-                        result.metadata.tags = value.match(/`([^`]+)`/g)?.map(t => t.replace(/`/g, '')) || [];
-                        break;
-                    case 'duration':
-                        result.metadata.duration = value;
-                        break;
-                }
-            }
-        }
-        
-        // Parse classification signals
-        if (inRouting && trimmed.startsWith('- ') && !trimmed.startsWith('**')) {
-            if (!result.metadata.signals) {
-                result.metadata.signals = [];
-            }
-            result.metadata.signals.push(trimmed.slice(2));
-        }
-    }
-    
-    // Extract content after metadata
-    if (contentStartIndex > 0) {
-        while (contentStartIndex < lines.length && lines[contentStartIndex].trim() === '') {
-            contentStartIndex++;
-        }
-        result.content = lines.slice(contentStartIndex).join('\n').trim();
-    } else {
-        result.content = rawText.trim();
-    }
     
     return result;
 };
@@ -760,7 +685,7 @@ export const listTranscripts = async (options: ListTranscriptsOptions): Promise<
                 filename: path.basename(file),
                 date,
                 time: dateTime?.time || parsed.metadata.recordingTime,
-                title: extractTitle(content),
+                title: parsed.metadata.title || extractTitle(content),
                 hasRawTranscript: await hasRawTranscript(file),
                 createdAt: stats.birthtime,
                 status: parsed.metadata.status,

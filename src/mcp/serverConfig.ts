@@ -14,6 +14,28 @@ import type { ContextInstance } from '@/context';
 import type { McpRoot } from './types';
 import { fileUriToPath } from './roots';
 import { resolve } from 'node:path';
+import * as Cardigantime from '@utilarium/cardigantime';
+
+const DEFAULT_CONFIG_FILE = 'protokoll-config.yaml';
+const cardigantime = Cardigantime.create({
+    defaults: {
+        configDirectory: '.',
+        configFile: DEFAULT_CONFIG_FILE,
+        isRequired: false,
+    },
+    configShape: {},
+    features: ['config', 'hierarchical'],
+});
+
+async function readConfigFromDirectory(directory: string): Promise<Record<string, unknown>> {
+    const previousCwd = process.cwd();
+    try {
+        process.chdir(directory);
+        return await cardigantime.read({});
+    } finally {
+        process.chdir(previousCwd);
+    }
+}
 
 // ============================================================================
 // Server Configuration State
@@ -25,6 +47,8 @@ interface ServerConfig {
     inputDirectory: string | null;
     outputDirectory: string | null;
     processedDirectory: string | null;
+    configFilePath: string | null;
+    configFile: Record<string, unknown> | null;
     initialized: boolean;
 }
 
@@ -34,6 +58,8 @@ let serverConfig: ServerConfig = {
     inputDirectory: null,
     outputDirectory: null,
     processedDirectory: null,
+    configFilePath: null,
+    configFile: null,
     initialized: false,
 };
 
@@ -57,35 +83,58 @@ export async function initializeServerConfig(roots: McpRoot[]): Promise<void> {
             inputDirectory: resolve(process.cwd(), './recordings'),
             outputDirectory: resolve(process.cwd(), './notes'),
             processedDirectory: resolve(process.cwd(), './processed'),
+            configFilePath: null,
+            configFile: null,
             initialized: true,
         };
         return;
     }
 
     try {
+        const configFile = await readConfigFromDirectory(workspaceRoot);
+        const resolvedConfigDirs = (configFile as any).resolvedConfigDirs as unknown;
+        const configFilePath = Array.isArray(resolvedConfigDirs) && resolvedConfigDirs.length > 0
+            ? resolve(resolvedConfigDirs[0], DEFAULT_CONFIG_FILE)
+            : null;
+
         // Load context from workspace root
         const context = await Context.create({
             startingDir: workspaceRoot,
         });
 
-        const config = context.getConfig();
+        const contextConfig = context.getConfig();
+        const mergedConfig = {
+            ...contextConfig,
+            ...configFile,
+        } as Record<string, unknown>;
         
         serverConfig = {
             context,
             workspaceRoot,
-            inputDirectory: resolveDirectory(config.inputDirectory as string | undefined, workspaceRoot, './recordings'),
-            outputDirectory: resolveDirectory(config.outputDirectory as string | undefined, workspaceRoot, './notes'),
-            processedDirectory: resolveDirectory(config.processedDirectory as string | undefined, workspaceRoot, './processed'),
+            inputDirectory: resolveDirectory(mergedConfig.inputDirectory as string | undefined, workspaceRoot, './recordings'),
+            outputDirectory: resolveDirectory(mergedConfig.outputDirectory as string | undefined, workspaceRoot, './notes'),
+            processedDirectory: resolveDirectory(mergedConfig.processedDirectory as string | undefined, workspaceRoot, './processed'),
+            configFilePath,
+            configFile: configFile ?? null,
             initialized: true,
         };
     } catch {
         // Context not available - use defaults relative to workspace
+        const configFile = await readConfigFromDirectory(workspaceRoot);
+        const resolvedConfigDirs = (configFile as any).resolvedConfigDirs as unknown;
+        const configFilePath = Array.isArray(resolvedConfigDirs) && resolvedConfigDirs.length > 0
+            ? resolve(resolvedConfigDirs[0], DEFAULT_CONFIG_FILE)
+            : null;
+        const mergedConfig = (configFile ?? {}) as Record<string, unknown>;
+
         serverConfig = {
             context: null,
             workspaceRoot,
-            inputDirectory: resolve(workspaceRoot, './recordings'),
-            outputDirectory: resolve(workspaceRoot, './notes'),
-            processedDirectory: resolve(workspaceRoot, './processed'),
+            inputDirectory: resolveDirectory(mergedConfig.inputDirectory as string | undefined, workspaceRoot, './recordings'),
+            outputDirectory: resolveDirectory(mergedConfig.outputDirectory as string | undefined, workspaceRoot, './notes'),
+            processedDirectory: resolveDirectory(mergedConfig.processedDirectory as string | undefined, workspaceRoot, './processed'),
+            configFilePath,
+            configFile: configFile ?? null,
             initialized: true,
         };
     }
@@ -108,6 +157,8 @@ export function clearServerConfig(): void {
         inputDirectory: null,
         outputDirectory: null,
         processedDirectory: null,
+        configFilePath: null,
+        configFile: null,
         initialized: false,
     };
 }
@@ -126,6 +177,8 @@ export function getServerConfig(): {
     inputDirectory: string;
     outputDirectory: string;
     processedDirectory: string | null;
+    configFilePath: string | null;
+    configFile: Record<string, unknown> | null;
     initialized: boolean;
     } {
     if (!serverConfig.initialized) {
@@ -138,6 +191,8 @@ export function getServerConfig(): {
         inputDirectory: serverConfig.inputDirectory!,
         outputDirectory: serverConfig.outputDirectory!,
         processedDirectory: serverConfig.processedDirectory,
+        configFilePath: serverConfig.configFilePath,
+        configFile: serverConfig.configFile,
         initialized: serverConfig.initialized,
     };
 }
