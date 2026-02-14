@@ -49,6 +49,26 @@ export async function readTranscriptResource(transcriptPath: string): Promise<Mc
         // Read content and metadata using PKL utilities
         const { content, metadata, title } = await readTranscriptContent(resolved.path);
         
+        // Get raw transcript if available
+        const { PklTranscript } = await import('@redaksjon/protokoll-format');
+        const pklTranscript = PklTranscript.open(resolved.path, { readOnly: true });
+        let rawTranscript = undefined;
+        try {
+            if (pklTranscript.hasRawTranscript) {
+                const rawData = pklTranscript.rawTranscript;
+                if (rawData) {
+                    rawTranscript = {
+                        text: rawData.text,
+                        model: rawData.model,
+                        duration: rawData.duration,
+                        transcribedAt: rawData.transcribedAt,
+                    };
+                }
+            }
+        } finally {
+            pklTranscript.close();
+        }
+        
         // Build the URI without extension (extension-agnostic identifier)
         const relativePath = resolved.path.startsWith('/')
             ? relative(outputDirectory, resolved.path)
@@ -80,6 +100,7 @@ export async function readTranscriptResource(transcriptPath: string): Promise<Mc
                 } : undefined,
             },
             content: content,
+            rawTranscript: rawTranscript,
         };
         
         return {
