@@ -636,7 +636,12 @@ export const listTranscripts = async (options: ListTranscriptsOptions): Promise<
         status: item.status,
         openTasksCount: undefined, // Not in storage result
         contentSize: item.contentPreview?.length,
-        entities: undefined, // Not in storage result
+        entities: item.project ? {
+            projects: [{
+                id: item.project,
+                name: item.project,
+            }],
+        } : undefined,
     }));
     
     return {
