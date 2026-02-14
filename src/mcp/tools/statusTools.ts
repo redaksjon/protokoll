@@ -1,86 +1,23 @@
 /**
  * Status and Task Tools - MCP tools for managing transcript lifecycle status and tasks
+ * 
+ * PKL-only implementation - all transcripts are stored in PKL format.
  */
 // eslint-disable-next-line import/extensions
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
-import { readFile, writeFile } from 'node:fs/promises';
 import { 
-    parseTranscriptContent, 
-    stringifyTranscript,
-    TranscriptStatus,
-} from '@/util/frontmatter';
-import { 
-    updateStatus, 
     isValidStatus, 
     VALID_STATUSES,
-    addTask,
-    completeTask as completeTaskUtil,
-    deleteTask as deleteTaskUtil,
 } from '@/util/metadata';
-import { fileExists, getConfiguredDirectory, sanitizePath, validatePathWithinDirectory } from './shared';
+import { getConfiguredDirectory, sanitizePath, validatePathWithinDirectory } from './shared';
 import { resolve, isAbsolute } from 'node:path';
+import { transcriptExists, ensurePklExtension } from '@/transcript/pkl-utils';
+import { PklTranscript } from '@redaksjon/protokoll-format';
+import type { Task as PklTask, TranscriptStatus } from '@redaksjon/protokoll-format';
 
 // ============================================================================
 // Helper Functions
 // ============================================================================
-
-/**
- * Validate transcript content before writing to disk
- * Ensures the content is properly formatted and parseable
- */
-async function validateTranscriptContent(content: string, operation: string): Promise<void> {
-    try {
-        // First check: Must start with ---
-        if (!content.trim().startsWith('---')) {
-            throw new Error('Content does not start with YAML frontmatter (---). Title may be placed before frontmatter.');
-        }
-        
-        // Second check: No duplicate opening delimiters
-        const lines = content.split('\n');
-        if (lines.length > 1 && lines[0].trim() === '---' && lines[1].trim() === '---') {
-            throw new Error('Content has duplicate opening frontmatter delimiters (---\\n---). This indicates a body extraction bug.');
-        }
-        
-        // Third check: Must have closing delimiter
-        const closingDelimiterIndex = lines.findIndex((line, idx) => idx > 0 && line.trim() === '---');
-        if (closingDelimiterIndex === -1) {
-            throw new Error('Content is missing closing YAML frontmatter delimiter (---)');
-        }
-        
-        // Fourth check: Must be parseable
-        const validation = parseTranscriptContent(content);
-        if (!validation.metadata) {
-            throw new Error('Content has no parseable metadata');
-        }
-        
-        // Fifth check: Title must be in frontmatter, not in body
-        const bodyAfterFrontmatter = lines.slice(closingDelimiterIndex + 1).join('\n');
-        const h1InBody = /^#\s+.+$/m.test(bodyAfterFrontmatter);
-        if (h1InBody) {
-            throw new Error('Body contains H1 title (# ...). Title must be in frontmatter only.');
-        }
-        
-        // Sixth check: After re-parsing, verify no duplicate delimiters were introduced
-        const reparsed = parseTranscriptContent(content);
-        const restringified = stringifyTranscript(reparsed.metadata, reparsed.body);
-        const restringifiedLines = restringified.split('\n');
-        if (restringifiedLines.length > 1 && restringifiedLines[0].trim() === '---' && restringifiedLines[1].trim() === '---') {
-            throw new Error('Round-trip test failed: re-stringifying produces duplicate delimiters. This indicates a bug in stringifyTranscript().');
-        }
-        
-        // eslint-disable-next-line no-console
-        console.log(`✅ ${operation} content validated successfully (format correct, parseable, round-trip clean, title in frontmatter)`);
-    } catch (validationError) {
-        // eslint-disable-next-line no-console
-        console.error(`❌ ${operation} validation failed:`, validationError);
-        // eslint-disable-next-line no-console
-        console.error('Generated content (first 500 chars):', content.substring(0, 500));
-        throw new Error(
-            `${operation} validation failed: ${validationError instanceof Error ? validationError.message : String(validationError)}. ` +
-            `This is a bug in the transcript generation logic. The file was NOT saved to prevent corruption.`
-        );
-    }
-}
 
 /**
  * Find a transcript by relative path (relative to output directory)
@@ -114,11 +51,14 @@ async function findTranscriptPath(
     
     validatePathWithinDirectory(resolvedPath, outputDirectory);
     
-    if (!await fileExists(resolvedPath)) {
+    // Ensure .pkl extension and check if file exists
+    const pklPath = ensurePklExtension(resolvedPath);
+    const existsResult = await transcriptExists(pklPath);
+    if (!existsResult.exists || !existsResult.path) {
         throw new Error(`Transcript not found: ${relativePath}`);
     }
     
-    return resolvedPath;
+    return existsResult.path;
 }
 
 // ============================================================================
@@ -139,7 +79,7 @@ export const setStatusTool: Tool = {
                 type: 'string',
                 description:
                     'Relative path to the transcript from the output directory. ' +
-                    'Examples: "meeting-notes.md", "2026/2/01-1325.md"',
+                    'Examples: "meeting-notes.pkl", "2026/2/01-1325.pkl"',
             },
             status: {
                 type: 'string',
@@ -173,7 +113,7 @@ export const createTaskTool: Tool = {
                 type: 'string',
                 description:
                     'Relative path to the transcript from the output directory. ' +
-                    'Examples: "meeting-notes.md", "2026/2/01-1325.md"',
+                    'Examples: "meeting-notes.pkl", "2026/2/01-1325.pkl"',
             },
             description: {
                 type: 'string',
@@ -198,7 +138,7 @@ export const completeTaskTool: Tool = {
                 type: 'string',
                 description:
                     'Relative path to the transcript from the output directory. ' +
-                    'Examples: "meeting-notes.md", "2026/2/01-1325.md"',
+                    'Examples: "meeting-notes.pkl", "2026/2/01-1325.pkl"',
             },
             taskId: {
                 type: 'string',
@@ -223,7 +163,7 @@ export const deleteTaskTool: Tool = {
                 type: 'string',
                 description:
                     'Relative path to the transcript from the output directory. ' +
-                    'Examples: "meeting-notes.md", "2026/2/01-1325.md"',
+                    'Examples: "meeting-notes.pkl", "2026/2/01-1325.pkl"',
             },
             taskId: {
                 type: 'string',
@@ -255,21 +195,33 @@ export async function handleSetStatus(args: {
         );
     }
     
-    const newStatus: TranscriptStatus = args.status;
+    const newStatus = args.status as TranscriptStatus;
     
     // Find the transcript
     const absolutePath = await findTranscriptPath(args.transcriptPath, args.contextDirectory);
     
-    // Read current content
-    const content = await readFile(absolutePath, 'utf-8');
-    
-    // Parse the transcript
-    const parsed = parseTranscriptContent(content);
-    const oldStatus = parsed.metadata.status || 'reviewed';
-    
-    // Check if status is actually changing
-    if (oldStatus === newStatus) {
-        // No change needed - return early
+    const transcript = PklTranscript.open(absolutePath, { readOnly: false });
+    try {
+        const oldStatus = transcript.metadata.status || 'reviewed';
+        
+        // Check if status is actually changing
+        if (oldStatus === newStatus) {
+            const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
+            const relativePath = await sanitizePath(absolutePath, outputDirectory);
+            
+            return {
+                success: true,
+                filePath: relativePath,
+                previousStatus: oldStatus,
+                newStatus: newStatus,
+                changed: false,
+                message: `Status is already '${newStatus}'`,
+            };
+        }
+        
+        // Update status
+        transcript.updateMetadata({ status: newStatus });
+        
         const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
         const relativePath = await sanitizePath(absolutePath, outputDirectory);
         
@@ -278,31 +230,12 @@ export async function handleSetStatus(args: {
             filePath: relativePath,
             previousStatus: oldStatus,
             newStatus: newStatus,
-            changed: false,
-            message: `Status is already '${newStatus}'`,
+            changed: true,
+            message: `Status changed from '${oldStatus}' to '${newStatus}'`,
         };
+    } finally {
+        transcript.close();
     }
-    
-    // Update status (records transition in history)
-    const updatedMetadata = updateStatus(parsed.metadata, newStatus);
-    
-    // Write updated transcript
-    const updatedContent = stringifyTranscript(updatedMetadata, parsed.body);
-    await validateTranscriptContent(updatedContent, 'Status change');
-    await writeFile(absolutePath, updatedContent, 'utf-8');
-    
-    // Convert to relative path for response
-    const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
-    const relativePath = await sanitizePath(absolutePath, outputDirectory);
-    
-    return {
-        success: true,
-        filePath: relativePath,
-        previousStatus: oldStatus,
-        newStatus: newStatus,
-        changed: true,
-        message: `Status changed from '${oldStatus}' to '${newStatus}'`,
-    };
 }
 
 // ============================================================================
@@ -321,35 +254,38 @@ export async function handleCreateTask(args: {
     // Find the transcript
     const absolutePath = await findTranscriptPath(args.transcriptPath, args.contextDirectory);
     
-    // Read current content
-    const content = await readFile(absolutePath, 'utf-8');
-    
-    // Parse the transcript
-    const parsed = parseTranscriptContent(content);
-    
-    // Add the task
-    const { metadata: updatedMetadata, task } = addTask(parsed.metadata, args.description.trim());
-    
-    // Write updated transcript
-    const updatedContent = stringifyTranscript(updatedMetadata, parsed.body);
-    await validateTranscriptContent(updatedContent, 'Add task');
-    await writeFile(absolutePath, updatedContent, 'utf-8');
-    
-    // Convert to relative path for response
-    const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
-    const relativePath = await sanitizePath(absolutePath, outputDirectory);
-    
-    return {
-        success: true,
-        filePath: relativePath,
-        task: {
-            id: task.id,
-            description: task.description,
-            status: task.status,
-            created: task.created,
-        },
-        message: `Task created: ${task.id}`,
-    };
+    const transcript = PklTranscript.open(absolutePath, { readOnly: false });
+    try {
+        // Create a new task
+        const taskId = `task-${Date.now()}`;
+        const newTask: PklTask = {
+            id: taskId,
+            description: args.description.trim(),
+            status: 'open',
+            created: new Date(),
+        };
+        
+        // Get existing tasks and add the new one
+        const existingTasks = transcript.metadata.tasks || [];
+        transcript.updateMetadata({ tasks: [...existingTasks, newTask] });
+        
+        const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
+        const relativePath = await sanitizePath(absolutePath, outputDirectory);
+        
+        return {
+            success: true,
+            filePath: relativePath,
+            task: {
+                id: newTask.id,
+                description: newTask.description,
+                status: newTask.status,
+                created: newTask.created.toISOString(),
+            },
+            message: `Task created: ${newTask.id}`,
+        };
+    } finally {
+        transcript.close();
+    }
 }
 
 export async function handleCompleteTask(args: {
@@ -364,37 +300,36 @@ export async function handleCompleteTask(args: {
     // Find the transcript
     const absolutePath = await findTranscriptPath(args.transcriptPath, args.contextDirectory);
     
-    // Read current content
-    const content = await readFile(absolutePath, 'utf-8');
-    
-    // Parse the transcript
-    const parsed = parseTranscriptContent(content);
-    
-    // Find the task
-    const task = parsed.metadata.tasks?.find(t => t.id === args.taskId);
-    if (!task) {
-        throw new Error(`Task not found: ${args.taskId}`);
+    const transcript = PklTranscript.open(absolutePath, { readOnly: false });
+    try {
+        // Find the task
+        const tasks = transcript.metadata.tasks || [];
+        const task = tasks.find(t => t.id === args.taskId);
+        if (!task) {
+            throw new Error(`Task not found: ${args.taskId}`);
+        }
+        
+        // Update the task to done
+        const updatedTasks = tasks.map(t => 
+            t.id === args.taskId 
+                ? { ...t, status: 'done' as const, completed: new Date() }
+                : t
+        );
+        transcript.updateMetadata({ tasks: updatedTasks });
+        
+        const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
+        const relativePath = await sanitizePath(absolutePath, outputDirectory);
+        
+        return {
+            success: true,
+            filePath: relativePath,
+            taskId: args.taskId,
+            description: task.description,
+            message: `Task completed: ${args.taskId}`,
+        };
+    } finally {
+        transcript.close();
     }
-    
-    // Complete the task
-    const updatedMetadata = completeTaskUtil(parsed.metadata, args.taskId);
-    
-    // Write updated transcript
-    const updatedContent = stringifyTranscript(updatedMetadata, parsed.body);
-    await validateTranscriptContent(updatedContent, 'Complete task');
-    await writeFile(absolutePath, updatedContent, 'utf-8');
-    
-    // Convert to relative path for response
-    const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
-    const relativePath = await sanitizePath(absolutePath, outputDirectory);
-    
-    return {
-        success: true,
-        filePath: relativePath,
-        taskId: args.taskId,
-        description: task.description,
-        message: `Task completed: ${args.taskId}`,
-    };
 }
 
 export async function handleDeleteTask(args: {
@@ -409,37 +344,32 @@ export async function handleDeleteTask(args: {
     // Find the transcript
     const absolutePath = await findTranscriptPath(args.transcriptPath, args.contextDirectory);
     
-    // Read current content
-    const content = await readFile(absolutePath, 'utf-8');
-    
-    // Parse the transcript
-    const parsed = parseTranscriptContent(content);
-    
-    // Find the task before deleting (for the response)
-    const task = parsed.metadata.tasks?.find(t => t.id === args.taskId);
-    if (!task) {
-        throw new Error(`Task not found: ${args.taskId}`);
+    const transcript = PklTranscript.open(absolutePath, { readOnly: false });
+    try {
+        // Find the task before deleting
+        const tasks = transcript.metadata.tasks || [];
+        const task = tasks.find(t => t.id === args.taskId);
+        if (!task) {
+            throw new Error(`Task not found: ${args.taskId}`);
+        }
+        
+        // Remove the task
+        const updatedTasks = tasks.filter(t => t.id !== args.taskId);
+        transcript.updateMetadata({ tasks: updatedTasks });
+        
+        const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
+        const relativePath = await sanitizePath(absolutePath, outputDirectory);
+        
+        return {
+            success: true,
+            filePath: relativePath,
+            taskId: args.taskId,
+            description: task.description,
+            message: `Task deleted: ${args.taskId}`,
+        };
+    } finally {
+        transcript.close();
     }
-    
-    // Delete the task
-    const updatedMetadata = deleteTaskUtil(parsed.metadata, args.taskId);
-    
-    // Write updated transcript
-    const updatedContent = stringifyTranscript(updatedMetadata, parsed.body);
-    await validateTranscriptContent(updatedContent, 'Delete task');
-    await writeFile(absolutePath, updatedContent, 'utf-8');
-    
-    // Convert to relative path for response
-    const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
-    const relativePath = await sanitizePath(absolutePath, outputDirectory);
-    
-    return {
-        success: true,
-        filePath: relativePath,
-        taskId: args.taskId,
-        description: task.description,
-        message: `Task deleted: ${args.taskId}`,
-    };
 }
 
 // Export all tools from this module

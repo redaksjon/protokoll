@@ -76,6 +76,14 @@ export async function readCardigantimeConfigFromDirectory(
             configDirectory: '.',
             configFile,
             isRequired: false,
+            // Tell CardiganTime to resolve these path fields relative to the config file's directory
+            // Note: contextDirectories must be in BOTH pathFields AND resolvePathArray - 
+            // pathFields determines which fields are processed, resolvePathArray determines
+            // if array elements should be resolved individually
+            pathResolution: {
+                pathFields: ['inputDirectory', 'outputDirectory', 'processedDirectory', 'contextDirectories'],
+                resolvePathArray: ['contextDirectories'],
+            },
         },
         configShape: {},
         features,

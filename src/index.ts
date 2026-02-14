@@ -15,7 +15,6 @@ export * from './context/types';
 
 // Export utilities
 export * from './util/metadata';
-export * from './util/frontmatter';
 
 // Export routing
 export * as Routing from './routing/index';

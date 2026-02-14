@@ -1,5 +1,5 @@
 /**
- * Tests for Output Manager
+ * Tests for Output Manager - PKL Format
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -8,6 +8,7 @@ import * as Metadata from '../../src/util/metadata';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
+import { PklTranscript } from '@redaksjon/protokoll-format';
 
 // Mock logging
 vi.mock('../../src/logging', () => ({
@@ -46,7 +47,7 @@ describe('Output Manager', () => {
                 date
             );
       
-            expect(paths.final).toBe('/notes/2026/01/11-meeting.md');
+            expect(paths.final).toBe('/notes/2026/01/11-meeting.pkl');
             // New format: YYYY-MM-DD-HHmm-<type>-<hash>.ext (hash at end)
             expect(paths.intermediate.transcript).toContain('2026-01-11-1245-transcript-abc123.json');
             expect(paths.intermediate.reflection).toContain('2026-01-11-1245-reflection-abc123.md');
@@ -189,42 +190,51 @@ describe('Output Manager', () => {
     });
   
     describe('writeTranscript', () => {
-        it('should write final transcript', async () => {
+        it('should write final transcript as PKL', async () => {
             const output = Output.create({
                 intermediateDir: path.join(tempDir, 'output/protokoll'),
                 keepIntermediates: true,
                 timestampFormat: 'YYMMDD-HHmm',
             });
       
-            const finalPath = path.join(tempDir, 'notes/2026/01/meeting.md');
+            // Note: paths.final will be converted to .pkl by createOutputPaths
+            const inputPath = path.join(tempDir, 'notes/2026/01/meeting.md');
             const paths = output.createOutputPaths(
                 '/audio/recording.m4a',
-                finalPath,
+                inputPath,
                 'abc123',
                 new Date()
             );
       
             await output.ensureDirectories(paths);
       
-            const content = '# Meeting Notes\n\nThis is the transcript.';
+            const content = 'This is the transcript.';
             const writtenPath = await output.writeTranscript(paths, content);
       
-            expect(writtenPath).toBe(finalPath);
-            const written = await fs.readFile(finalPath, 'utf-8');
-            expect(written).toBe(content);
+            // Should write to .pkl path
+            expect(writtenPath).toBe(paths.final);
+            expect(writtenPath).toContain('.pkl');
+            
+            // Read the PKL file to verify content
+            const transcript = PklTranscript.open(writtenPath, { readOnly: true });
+            try {
+                expect(transcript.content).toBe(content);
+            } finally {
+                transcript.close();
+            }
         });
 
-        it('should prepend metadata when provided', async () => {
+        it('should include metadata when provided', async () => {
             const output = Output.create({
                 intermediateDir: path.join(tempDir, 'output/protokoll'),
                 keepIntermediates: true,
                 timestampFormat: 'YYMMDD-HHmm',
             });
       
-            const finalPath = path.join(tempDir, 'notes/2026/01/meeting.md');
+            const inputPath = path.join(tempDir, 'notes/2026/01/meeting.md');
             const paths = output.createOutputPaths(
                 '/audio/recording.m4a',
-                finalPath,
+                inputPath,
                 'abc123',
                 new Date()
             );
@@ -239,21 +249,21 @@ describe('Output Manager', () => {
                 tags: ['meeting', 'Q1-planning'],
             };
 
-            const content = '# Meeting Notes\n\nThis is the transcript.';
+            const content = 'This is the transcript.';
             await output.writeTranscript(paths, content, metadata);
       
-            const written = await fs.readFile(finalPath, 'utf-8');
-            
-            // Should use YAML frontmatter format (new format)
-            expect(written).toMatch(/^---\n/); // Starts with frontmatter delimiter
-            expect(written).toContain('title: Team Meeting');
-            expect(written).toContain('project: Project Alpha');
-            expect(written).toContain('projectId: proj-alpha');
-            expect(written).toContain('- meeting');
-            expect(written).toContain('- Q1-planning');
-            
-            // Original content should be after frontmatter
-            expect(written).toContain('This is the transcript.');
+            // Read the PKL file to verify metadata
+            const transcript = PklTranscript.open(paths.final, { readOnly: true });
+            try {
+                expect(transcript.metadata.title).toBe('Team Meeting');
+                expect(transcript.metadata.project).toBe('Project Alpha');
+                expect(transcript.metadata.projectId).toBe('proj-alpha');
+                expect(transcript.metadata.tags).toContain('meeting');
+                expect(transcript.metadata.tags).toContain('Q1-planning');
+                expect(transcript.content).toBe(content);
+            } finally {
+                transcript.close();
+            }
         });
 
         it('should include routing metadata in transcript', async () => {
@@ -263,10 +273,10 @@ describe('Output Manager', () => {
                 timestampFormat: 'YYMMDD-HHmm',
             });
       
-            const finalPath = path.join(tempDir, 'notes/2026/01/meeting.md');
+            const inputPath = path.join(tempDir, 'notes/2026/01/meeting.md');
             const paths = output.createOutputPaths(
                 '/audio/recording.m4a',
-                finalPath,
+                inputPath,
                 'abc123',
                 new Date()
             );
@@ -291,16 +301,17 @@ describe('Output Manager', () => {
             const content = 'Meeting transcript content here.';
             await output.writeTranscript(paths, content, metadata);
       
-            const written = await fs.readFile(finalPath, 'utf-8');
-            
-            // Should use YAML frontmatter format with routing info
-            expect(written).toMatch(/^---\n/); // Starts with frontmatter delimiter
-            expect(written).toContain('title: Work Meeting');
-            expect(written).toContain('routing:');
-            expect(written).toContain('destination: /home/user/work/notes');
-            expect(written).toContain('confidence: 0.95');
-            expect(written).toContain('type: explicit_phrase');
-            expect(written).toContain('value: work meeting');
+            // Read the PKL file to verify routing metadata
+            const transcript = PklTranscript.open(paths.final, { readOnly: true });
+            try {
+                expect(transcript.metadata.title).toBe('Work Meeting');
+                expect(transcript.metadata.routing).toBeDefined();
+                const pklRouting = transcript.metadata.routing as { destination: string; confidence: number };
+                expect(pklRouting.destination).toBe('/home/user/work/notes');
+                expect(pklRouting.confidence).toBe(0.95);
+            } finally {
+                transcript.close();
+            }
         });
     });
   

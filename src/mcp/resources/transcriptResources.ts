@@ -14,16 +14,14 @@ import {
     resolveTranscriptPath, 
     readTranscriptContent, 
     stripTranscriptExtension 
-} from '@/transcript/format-adapter';
+} from '@/transcript/pkl-utils';
 
 /**
  * Read a single transcript resource
  * 
  * transcriptPath can be:
- * - A path without extension (e.g., "2026/1/29-2027-meeting") - will resolve to .pkl or .md
- * - A path with extension (e.g., "2026/1/29-2027-meeting.md") - will use that specific file
- * 
- * The server prefers .pkl format when no extension is provided.
+ * - A path without extension (e.g., "2026/1/29-2027-meeting") - will resolve to .pkl
+ * - A path with extension (e.g., "2026/1/29-2027-meeting.pkl") - will use that specific file
  */
 export async function readTranscriptResource(transcriptPath: string): Promise<McpResourceContents> {
     // Guard against undefined/null paths
@@ -40,16 +38,16 @@ export async function readTranscriptResource(transcriptPath: string): Promise<Mc
         ? transcriptPath
         : resolve(outputDirectory, transcriptPath);
 
-    // Resolve to actual file (checks .pkl first, then .md)
+    // Resolve to actual .pkl file
     const resolved = await resolveTranscriptPath(basePath);
     
     if (!resolved.exists || !resolved.path) {
-        throw new Error(`Transcript not found: ${basePath} (checked .pkl and .md)`);
+        throw new Error(`Transcript not found: ${basePath}`);
     }
 
     try {
-        // Read content using the format adapter
-        const { content, mimeType } = await readTranscriptContent(resolved.path);
+        // Read content and metadata using PKL utilities
+        const { content, metadata, title } = await readTranscriptContent(resolved.path);
         
         // Build the URI without extension (extension-agnostic identifier)
         const relativePath = resolved.path.startsWith('/')
@@ -59,10 +57,35 @@ export async function readTranscriptResource(transcriptPath: string): Promise<Mc
         // Strip extension from the URI - the identifier should be extension-agnostic
         const identifierPath = stripTranscriptExtension(relativePath);
         
+        // Return structured JSON response - clients should NOT parse this
+        // All metadata is provided directly for display
+        const structuredResponse = {
+            uri: buildTranscriptUri(identifierPath),
+            path: identifierPath,
+            title: title || identifierPath.split('/').pop() || 'Untitled',
+            metadata: {
+                date: metadata.date,
+                time: metadata.time,
+                project: metadata.project,
+                projectId: metadata.projectId,
+                status: metadata.status,
+                tags: metadata.tags || [],
+                duration: metadata.duration,
+                entities: metadata.entities || {},
+                tasks: metadata.tasks || [],
+                history: metadata.history || [],
+                routing: metadata.destination ? {
+                    destination: metadata.destination,
+                    confidence: metadata.confidence,
+                } : undefined,
+            },
+            content: content,
+        };
+        
         return {
             uri: buildTranscriptUri(identifierPath),
-            mimeType,
-            text: content,
+            mimeType: 'application/json',
+            text: JSON.stringify(structuredResponse),
         };
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') {

@@ -251,8 +251,8 @@ function parseAudioUri(
  * Build a transcript resource URI
  * 
  * @param transcriptPath The transcript identifier (should NOT include file extension)
- *                       e.g., "2026/1/29-1234-meeting" not "2026/1/29-1234-meeting.md"
- *                       The server resolves the actual file format (.pkl or .md) automatically
+ *                       e.g., "2026/1/29-1234-meeting" not "2026/1/29-1234-meeting.pkl"
+ *                       The server resolves the actual file format automatically
  */
 export function buildTranscriptUri(transcriptPath: string): string {
     const encoded = encodeURIComponent(transcriptPath).replace(/%2F/g, '/');

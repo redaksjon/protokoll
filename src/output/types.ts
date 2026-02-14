@@ -32,7 +32,7 @@ export interface RawTranscriptData {
 }
 
 export interface OutputPaths {
-    final: string;                // Routed destination (e.g., /notes/2026/1/14-meeting.md)
+    final: string;                // Routed destination (e.g., /notes/2026/1/14-meeting.pkl)
     rawTranscript: string;        // Raw transcript in .transcript/ alongside final
     intermediate: IntermediateFiles;
 }

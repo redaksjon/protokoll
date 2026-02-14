@@ -2,20 +2,22 @@
  * Transcript Operations
  * 
  * Core business logic for transcript parsing, listing, editing, and combining.
- * Extracted from CLI modules to provide reusable functions for MCP tools.
+ * PKL-only implementation - all transcripts are stored in PKL format.
  */
 
 import * as fs from 'fs/promises';
 import * as path from 'node:path';
-import { glob } from 'glob';
 import * as Context from '../context';
 import * as Routing from '../routing';
-import * as Metadata from '../util/metadata';
-import * as Frontmatter from '../util/frontmatter';
 import { Project } from '../context/types';
 import { findProjectResilient } from '../utils/entityFinder';
-import { isPklFile, isMdFile, getTranscriptGlobPattern } from './format-adapter';
-import { PklTranscript } from '@redaksjon/protokoll-format';
+import { 
+    PklTranscript, 
+    listTranscripts as listTranscriptsFromStorage,
+    type TranscriptMetadata as PklMetadata,
+    type ListTranscriptsOptions as StorageListOptions,
+} from '@redaksjon/protokoll-format';
+import { ensurePklExtension } from './pkl-utils';
 
 /**
  * Parsed transcript structure
@@ -43,43 +45,49 @@ export interface TranscriptMetadata {
 
 /**
  * Parse a transcript file into its components
- * Now uses YAML frontmatter format instead of legacy ## Metadata format
+ * PKL-only implementation
  */
 export const parseTranscript = async (filePath: string): Promise<ParsedTranscript> => {
-    const rawText = await fs.readFile(filePath, 'utf-8');
+    const pklPath = ensurePklExtension(filePath);
+    const transcript = PklTranscript.open(pklPath, { readOnly: true });
     
-    // Use the frontmatter parser which handles both new and legacy formats
-    const parsed = Frontmatter.parseTranscriptContent(rawText);
-    
-    const result: ParsedTranscript = {
-        filePath,
-        title: parsed.metadata.title,
-        metadata: {
-            date: parsed.metadata.date?.toISOString().split('T')[0],
-            time: parsed.metadata.recordingTime,
-            project: parsed.metadata.project,
-            projectId: parsed.metadata.projectId,
-            destination: parsed.metadata.routing?.destination,
-            confidence: parsed.metadata.routing?.confidence?.toString(),
-            signals: parsed.metadata.routing?.signals?.map(s => 
-                `${s.type}: ${s.value} (weight: ${s.weight})`
-            ),
-            reasoning: parsed.metadata.routing?.reasoning,
-            tags: parsed.metadata.tags,
-            duration: parsed.metadata.duration,
-        },
-        content: parsed.body,
-        rawText,
-    };
-    
-    return result;
+    try {
+        const pklMetadata = transcript.metadata;
+        const content = transcript.content;
+        
+        const result: ParsedTranscript = {
+            filePath: pklPath,
+            title: pklMetadata.title,
+            metadata: {
+                date: pklMetadata.date instanceof Date 
+                    ? pklMetadata.date.toISOString().split('T')[0] 
+                    : undefined,
+                time: pklMetadata.recordingTime,
+                project: pklMetadata.project,
+                projectId: pklMetadata.projectId,
+                destination: pklMetadata.routing?.destination,
+                confidence: pklMetadata.routing?.confidence?.toString(),
+                signals: pklMetadata.routing?.signals,
+                reasoning: pklMetadata.routing?.reasoning,
+                tags: pklMetadata.tags,
+                duration: pklMetadata.duration,
+            },
+            content,
+            rawText: content, // For PKL files, content is the enhanced text
+        };
+        
+        return result;
+    } finally {
+        transcript.close();
+    }
 };
 
 /**
  * Extract the timestamp from a transcript filename
  */
 export const extractTimestampFromFilename = (filePath: string): { day: number; hour: number; minute: number } | null => {
-    const basename = path.basename(filePath, '.md');
+    const ext = path.extname(filePath);
+    const basename = path.basename(filePath, ext);
     const match = basename.match(/^(\d{1,2})-(\d{2})(\d{2})/);
     
     if (match) {
@@ -188,7 +196,6 @@ const buildRoutingConfig = (
                     filename_options: p.routing?.filename_options || ['date', 'time', 'subject'],
                 },
                 classification: p.classification,
-                // priority: p.priority, // Not in Project type
                 active: p.active,
             })),
         conflict_resolution: 'primary' as const,
@@ -197,6 +204,7 @@ const buildRoutingConfig = (
 
 /**
  * Combine multiple transcripts into a single document
+ * PKL-only implementation
  */
 export const combineTranscripts = async (
     filePaths: string[],
@@ -286,6 +294,7 @@ export const combineTranscripts = async (
             ? `${firstTranscript.title} (Combined)`
             : 'Combined Transcript');
     
+    // Build combined content
     const contentParts: string[] = [];
     for (let i = 0; i < transcripts.length; i++) {
         const t = transcripts[i];
@@ -299,30 +308,9 @@ export const combineTranscripts = async (
         contentParts.push('');
     }
     
-    const fullMetadata: Metadata.TranscriptMetadata = {
-        title: combinedTitle,
-        date: baseMetadata.date ? new Date(baseMetadata.date) : undefined,
-        recordingTime: baseMetadata.time,
-        project: targetProject?.name || baseMetadata.project,
-        projectId: targetProject?.id || baseMetadata.projectId,
-        tags: baseMetadata.tags,
-        duration: baseMetadata.duration,
-        entities: targetProject ? {
-            people: [],
-            projects: [{
-                id: targetProject.id,
-                name: targetProject.name,
-                type: 'project' as const,
-            }],
-            terms: [],
-            companies: [],
-        } : undefined,
-        status: 'reviewed' as const,
-    };
-    
     const combinedContent = contentParts.join('\n');
-    const finalContent = Frontmatter.stringifyTranscript(fullMetadata, combinedContent);
     
+    // Determine output path
     let outputPath: string;
     
     if (targetProject?.routing?.destination) {
@@ -332,13 +320,15 @@ export const combineTranscripts = async (
         const audioDate = extractDateFromMetadata(baseMetadata, firstTranscript.filePath);
         
         const routingContext: Routing.RoutingContext = {
-            transcriptText: finalContent,
+            transcriptText: combinedContent,
             audioDate,
             sourceFile: firstTranscript.filePath,
         };
         
         const decision = routing.route(routingContext);
         outputPath = routing.buildOutputPath(decision, routingContext);
+        // Ensure .pkl extension
+        outputPath = outputPath.replace(/\.md$/, '.pkl');
     } else {
         const firstDir = path.dirname(firstTranscript.filePath);
         const timestamp = extractTimestampFromFilename(firstTranscript.filePath);
@@ -351,17 +341,52 @@ export const combineTranscripts = async (
             const day = timestamp.day.toString().padStart(2, '0');
             const hour = timestamp.hour.toString().padStart(2, '0');
             const minute = timestamp.minute.toString().padStart(2, '0');
-            outputPath = path.join(firstDir, `${day}-${hour}${minute}-${filenameSuffix}.md`);
+            outputPath = path.join(firstDir, `${day}-${hour}${minute}-${filenameSuffix}.pkl`);
         } else {
-            outputPath = path.join(firstDir, `${filenameSuffix}.md`);
+            outputPath = path.join(firstDir, `${filenameSuffix}.pkl`);
         }
     }
     
-    return { outputPath, content: finalContent };
+    // Create the combined PKL transcript
+    if (!options.dryRun) {
+        const initialMetadata: PklMetadata = {
+            title: combinedTitle,
+            date: baseMetadata.date ? new Date(baseMetadata.date) : undefined,
+            recordingTime: baseMetadata.time,
+            project: targetProject?.name || baseMetadata.project,
+            projectId: targetProject?.id || baseMetadata.projectId,
+            tags: baseMetadata.tags || [],
+            duration: baseMetadata.duration,
+            status: 'reviewed',
+        };
+        
+        if (targetProject) {
+            initialMetadata.entities = {
+                people: [],
+                projects: [{
+                    id: targetProject.id,
+                    name: targetProject.name,
+                    type: 'project',
+                }],
+                terms: [],
+                companies: [],
+            };
+        }
+        
+        const newTranscript = PklTranscript.create(outputPath, initialMetadata);
+        try {
+            newTranscript.updateContent(combinedContent);
+        } finally {
+            newTranscript.close();
+        }
+    }
+    
+    return { outputPath, content: combinedContent };
 };
 
 /**
  * Edit transcript metadata and content
+ * PKL-only implementation
  */
 export const editTranscript = async (
     filePath: string,
@@ -377,175 +402,155 @@ export const editTranscript = async (
         contextDirectories?: string[];
     }
 ): Promise<{ outputPath: string; content: string }> => {
-    const transcript = await parseTranscript(filePath);
+    const pklPath = ensurePklExtension(filePath);
+    const transcript = PklTranscript.open(pklPath, { readOnly: false });
     
-    // Use explicit contextDirectories from options if provided (from protokoll-config.yaml)
-    const context = await Context.create({
-        startingDir: options.contextDirectory || path.dirname(filePath),
-        contextDirectories: options.contextDirectories,
-    });
-    let targetProject: Project | undefined;
-    
-    if (options.projectId) {
-        targetProject = findProjectResilient(context, options.projectId);
-    }
-    
-    const newTitle = options.title || transcript.title || 'Untitled';
-    const updatedMetadata = { ...transcript.metadata };
-    
-    if (targetProject) {
-        updatedMetadata.project = targetProject.name;
-        updatedMetadata.projectId = targetProject.id;
-        if (targetProject.routing?.destination) {
+    try {
+        const pklMetadata = transcript.metadata;
+        const content = transcript.content;
+        
+        // Use explicit contextDirectories from options if provided (from protokoll-config.yaml)
+        const context = await Context.create({
+            startingDir: options.contextDirectory || path.dirname(pklPath),
+            contextDirectories: options.contextDirectories,
+        });
+        let targetProject: Project | undefined;
+        
+        if (options.projectId) {
+            targetProject = findProjectResilient(context, options.projectId);
+        }
+        
+        const newTitle = options.title || pklMetadata.title || 'Untitled';
+        
+        // Build updated metadata
+        const updatedMetadata: Partial<PklMetadata> = {};
+        
+        if (options.title) {
+            updatedMetadata.title = newTitle;
+        }
+        
+        if (targetProject) {
+            updatedMetadata.project = targetProject.name;
+            updatedMetadata.projectId = targetProject.id;
+            
+            // Update entities with the project
+            const existingEntities = pklMetadata.entities || { people: [], projects: [], terms: [], companies: [] };
+            updatedMetadata.entities = {
+                people: existingEntities.people || [],
+                projects: [{
+                    id: targetProject.id,
+                    name: targetProject.name,
+                    type: 'project',
+                }],
+                terms: existingEntities.terms || [],
+                companies: existingEntities.companies || [],
+            };
+        }
+        
+        // Handle tag updates
+        if (options.tagsToAdd || options.tagsToRemove) {
+            const currentTags = new Set(pklMetadata.tags || []);
+            
+            if (options.tagsToRemove) {
+                for (const tag of options.tagsToRemove) {
+                    currentTags.delete(tag);
+                }
+            }
+            
+            if (options.tagsToAdd) {
+                for (const tag of options.tagsToAdd) {
+                    currentTags.add(tag);
+                }
+            }
+            
+            updatedMetadata.tags = Array.from(currentTags).sort();
+        }
+        
+        // Determine output path
+        let outputPath = pklPath;
+        
+        if (targetProject?.routing?.destination || options.title) {
             const config = context.getConfig();
             const defaultPath = expandPath((config.outputDirectory as string) || '~/notes');
-            const routingPath = expandPath(targetProject.routing.destination);
-            const resolvedPath = !routingPath.startsWith('/') && !routingPath.match(/^[A-Za-z]:/)
-                ? path.resolve(defaultPath, routingPath)
-                : routingPath;
-            updatedMetadata.destination = resolvedPath;
-        }
-    }
-    
-    if (options.tagsToAdd || options.tagsToRemove) {
-        const currentTags = new Set(updatedMetadata.tags || []);
-        
-        if (options.tagsToRemove) {
-            for (const tag of options.tagsToRemove) {
-                currentTags.delete(tag);
-            }
-        }
-        
-        if (options.tagsToAdd) {
-            for (const tag of options.tagsToAdd) {
-                currentTags.add(tag);
-            }
-        }
-        
-        updatedMetadata.tags = Array.from(currentTags).sort();
-    }
-    
-    const parsed = Frontmatter.parseTranscriptContent(transcript.rawText);
-    const existingEntities = parsed.metadata.entities;
-    
-    let updatedEntities = existingEntities;
-    if (options.projectId && targetProject) {
-        updatedEntities = {
-            people: existingEntities?.people || [],
-            projects: [{
-                id: targetProject.id,
-                name: targetProject.name,
-                type: 'project' as const,
-            }],
-            terms: existingEntities?.terms || [],
-            companies: existingEntities?.companies || [],
-        };
-    }
-    
-    const entitiesToInclude = updatedEntities || existingEntities;
-    
-    const entityRefsIndex = transcript.rawText.indexOf('## Entity References');
-    let contentWithoutEntityRefs: string;
-    
-    if (entityRefsIndex >= 0) {
-        const metadataEndIndex = transcript.rawText.indexOf('---');
-        if (metadataEndIndex >= 0) {
-            let contentStart = metadataEndIndex + '---'.length;
-            while (contentStart < transcript.rawText.length && 
-                   (transcript.rawText[contentStart] === '\n' || 
-                    transcript.rawText[contentStart] === '\r' || 
-                    transcript.rawText[contentStart] === ' ')) {
-                contentStart++;
-            }
-            contentWithoutEntityRefs = transcript.rawText
-                .substring(contentStart, entityRefsIndex)
-                .trimEnd();
-        } else {
-            const contentEndIndex = transcript.content.indexOf('## Entity References');
-            contentWithoutEntityRefs = contentEndIndex >= 0 
-                ? transcript.content.substring(0, contentEndIndex).trimEnd()
-                : transcript.content;
-        }
-    } else {
-        contentWithoutEntityRefs = transcript.content;
-    }
-    
-    const fullMetadata: Metadata.TranscriptMetadata = {
-        ...parsed.metadata,
-        title: newTitle,
-        entities: entitiesToInclude,
-        date: parsed.metadata.date || (updatedMetadata.date ? new Date(updatedMetadata.date) : undefined),
-        recordingTime: parsed.metadata.recordingTime || updatedMetadata.time,
-        project: parsed.metadata.project || updatedMetadata.project,
-        projectId: parsed.metadata.projectId || updatedMetadata.projectId,
-        tags: parsed.metadata.tags || updatedMetadata.tags,
-        duration: parsed.metadata.duration || updatedMetadata.duration,
-        status: parsed.metadata.status || 'reviewed',
-    };
-    
-    if (targetProject) {
-        fullMetadata.project = targetProject.name;
-        fullMetadata.projectId = targetProject.id;
-    }
-    
-    if (options.tagsToAdd || options.tagsToRemove) {
-        fullMetadata.tags = updatedMetadata.tags;
-    }
-    
-    const finalContent = Frontmatter.stringifyTranscript(fullMetadata, contentWithoutEntityRefs);
-    
-    let outputPath: string;
-    
-    if (targetProject?.routing?.destination) {
-        const routingConfig = buildRoutingConfig(context, targetProject);
-        const routing = Routing.create(routingConfig, context);
-        
-        const audioDate = extractDateFromMetadata(updatedMetadata, filePath);
-        
-        const routingContext: Routing.RoutingContext = {
-            transcriptText: finalContent,
-            audioDate,
-            sourceFile: filePath,
-        };
-        
-        const decision = routing.route(routingContext);
-        
-        if (options.title) {
-            const basePath = path.dirname(routing.buildOutputPath(decision, routingContext));
-            const timestamp = extractTimestampFromFilename(filePath);
-            const sluggedTitle = slugifyTitle(options.title);
             
-            if (timestamp) {
-                const day = timestamp.day.toString().padStart(2, '0');
-                const hour = timestamp.hour.toString().padStart(2, '0');
-                const minute = timestamp.minute.toString().padStart(2, '0');
-                outputPath = path.join(basePath, `${day}-${hour}${minute}-${sluggedTitle}.md`);
-            } else {
-                outputPath = path.join(basePath, `${sluggedTitle}.md`);
+            if (targetProject?.routing?.destination) {
+                const routingConfig = buildRoutingConfig(context, targetProject);
+                const routing = Routing.create(routingConfig, context);
+                
+                const audioDate = pklMetadata.date instanceof Date ? pklMetadata.date : new Date();
+                
+                const routingContext: Routing.RoutingContext = {
+                    transcriptText: content,
+                    audioDate,
+                    sourceFile: pklPath,
+                };
+                
+                const decision = routing.route(routingContext);
+                
+                if (options.title) {
+                    const basePath = path.dirname(routing.buildOutputPath(decision, routingContext));
+                    const timestamp = extractTimestampFromFilename(pklPath);
+                    const sluggedTitle = slugifyTitle(options.title);
+                    
+                    if (timestamp) {
+                        const day = timestamp.day.toString().padStart(2, '0');
+                        const hour = timestamp.hour.toString().padStart(2, '0');
+                        const minute = timestamp.minute.toString().padStart(2, '0');
+                        outputPath = path.join(basePath, `${day}-${hour}${minute}-${sluggedTitle}.pkl`);
+                    } else {
+                        outputPath = path.join(basePath, `${sluggedTitle}.pkl`);
+                    }
+                } else {
+                    outputPath = routing.buildOutputPath(decision, routingContext);
+                    outputPath = outputPath.replace(/\.md$/, '.pkl');
+                }
+            } else if (options.title) {
+                const dir = path.dirname(pklPath);
+                const timestamp = extractTimestampFromFilename(pklPath);
+                const sluggedTitle = slugifyTitle(options.title);
+                
+                if (timestamp) {
+                    const day = timestamp.day.toString().padStart(2, '0');
+                    const hour = timestamp.hour.toString().padStart(2, '0');
+                    const minute = timestamp.minute.toString().padStart(2, '0');
+                    outputPath = path.join(dir, `${day}-${hour}${minute}-${sluggedTitle}.pkl`);
+                } else {
+                    outputPath = path.join(dir, `${sluggedTitle}.pkl`);
+                }
             }
-        } else {
-            outputPath = routing.buildOutputPath(decision, routingContext);
         }
-    } else {
-        const dir = path.dirname(filePath);
-        const timestamp = extractTimestampFromFilename(filePath);
         
-        if (options.title) {
-            const sluggedTitle = slugifyTitle(options.title);
-            if (timestamp) {
-                const day = timestamp.day.toString().padStart(2, '0');
-                const hour = timestamp.hour.toString().padStart(2, '0');
-                const minute = timestamp.minute.toString().padStart(2, '0');
-                outputPath = path.join(dir, `${day}-${hour}${minute}-${sluggedTitle}.md`);
-            } else {
-                outputPath = path.join(dir, `${sluggedTitle}.md`);
+        // Apply updates
+        if (!options.dryRun) {
+            if (Object.keys(updatedMetadata).length > 0) {
+                transcript.updateMetadata(updatedMetadata);
             }
-        } else {
-            outputPath = filePath;
+            
+            // If output path changed, we need to move the file
+            if (outputPath !== pklPath) {
+                // Close current transcript
+                transcript.close();
+                
+                // Create directory if needed
+                await fs.mkdir(path.dirname(outputPath), { recursive: true });
+                
+                // Copy to new location
+                await fs.copyFile(pklPath, outputPath);
+                
+                // Delete old file
+                await fs.unlink(pklPath);
+            }
+        }
+        
+        return { outputPath, content };
+    } finally {
+        // Only close if not already closed (due to move operation)
+        try {
+            transcript.close();
+        } catch {
+            // Already closed
         }
     }
-    
-    return { outputPath, content: finalContent };
 };
 
 /**
@@ -590,60 +595,8 @@ export interface ListTranscriptsResult {
 }
 
 /**
- * Get raw transcript path
- */
-const getRawTranscriptPath = (finalPath: string): string => {
-    const dir = path.dirname(finalPath);
-    const basename = path.basename(finalPath, path.extname(finalPath));
-    return path.join(dir, '.transcript', `${basename}.json`);
-};
-
-/**
- * Check if raw transcript exists
- */
-const hasRawTranscript = async (finalPath: string): Promise<boolean> => {
-    try {
-        await fs.access(getRawTranscriptPath(finalPath));
-        return true;
-    } catch {
-        return false;
-    }
-};
-
-/**
- * Extract title from content
- */
-const extractTitle = (content: string): string => {
-    const match = content.match(/^#\s+(.+)$/m);
-    if (match) {
-        return match[1].trim();
-    }
-    const firstLine = content.split('\n')[0];
-    return firstLine ? firstLine.trim().substring(0, 100) : 'Untitled';
-};
-
-/**
- * Extract date from filename
- */
-const extractDateTimeFromFilename = (filename: string): { date: string; time?: string } | null => {
-    const withTimeMatch = filename.match(/(\d{4}-\d{2}-\d{2})-(\d{4})/);
-    if (withTimeMatch) {
-        const [, date, time] = withTimeMatch;
-        const hours = time.substring(0, 2);
-        const minutes = time.substring(2, 4);
-        return { date, time: `${hours}:${minutes}` };
-    }
-    
-    const dateMatch = filename.match(/(\d{4}-\d{2}-\d{2})/);
-    if (dateMatch) {
-        return { date: dateMatch[1] };
-    }
-    
-    return null;
-};
-
-/**
  * List transcripts with filtering and pagination
+ * Uses the protokoll-format storage API
  */
 export const listTranscripts = async (options: ListTranscriptsOptions): Promise<ListTranscriptsResult> => {
     const {
@@ -657,129 +610,39 @@ export const listTranscripts = async (options: ListTranscriptsOptions): Promise<
         projectId,
     } = options;
     
-    const absoluteDir = path.isAbsolute(directory) 
-        ? directory 
-        : path.resolve(process.cwd(), directory);
+    // Use the storage API from protokoll-format
+    const storageOptions: StorageListOptions = {
+        directory,
+        limit,
+        offset,
+        sortBy,
+        search,
+        project: projectId,
+        startDate,
+        endDate,
+    };
     
-    // Find both .md and .pkl transcript files
-    const pattern = path.join(absoluteDir, getTranscriptGlobPattern());
-    const files = await glob(pattern, { ignore: ['**/node_modules/**', '**/.transcript/**'] });
+    const result = await listTranscriptsFromStorage(storageOptions);
     
-    const transcripts: TranscriptListItem[] = [];
-    
-    for (const file of files) {
-        try {
-            const stats = await fs.stat(file);
-            
-            // Handle .pkl files
-            if (isPklFile(file)) {
-                const transcript = PklTranscript.open(file, { readOnly: true });
-                try {
-                    const pklMetadata = transcript.metadata;
-                    const content = transcript.content;
-                    
-                    const dateTime = extractDateTimeFromFilename(path.basename(file));
-                    const date = dateTime?.date || (pklMetadata.date instanceof Date 
-                        ? pklMetadata.date.toISOString().split('T')[0] 
-                        : '') || '';
-                    
-                    if (startDate && date < startDate) continue;
-                    if (endDate && date > endDate) continue;
-                    
-                    if (projectId && pklMetadata.projectId !== projectId) continue;
-                    
-                    if (search) {
-                        const searchLower = search.toLowerCase();
-                        const title = (pklMetadata.title || '').toLowerCase();
-                        if (!title.includes(searchLower) && !content.toLowerCase().includes(searchLower)) {
-                            continue;
-                        }
-                    }
-                    
-                    const openTasks = pklMetadata.tasks?.filter(t => t.status === 'open').length || 0;
-                    
-                    transcripts.push({
-                        path: file,
-                        filename: path.basename(file),
-                        date,
-                        time: dateTime?.time || pklMetadata.recordingTime,
-                        title: pklMetadata.title || extractTitle(content),
-                        hasRawTranscript: transcript.hasRawTranscript,
-                        createdAt: stats.birthtime,
-                        status: pklMetadata.status,
-                        openTasksCount: openTasks,
-                        contentSize: content.length,
-                        entities: pklMetadata.entities,
-                    });
-                } finally {
-                    transcript.close();
-                }
-                continue;
-            }
-            
-            // Handle .md files with existing logic
-            if (!isMdFile(file)) {
-                continue;
-            }
-            
-            const content = await fs.readFile(file, 'utf-8');
-            const parsed = Frontmatter.parseTranscriptContent(content);
-            
-            const dateTime = extractDateTimeFromFilename(path.basename(file));
-            const date = dateTime?.date || parsed.metadata.date?.toISOString().split('T')[0] || '';
-            
-            if (startDate && date < startDate) continue;
-            if (endDate && date > endDate) continue;
-            
-            if (projectId && parsed.metadata.projectId !== projectId) continue;
-            
-            if (search) {
-                const searchLower = search.toLowerCase();
-                const title = extractTitle(content).toLowerCase();
-                if (!title.includes(searchLower) && !content.toLowerCase().includes(searchLower)) {
-                    continue;
-                }
-            }
-            
-            const openTasks = parsed.metadata.tasks?.filter(t => !t.completed).length || 0;
-            
-            transcripts.push({
-                path: file,
-                filename: path.basename(file),
-                date,
-                time: dateTime?.time || parsed.metadata.recordingTime,
-                title: parsed.metadata.title || extractTitle(content),
-                hasRawTranscript: await hasRawTranscript(file),
-                createdAt: stats.birthtime,
-                status: parsed.metadata.status,
-                openTasksCount: openTasks,
-                contentSize: content.length,
-                entities: parsed.metadata.entities,
-            });
-        } catch {
-            // Skip files that can't be parsed
-            continue;
-        }
-    }
-    
-    // Sort
-    transcripts.sort((a, b) => {
-        if (sortBy === 'date') {
-            return b.date.localeCompare(a.date);
-        } else if (sortBy === 'filename') {
-            return a.filename.localeCompare(b.filename);
-        } else {
-            return a.title.localeCompare(b.title);
-        }
-    });
-    
-    const total = transcripts.length;
-    const paginatedTranscripts = transcripts.slice(offset, offset + limit);
+    // Convert storage result to operations result format
+    const transcripts: TranscriptListItem[] = result.transcripts.map(item => ({
+        path: item.filePath,
+        filename: path.basename(item.filePath),
+        date: item.date instanceof Date ? item.date.toISOString().split('T')[0] : '',
+        time: undefined, // Not in storage result
+        title: item.title,
+        hasRawTranscript: false, // Not in storage result, would need to open file to check
+        createdAt: item.date || new Date(),
+        status: item.status,
+        openTasksCount: undefined, // Not in storage result
+        contentSize: item.contentPreview?.length,
+        entities: undefined, // Not in storage result
+    }));
     
     return {
-        transcripts: paginatedTranscripts,
-        total,
-        hasMore: offset + limit < total,
+        transcripts,
+        total: result.total,
+        hasMore: result.hasMore,
         limit,
         offset,
     };

@@ -11,6 +11,8 @@ import * as Context from '../context';
 import * as Reasoning from '../reasoning';
 import * as Logging from '../logging';
 import { slugifyTitle, extractTimestampFromFilename } from './operations';
+import { PklTranscript } from '@redaksjon/protokoll-format';
+import { ensurePklExtension } from './pkl-utils';
 
 /**
  * Tool definitions for feedback processor
@@ -292,34 +294,8 @@ export const executeTool = async (
         case 'change_title': {
             const newTitle = String(args.new_title);
             
-            // Update title in YAML frontmatter
-            const frontmatterRegex = /^---\s*\n([\s\S]*?)\n---/;
-            const frontmatterMatch = feedbackCtx.transcriptContent.match(frontmatterRegex);
-            
-            if (frontmatterMatch) {
-                const frontmatter = frontmatterMatch[1];
-                // Replace existing title or add it if missing
-                let updatedFrontmatter: string;
-                if (/^title:/m.test(frontmatter)) {
-                    // Replace existing title (handles both quoted and unquoted values)
-                    updatedFrontmatter = frontmatter.replace(
-                        /^title:.*$/m,
-                        `title: '${newTitle.replace(/'/g, "''")}'`
-                    );
-                } else {
-                    // Add title as first field after opening ---
-                    updatedFrontmatter = `title: '${newTitle.replace(/'/g, "''")}'\n${frontmatter}`;
-                }
-                feedbackCtx.transcriptContent = feedbackCtx.transcriptContent.replace(
-                    frontmatterRegex,
-                    `---\n${updatedFrontmatter}\n---`
-                );
-            } else {
-                // No frontmatter exists - this shouldn't happen with new format
-                // but handle gracefully by adding frontmatter
-                feedbackCtx.transcriptContent = `---\ntitle: '${newTitle.replace(/'/g, "''")}'\\n---\n\n${feedbackCtx.transcriptContent}`;
-            }
-            
+            // For PKL format, title is stored in metadata, not in content
+            // We just track the change here - applyChanges will update the PKL metadata
             feedbackCtx.changes.push({
                 type: 'title_changed',
                 description: `Changed title to "${newTitle}"`,
@@ -522,20 +498,22 @@ export const applyChanges = async (
 ): Promise<{ newPath: string; moved: boolean }> => {
     const logger = Logging.getLogger();
     
-    let newPath = feedbackCtx.transcriptPath;
+    // Ensure we're working with PKL files
+    const pklPath = ensurePklExtension(feedbackCtx.transcriptPath);
+    let newPath = pklPath;
     let moved = false;
     
     const titleChange = feedbackCtx.changes.find(c => c.type === 'title_changed');
     if (titleChange) {
         const slug = titleChange.details.slug as string;
-        const timestamp = extractTimestampFromFilename(feedbackCtx.transcriptPath);
-        const dir = path.dirname(feedbackCtx.transcriptPath);
+        const timestamp = extractTimestampFromFilename(pklPath);
+        const dir = path.dirname(pklPath);
         
         if (timestamp) {
             const timeStr = `${timestamp.hour.toString().padStart(2, '0')}${timestamp.minute.toString().padStart(2, '0')}`;
-            newPath = path.join(dir, `${timestamp.day}-${timeStr}-${slug}.md`);
+            newPath = path.join(dir, `${timestamp.day}-${timeStr}-${slug}.pkl`);
         } else {
-            newPath = path.join(dir, `${slug}.md`);
+            newPath = path.join(dir, `${slug}.pkl`);
         }
     }
     
@@ -572,10 +550,34 @@ export const applyChanges = async (
     await fs.mkdir(path.dirname(newPath), { recursive: true });
     
     if (!feedbackCtx.dryRun) {
-        await fs.writeFile(newPath, feedbackCtx.transcriptContent, 'utf-8');
+        // Open the PKL transcript and apply changes
+        const transcript = PklTranscript.open(pklPath, { readOnly: false });
+        try {
+            // Update content if it was modified
+            if (feedbackCtx.transcriptContent !== feedbackCtx.originalContent) {
+                transcript.updateContent(feedbackCtx.transcriptContent);
+            }
+            
+            // Update title if it was changed
+            if (titleChange) {
+                transcript.updateMetadata({ title: titleChange.details.new_title as string });
+            }
+            
+            // Update project if it was changed
+            if (projectChange) {
+                transcript.updateMetadata({ 
+                    projectId: projectChange.details.project_id as string,
+                    project: projectChange.details.project_name as string,
+                });
+            }
+        } finally {
+            transcript.close();
+        }
         
-        if (newPath !== feedbackCtx.transcriptPath) {
-            await fs.unlink(feedbackCtx.transcriptPath);
+        // Move file if path changed
+        if (newPath !== pklPath) {
+            await fs.copyFile(pklPath, newPath);
+            await fs.unlink(pklPath);
         }
     }
     

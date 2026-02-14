@@ -3,6 +3,8 @@
  *
  * Manages intermediate files and final output destinations.
  * Follows the kodrdriv pattern for debugging and intermediate file management.
+ * 
+ * PKL-only implementation - all transcripts are stored in PKL format.
  */
 
 import * as path from 'node:path';
@@ -10,8 +12,7 @@ import * as fs from 'fs/promises';
 import { OutputConfig, IntermediateFiles, OutputPaths, RawTranscriptData } from './types';
 import * as Logging from '../logging';
 import * as Metadata from '../util/metadata';
-import * as Frontmatter from '../util/frontmatter';
-import { validateOrThrow } from '../util/validation';
+import { PklTranscript } from '@redaksjon/protokoll-format';
 
 export interface ManagerInstance {
     createOutputPaths(
@@ -73,14 +74,22 @@ export const create = (config: OutputConfig): ManagerInstance => {
     
         const intermediateDir = config.intermediateDir;
     
+        // Ensure final path uses .pkl extension
+        let finalPath = routedDestination;
+        if (finalPath.endsWith('.md')) {
+            finalPath = finalPath.replace(/\.md$/, '.pkl');
+        } else if (!finalPath.endsWith('.pkl')) {
+            finalPath = finalPath + '.pkl';
+        }
+
         // Generate raw transcript path in .transcript/ directory alongside final output
-        // e.g., /notes/2026/1/14-meeting.md -> /notes/2026/1/.transcript/14-meeting.json
-        const finalDir = path.dirname(routedDestination);
-        const finalBasename = path.basename(routedDestination, path.extname(routedDestination));
+        // e.g., /notes/2026/1/14-meeting.pkl -> /notes/2026/1/.transcript/14-meeting.json
+        const finalDir = path.dirname(finalPath);
+        const finalBasename = path.basename(finalPath, '.pkl');
         const rawTranscriptPath = path.join(finalDir, '.transcript', `${finalBasename}.json`);
 
         return {
-            final: routedDestination,
+            final: finalPath,
             rawTranscript: rawTranscriptPath,
             intermediate: {
                 transcript: path.join(intermediateDir, buildFilename('transcript', '.json')),
@@ -135,31 +144,42 @@ export const create = (config: OutputConfig): ManagerInstance => {
         content: string,
         metadata?: Metadata.TranscriptMetadata
     ): Promise<string> => {
-        let finalContent: string;
+        // Create PKL transcript
+        // Convert routing metadata to PKL format (signals are strings in PKL)
+        const pklRouting = metadata?.routing ? {
+            destination: metadata.routing.destination,
+            confidence: metadata.routing.confidence,
+            signals: metadata.routing.signals?.map(s => 
+                typeof s === 'string' ? s : `${s.type}: ${s.value} (weight: ${s.weight})`
+            ),
+            reasoning: metadata.routing.reasoning,
+        } : undefined;
         
-        if (metadata) {
-            // Use YAML frontmatter format (same as MCP server)
-            // This ensures consistency between CLI and MCP server output
-            finalContent = Frontmatter.stringifyTranscript(metadata, content);
-            
-            // Validate before writing (same validation as MCP server)
-            // This prevents corrupted files from being written
-            try {
-                validateOrThrow(finalContent);
-                logger.debug('Transcript content validated successfully');
-            } catch (validationError) {
-                logger.error('Transcript validation failed', { 
-                    error: validationError instanceof Error ? validationError.message : String(validationError),
-                    contentPreview: finalContent.substring(0, 500),
-                });
-                throw validationError;
-            }
-        } else {
-            finalContent = content;
+        const pklMetadata = metadata ? {
+            title: metadata.title,
+            date: metadata.date,
+            recordingTime: metadata.recordingTime,
+            project: metadata.project,
+            projectId: metadata.projectId,
+            tags: metadata.tags || [],
+            duration: metadata.duration,
+            status: metadata.status || 'initial' as const,
+            entities: metadata.entities,
+            routing: pklRouting,
+        } : {
+            title: 'Untitled',
+            tags: [],
+            status: 'initial' as const,
+        };
+        
+        const transcript = PklTranscript.create(paths.final, pklMetadata);
+        try {
+            transcript.updateContent(content);
+            logger.info('Wrote final transcript', { path: paths.final });
+        } finally {
+            transcript.close();
         }
         
-        await fs.writeFile(paths.final, finalContent, 'utf-8');
-        logger.info('Wrote final transcript', { path: paths.final });
         return paths.final;
     };
   
@@ -204,7 +224,8 @@ export const create = (config: OutputConfig): ManagerInstance => {
      */
     const readRawTranscript = async (finalOutputPath: string): Promise<RawTranscriptData | null> => {
         const finalDir = path.dirname(finalOutputPath);
-        const finalBasename = path.basename(finalOutputPath, path.extname(finalOutputPath));
+        const ext = path.extname(finalOutputPath);
+        const finalBasename = path.basename(finalOutputPath, ext);
         const rawTranscriptPath = path.join(finalDir, '.transcript', `${finalBasename}.json`);
         
         try {
@@ -229,4 +250,3 @@ export const create = (config: OutputConfig): ManagerInstance => {
         cleanIntermediates,
     };
 };
-

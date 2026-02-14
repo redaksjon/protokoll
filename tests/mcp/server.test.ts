@@ -6,6 +6,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
+import { PklTranscript } from '@redaksjon/protokoll-format';
 
 // Mock the MCP SDK modules before importing the server
 vi.mock('@modelcontextprotocol/sdk/server/index.js', () => ({
@@ -86,30 +87,45 @@ import {
     type ProjectSuggestion,
 } from '../../src/mcp/tools';
 
-// Sample transcript content for testing
-const SAMPLE_TRANSCRIPT = `# Test Meeting Notes
+// Sample transcript content for testing (legacy markdown format - kept for reference)
+const SAMPLE_TRANSCRIPT_CONTENT = 'This is the transcript content.';
 
-## Metadata
-
-**Date**: January 15, 2026
-**Time**: 02:12 PM
-
-**Project**: test-project
-**Project ID**: \`test-project\`
-
-### Routing
-
-**Destination**: /tmp/notes
-**Confidence**: 85.0%
-
-**Tags**: \`test\`, \`meeting\`
-
-**Duration**: 5m 30s
-
----
-
-This is the transcript content.
-`;
+/**
+ * Helper to create a PKL transcript for testing
+ */
+async function createTestPklTranscript(
+    dir: string,
+    filename: string,
+    options: {
+        title?: string;
+        date?: Date;
+        project?: string;
+        projectId?: string;
+        tags?: string[];
+        duration?: string;
+        content?: string;
+    } = {}
+): Promise<string> {
+    const pklPath = path.join(dir, filename);
+    const metadata = {
+        title: options.title || 'Test Meeting Notes',
+        date: options.date || new Date('2026-01-15T14:12:00Z'),
+        project: options.project || 'test-project',
+        projectId: options.projectId || 'test-project',
+        tags: options.tags || ['test', 'meeting'],
+        duration: options.duration || '5m 30s',
+        status: 'reviewed' as const,
+    };
+    
+    const transcript = PklTranscript.create(pklPath, metadata);
+    try {
+        transcript.updateContent(options.content || SAMPLE_TRANSCRIPT_CONTENT);
+    } finally {
+        transcript.close();
+    }
+    
+    return pklPath;
+}
 
 describe('MCP Server', () => {
     let tempDir: string;
@@ -1032,8 +1048,7 @@ routing:
 
     describe('handleReadTranscript', () => {
         it('should read and parse a transcript', async () => {
-            const transcriptPath = path.join(tempDir, 'transcript.md');
-            await fs.writeFile(transcriptPath, SAMPLE_TRANSCRIPT);
+            const transcriptPath = await createTestPklTranscript(tempDir, 'transcript.pkl');
 
             const result = await handleReadTranscript({ 
                 transcriptPath: toRelativePath(transcriptPath),
@@ -1049,7 +1064,7 @@ routing:
         });
 
         it('should throw error for non-existent file', async () => {
-            const fakePath = path.join(tempDir, 'nonexistent.md');
+            const fakePath = path.join(tempDir, 'nonexistent.pkl');
             await expect(handleReadTranscript({ 
                 transcriptPath: toRelativePath(fakePath),
                 contextDirectory: protokollDir
@@ -1060,8 +1075,7 @@ routing:
 
     describe('handleEditTranscript', () => {
         it('should edit transcript title', async () => {
-            const transcriptPath = path.join(tempDir, 'edit-test.md');
-            await fs.writeFile(transcriptPath, SAMPLE_TRANSCRIPT);
+            const transcriptPath = await createTestPklTranscript(tempDir, 'edit-test.pkl');
 
             const result = await handleEditTranscript({
                 transcriptPath: toRelativePath(transcriptPath),
@@ -1082,46 +1096,28 @@ routing:
             const absoluteOutputPath = path.isAbsolute(result.outputPath) 
                 ? result.outputPath 
                 : path.resolve(tempDir, result.outputPath);
-            const content = await fs.readFile(absoluteOutputPath, 'utf-8');
-            expect(content).toContain('New Title');
+            // Read the PKL file to verify the title was updated
+            const transcript = PklTranscript.open(absoluteOutputPath, { readOnly: true });
+            try {
+                expect(transcript.metadata.title).toBe('New Title');
+            } finally {
+                transcript.close();
+            }
         });
     });
 
     describe('handleCombineTranscripts', () => {
         it('should combine multiple transcripts', async () => {
-            const transcript1 = path.join(tempDir, '01-transcript1.md');
-            const transcript2 = path.join(tempDir, '02-transcript2.md');
-            
-            await fs.writeFile(transcript1, `# Part 1
-
-## Metadata
-
-**Date**: January 15, 2026
-**Time**: 02:00 PM
-
-**Tags**: \`test\`
-
-**Duration**: 5m
-
----
-
-Content from part 1.
-`);
-            await fs.writeFile(transcript2, `# Part 2
-
-## Metadata
-
-**Date**: January 15, 2026
-**Time**: 02:30 PM
-
-**Tags**: \`test\`
-
-**Duration**: 5m
-
----
-
-Content from part 2.
-`);
+            const transcript1 = await createTestPklTranscript(tempDir, '01-transcript1.pkl', {
+                title: 'Part 1',
+                date: new Date('2026-01-15T14:00:00Z'),
+                content: 'Content from part 1.',
+            });
+            const transcript2 = await createTestPklTranscript(tempDir, '02-transcript2.pkl', {
+                title: 'Part 2',
+                date: new Date('2026-01-15T14:30:00Z'),
+                content: 'Content from part 2.',
+            });
 
             const result = await handleCombineTranscripts({
                 transcriptPaths: [toRelativePath(transcript1), toRelativePath(transcript2)],
@@ -1136,10 +1132,15 @@ Content from part 2.
 
             // Verify the combined file exists - result.outputPath is relative, resolve it
             const absoluteCombinedPath = path.resolve(tempDir, result.outputPath);
-            const combinedContent = await fs.readFile(absoluteCombinedPath, 'utf-8');
-            expect(combinedContent).toContain('Combined Transcript');
-            expect(combinedContent).toContain('Content from part 1');
-            expect(combinedContent).toContain('Content from part 2');
+            // Read the PKL file to verify the content
+            const transcript = PklTranscript.open(absoluteCombinedPath, { readOnly: true });
+            try {
+                expect(transcript.metadata.title).toBe('Combined Transcript');
+                expect(transcript.content).toContain('Content from part 1');
+                expect(transcript.content).toContain('Content from part 2');
+            } finally {
+                transcript.close();
+            }
         });
     });
 
@@ -1174,8 +1175,7 @@ Content from part 2.
 
     describe('handleEditTranscript error cases', () => {
         it('should throw error when neither title nor projectId specified', async () => {
-            const transcriptPath = path.join(tempDir, 'edit-error-test.md');
-            await fs.writeFile(transcriptPath, SAMPLE_TRANSCRIPT);
+            const transcriptPath = await createTestPklTranscript(tempDir, 'edit-error-test.pkl');
 
             await expect(handleEditTranscript({
                 transcriptPath: toRelativePath(transcriptPath),
@@ -1186,8 +1186,7 @@ Content from part 2.
 
     describe('handleCombineTranscripts error cases', () => {
         it('should throw error when less than 2 files provided', async () => {
-            const transcript1 = path.join(tempDir, 'single.md');
-            await fs.writeFile(transcript1, SAMPLE_TRANSCRIPT);
+            const transcript1 = await createTestPklTranscript(tempDir, 'single.pkl');
 
             await expect(handleCombineTranscripts({
                 transcriptPaths: [transcript1],
@@ -1196,9 +1195,8 @@ Content from part 2.
         });
 
         it('should throw error when file does not exist', async () => {
-            const transcript1 = path.join(tempDir, 'exists.md');
-            const transcript2 = path.join(tempDir, 'does-not-exist.md');
-            await fs.writeFile(transcript1, SAMPLE_TRANSCRIPT);
+            const transcript1 = await createTestPklTranscript(tempDir, 'exists.pkl');
+            const transcript2 = path.join(tempDir, 'does-not-exist.pkl');
 
             await expect(handleCombineTranscripts({
                 transcriptPaths: [transcript1, transcript2],

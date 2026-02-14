@@ -5,7 +5,7 @@
  
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { resolve, dirname, relative, isAbsolute } from 'node:path';
-import { readFile, writeFile, mkdir, unlink } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import * as Context from '@/context';
 import * as Reasoning from '@/reasoning';
 import { DEFAULT_MODEL } from '@/constants';
@@ -13,7 +13,12 @@ import * as Transcript from '@/transcript';
 
 import { fileExists, getConfiguredDirectory, getContextDirectories, sanitizePath, validatePathWithinDirectory, validatePathWithinOutputDirectory, validateNotRemoteMode } from './shared.js';
 import * as Metadata from '@/util/metadata';
-import { validateOrThrow } from '@/util/validation';
+import { transcriptExists, stripTranscriptExtension, ensurePklExtension } from '@/transcript/pkl-utils';
+import { 
+    PklTranscript, 
+    readTranscript as readTranscriptFromStorage,
+    listTranscripts as listTranscriptsFromStorage,
+} from '@redaksjon/protokoll-format';
 
 // ============================================================================
 // Helper Functions
@@ -77,17 +82,22 @@ async function findTranscript(
     // This prevents path traversal attacks using ../ sequences
     validatePathWithinDirectory(resolvedPath, outputDirectory);
     
-    if (await fileExists(resolvedPath)) {
-        return resolvedPath;
+    // Use transcriptExists to check for .pkl files
+    // This handles paths with or without extensions
+    const existsResult = await transcriptExists(resolvedPath);
+    if (existsResult.exists && existsResult.path) {
+        return existsResult.path;
     }
     
     // If direct path resolution didn't work, try searching by filename
-    // Extract just the filename if it's a path
-    const searchTerm = normalizedPath.includes('/')
+    // Extract just the filename if it's a path, and strip any extension for search
+    const rawSearchTerm = normalizedPath.includes('/')
         ? normalizedPath.split('/').pop() || normalizedPath
         : normalizedPath;
+    const searchTerm = stripTranscriptExtension(rawSearchTerm);
     
-    const result = await Transcript.listTranscripts({
+    // Use protokoll-format storage API for search
+    const result = await listTranscriptsFromStorage({
         directory: outputDirectory,
         search: searchTerm,
         limit: 10,
@@ -101,23 +111,31 @@ async function findTranscript(
     }
 
     if (result.transcripts.length === 1) {
-        return result.transcripts[0].path;
+        return result.transcripts[0].filePath;
     }
 
     // Multiple matches - try exact match by relative path
+    // Compare paths without extensions to handle .pkl files
     const outputDirNormalized = outputDirectory.replace(/\\/g, '/');
+    const normalizedPathWithoutExt = stripTranscriptExtension(normalizedPath);
     const exactMatch = result.transcripts.find(t => {
-        const tPathNormalized = t.path.replace(/\\/g, '/');
+        const tPathNormalized = t.filePath.replace(/\\/g, '/');
         const tRelative = tPathNormalized.replace(outputDirNormalized + '/', '');
-        return tRelative === normalizedPath || t.filename === searchTerm;
+        const tRelativeWithoutExt = stripTranscriptExtension(tRelative);
+        const filename = t.filePath.split('/').pop() || '';
+        const filenameWithoutExt = stripTranscriptExtension(filename);
+        return tRelativeWithoutExt === normalizedPathWithoutExt || 
+               filenameWithoutExt === searchTerm ||
+               tRelative === normalizedPath || 
+               filename === searchTerm;
     });
     
     if (exactMatch) {
-        return exactMatch.path;
+        return exactMatch.filePath;
     }
 
     // Multiple matches and no exact match
-    const matches = result.transcripts.map(t => t.filename).join(', ');
+    const matches = result.transcripts.map(t => t.filePath.split('/').pop() || '').join(', ');
     throw new Error(
         `Multiple transcripts match "${relativePath}": ${matches}. ` +
         `Please be more specific.`
@@ -141,7 +159,7 @@ export const readTranscriptTool: Tool = {
                 type: 'string',
                 description: 
                     'Relative path to the transcript from the output directory. ' +
-                    'Examples: "meeting-notes.md", "2026/2/01-1325-02012026091511.md"',
+                    'Examples: "meeting-notes.pkl", "2026/2/01-1325-02012026091511.pkl"',
             },
             contextDirectory: {
                 type: 'string',
@@ -222,7 +240,7 @@ export const editTranscriptTool: Tool = {
                 type: 'string',
                 description: 
                     'Relative path to the transcript from the output directory. ' +
-                    'Examples: "meeting-notes.md", "2026/2/01-1325-02012026091511.md"',
+                    'Examples: "meeting-notes.pkl", "2026/2/01-1325-02012026091511.pkl"',
             },
             title: {
                 type: 'string',
@@ -271,7 +289,7 @@ export const changeTranscriptDateTool: Tool = {
                 type: 'string',
                 description: 
                     'Relative path to the transcript from the output directory. ' +
-                    'Examples: "meeting-notes.md", "2026/2/01-1325-02012026091511.md"',
+                    'Examples: "meeting-notes.pkl", "2026/2/01-1325-02012026091511.pkl"',
             },
             newDate: {
                 type: 'string',
@@ -303,7 +321,7 @@ export const combineTranscriptsTool: Tool = {
                 items: { type: 'string' },
                 description: 
                     'Array of relative paths from the output directory. ' +
-                    'Examples: ["meeting-1.md", "meeting-2.md"] or ["2026/2/01-1325.md", "2026/2/01-1400.md"]',
+                    'Examples: ["meeting-1.pkl", "meeting-2.pkl"] or ["2026/2/01-1325.pkl", "2026/2/01-1400.pkl"]',
             },
             title: {
                 type: 'string',
@@ -340,7 +358,7 @@ export const provideFeedbackTool: Tool = {
                 type: 'string',
                 description: 
                     'Relative path to the transcript from the output directory. ' +
-                    'Examples: "meeting-notes.md", "2026/2/01-1325-02012026091511.md"',
+                    'Examples: "meeting-notes.pkl", "2026/2/01-1325-02012026091511.pkl"',
             },
             feedback: {
                 type: 'string',
@@ -375,7 +393,7 @@ export const updateTranscriptContentTool: Tool = {
                 type: 'string',
                 description: 
                     'Relative path to the transcript from the output directory. ' +
-                    'Examples: "meeting-notes.md", "2026/2/01-1325-02012026091511.md"',
+                    'Examples: "meeting-notes.pkl", "2026/2/01-1325-02012026091511.pkl"',
             },
             content: {
                 type: 'string',
@@ -407,7 +425,7 @@ export const updateTranscriptEntityReferencesTool: Tool = {
                 type: 'string',
                 description: 
                     'Relative path to the transcript from the output directory. ' +
-                    'Examples: "meeting-notes.md", "2026/2/01-1325-02012026091511.md"',
+                    'Examples: "meeting-notes.pkl", "2026/2/01-1325-02012026091511.pkl"',
             },
             entities: {
                 type: 'object',
@@ -519,18 +537,35 @@ export async function handleReadTranscript(args: {
     // Find the transcript (returns absolute path for file operations)
     const absolutePath = await findTranscript(args.transcriptPath, args.contextDirectory);
 
-    const parsed = await Transcript.parseTranscript(absolutePath);
+    // Use protokoll-format storage API directly - returns structured JSON
+    const transcriptData = await readTranscriptFromStorage(absolutePath);
 
     // Convert to relative path for response
     const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
     const relativePath = await sanitizePath(absolutePath, outputDirectory);
 
+    // Return complete structured JSON for client display
+    // Clients should NOT need to parse this - all data is ready to display
     return {
         filePath: relativePath,
-        title: parsed.title,
-        metadata: parsed.metadata,
-        content: parsed.content,
-        contentLength: parsed.content.length,
+        title: transcriptData.metadata.title || '',
+        metadata: {
+            date: transcriptData.metadata.date?.toISOString() || null,
+            recordingTime: transcriptData.metadata.recordingTime || null,
+            duration: transcriptData.metadata.duration || null,
+            project: transcriptData.metadata.project || null,
+            projectId: transcriptData.metadata.projectId || null,
+            tags: transcriptData.metadata.tags || [],
+            status: transcriptData.metadata.status || 'initial',
+            confidence: transcriptData.metadata.confidence || null,
+            routing: transcriptData.metadata.routing || null,
+            history: transcriptData.metadata.history || [],
+            tasks: transcriptData.metadata.tasks || [],
+            entities: transcriptData.metadata.entities || {},
+        },
+        content: transcriptData.content,
+        hasRawTranscript: transcriptData.hasRawTranscript,
+        contentLength: transcriptData.content.length,
     };
 }
 
@@ -553,7 +588,8 @@ export async function handleListTranscripts(args: {
         throw new Error(`Directory not found: ${directory}`);
     }
 
-    const result = await Transcript.listTranscripts({
+    // Use protokoll-format storage API directly
+    const result = await listTranscriptsFromStorage({
         directory,
         limit: args.limit ?? 50,
         offset: args.offset ?? 0,
@@ -567,12 +603,15 @@ export async function handleListTranscripts(args: {
     const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
     const relativeTranscripts = await Promise.all(
         result.transcripts.map(async (t) => ({
-            path: t.path ? await sanitizePath(t.path, outputDirectory) : t.filename || '',
-            filename: t.filename,
-            date: t.date,
-            time: t.time,
+            path: await sanitizePath(t.filePath, outputDirectory),
+            relativePath: t.relativePath,
             title: t.title,
-            hasRawTranscript: t.hasRawTranscript,
+            date: t.date?.toISOString() || null,
+            project: t.project || null,
+            tags: t.tags,
+            status: t.status,
+            duration: t.duration || null,
+            contentPreview: t.contentPreview,
         }))
     );
 
@@ -581,10 +620,10 @@ export async function handleListTranscripts(args: {
         transcripts: relativeTranscripts,
         pagination: {
             total: result.total,
-            limit: result.limit,
-            offset: result.offset,
+            limit: args.limit ?? 50,
+            offset: args.offset ?? 0,
             hasMore: result.hasMore,
-            nextOffset: result.hasMore ? result.offset + result.limit : null,
+            nextOffset: result.hasMore ? (args.offset ?? 0) + (args.limit ?? 50) : null,
         },
         filters: {
             sortBy: args.sortBy ?? 'date',
@@ -629,6 +668,7 @@ export async function handleEditTranscript(args: {
     let wasRenamed = false;
     
     // Handle title/project/tags changes via existing editTranscript function
+    // The editTranscript function handles PKL files directly
     if (args.title || args.projectId || args.tagsToAdd || args.tagsToRemove) {
         // Get context directories from server config (from protokoll-config.yaml)
         const contextDirectories = await getContextDirectories();
@@ -645,74 +685,32 @@ export async function handleEditTranscript(args: {
         // Validate that the output path stays within the output directory
         validatePathWithinDirectory(result.outputPath, outputDirectory);
 
-        // Validate the content before writing (using shared validation utility)
-        try {
-            validateOrThrow(result.content);
-            // eslint-disable-next-line no-console
-            console.log('✅ Transcript content validated successfully');
-        } catch (validationError) {
-            // eslint-disable-next-line no-console
-            console.error('❌ Transcript validation failed:', validationError);
-            // eslint-disable-next-line no-console
-            console.error('Generated content (first 500 chars):', result.content.substring(0, 500));
-            throw new Error(
-                `Transcript validation failed: ${validationError instanceof Error ? validationError.message : String(validationError)}. ` +
-                `This is a bug in the transcript generation logic. The file was NOT saved to prevent corruption.`
-            );
-        }
-        
-        // Write the updated content
-        await mkdir(dirname(result.outputPath), { recursive: true });
-        await writeFile(result.outputPath, result.content, 'utf-8');
-
-        // Delete original if path changed
+        // editTranscript handles file operations internally for PKL files
         if (result.outputPath !== absolutePath) {
-            await unlink(absolutePath);
             wasRenamed = true;
         }
         
         finalOutputPath = result.outputPath;
     }
 
-    // Handle status change using frontmatter utilities
+    // Handle status change using PklTranscript
     let statusChanged = false;
     let previousStatus: string | undefined;
     
     if (args.status) {
-        const content = await readFile(finalOutputPath, 'utf-8');
-        const { parseTranscriptContent, stringifyTranscript } = await import('@/util/frontmatter');
-        const parsed = parseTranscriptContent(content);
-        
-        previousStatus = parsed.metadata.status || 'reviewed';
-        
-        if (previousStatus !== args.status) {
-            const updatedMetadata = Metadata.updateStatus(parsed.metadata, args.status as Metadata.TranscriptStatus);
-            const updatedContent = stringifyTranscript(updatedMetadata, parsed.body);
+        const pklPath = ensurePklExtension(finalOutputPath);
+        const transcript = PklTranscript.open(pklPath, { readOnly: false });
+        try {
+            previousStatus = transcript.metadata.status || 'reviewed';
             
-            // Validate before writing
-            try {
-                const validation = parseTranscriptContent(updatedContent);
-                if (!validation.metadata) {
-                    throw new Error('Generated content has no parseable metadata');
-                }
-                if (!updatedContent.trim().startsWith('---')) {
-                    throw new Error('Generated content does not start with YAML frontmatter (---)');
-                }
+            if (previousStatus !== args.status) {
+                transcript.updateMetadata({ status: args.status as Metadata.TranscriptStatus });
+                statusChanged = true;
                 // eslint-disable-next-line no-console
-                console.log('✅ Status update content validated successfully');
-            } catch (validationError) {
-                // eslint-disable-next-line no-console
-                console.error('❌ Status update validation failed:', validationError);
-                // eslint-disable-next-line no-console
-                console.error('Generated content (first 500 chars):', updatedContent.substring(0, 500));
-                throw new Error(
-                    `Status update validation failed: ${validationError instanceof Error ? validationError.message : String(validationError)}. ` +
-                    `The file was NOT saved to prevent corruption.`
-                );
+                console.log('✅ Status update completed successfully');
             }
-            
-            await writeFile(finalOutputPath, updatedContent, 'utf-8');
-            statusChanged = true;
+        } finally {
+            transcript.close();
         }
     }
 
@@ -745,7 +743,7 @@ export async function handleChangeTranscriptDate(args: {
     newDate: string;
     contextDirectory?: string;
 }) {
-    const { readFile, writeFile, mkdir, unlink } = await import('node:fs/promises');
+    const fsPromises = await import('node:fs/promises');
     const path = await import('node:path');
     
     // Get the output directory
@@ -758,17 +756,6 @@ export async function handleChangeTranscriptDate(args: {
     const newDate = new Date(args.newDate);
     if (isNaN(newDate.getTime())) {
         throw new Error(`Invalid date format: ${args.newDate}. Use ISO 8601 format (e.g., "2026-01-15" or "2026-01-15T10:30:00Z")`);
-    }
-    
-    // Read the transcript content
-    const content = await readFile(absolutePath, 'utf-8');
-    
-    // Parse the transcript to get metadata
-    const { parseTranscriptContent } = await import('@/util/frontmatter');
-    const parsed = parseTranscriptContent(content);
-    
-    if (!parsed.metadata) {
-        throw new Error('Could not parse transcript metadata');
     }
     
     // Determine the new directory structure based on the date
@@ -784,12 +771,21 @@ export async function handleChangeTranscriptDate(args: {
     
     // Check if the file would move to a different location
     if (absolutePath === newAbsolutePath) {
+        // Still update the date in metadata even if not moving
+        const pklPath = ensurePklExtension(absolutePath);
+        const transcript = PklTranscript.open(pklPath, { readOnly: false });
+        try {
+            transcript.updateMetadata({ date: newDate });
+        } finally {
+            transcript.close();
+        }
+        
         return {
             success: true,
-            originalPath: await sanitizePath(absolutePath, outputDirectory),
-            outputPath: await sanitizePath(newAbsolutePath, outputDirectory),
+            originalPath: await sanitizePath(pklPath, outputDirectory),
+            outputPath: await sanitizePath(pklPath, outputDirectory),
             moved: false,
-            message: 'Transcript date matches the target directory structure. No move needed.',
+            message: 'Transcript date updated. No move needed (already in correct directory).',
         };
     }
     
@@ -800,34 +796,42 @@ export async function handleChangeTranscriptDate(args: {
     await mkdir(newDirPath, { recursive: true });
     
     // Check if a file already exists at the destination
-    try {
-        await readFile(newAbsolutePath, 'utf-8');
+    const destExists = await transcriptExists(newAbsolutePath);
+    if (destExists.exists) {
         throw new Error(
-            `A file already exists at the destination: ${await sanitizePath(newAbsolutePath, outputDirectory)}. ` +
+            `A file already exists at the destination: ${await sanitizePath(destExists.path || newAbsolutePath, outputDirectory)}. ` +
             `Please rename the transcript first or choose a different date.`
         );
-    } catch (error) {
-        // File doesn't exist, which is what we want
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-            throw error;
-        }
     }
     
-    // Update the date in the transcript's front-matter
-    const { updateTranscript } = await import('@/util/frontmatter');
-    const updatedContent = updateTranscript(content, {
-        metadata: {
-            date: newDate,
-        },
-    });
+    // Ensure we're working with PKL files
+    const pklPath = ensurePklExtension(absolutePath);
+    const newPklPath = ensurePklExtension(newAbsolutePath);
     
-    // Move the file to the new location with updated content
-    await writeFile(newAbsolutePath, updatedContent, 'utf-8');
-    await unlink(absolutePath);
+    // Update the date in metadata
+    const transcript = PklTranscript.open(pklPath, { readOnly: false });
+    try {
+        transcript.updateMetadata({ date: newDate });
+    } finally {
+        transcript.close();
+    }
+    
+    // Move the file to the new location
+    await fsPromises.rename(pklPath, newPklPath);
+    
+    // Also move any associated WAL/SHM files if they exist
+    const walPath = pklPath + '-wal';
+    const shmPath = pklPath + '-shm';
+    try {
+        await fsPromises.rename(walPath, newPklPath + '-wal');
+    } catch { /* ignore if doesn't exist */ }
+    try {
+        await fsPromises.rename(shmPath, newPklPath + '-shm');
+    } catch { /* ignore if doesn't exist */ }
     
     // Convert to relative paths for response
-    const relativeOriginalPath = await sanitizePath(absolutePath, outputDirectory);
-    const relativeOutputPath = await sanitizePath(newAbsolutePath, outputDirectory);
+    const relativeOriginalPath = await sanitizePath(pklPath, outputDirectory);
+    const relativeOutputPath = await sanitizePath(newPklPath, outputDirectory);
     
     return {
         success: true,
@@ -872,40 +876,16 @@ export async function handleCombineTranscripts(args: {
     // This prevents project routing from writing files outside the allowed directory
     await validatePathWithinOutputDirectory(result.outputPath, args.contextDirectory);
 
-    // Validate the combined content before writing
-    try {
-        const { parseTranscriptContent } = await import('@/util/frontmatter');
-        const validation = parseTranscriptContent(result.content);
-        
-        if (!validation.metadata) {
-            throw new Error('Combined content has no parseable metadata');
-        }
-        if (!result.content.trim().startsWith('---')) {
-            throw new Error('Combined content does not start with YAML frontmatter (---)');
-        }
-        // eslint-disable-next-line no-console
-        console.log('✅ Combined transcript content validated successfully');
-    } catch (validationError) {
-        // eslint-disable-next-line no-console
-        console.error('❌ Combined transcript validation failed:', validationError);
-        // eslint-disable-next-line no-console
-        console.error('Generated content (first 500 chars):', result.content.substring(0, 500));
-        throw new Error(
-            `Combined transcript validation failed: ${validationError instanceof Error ? validationError.message : String(validationError)}. ` +
-            `The file was NOT saved to prevent corruption.`
-        );
-    }
-    
-    // Write the combined transcript
-    await mkdir(dirname(result.outputPath), { recursive: true });
-    await writeFile(result.outputPath, result.content, 'utf-8');
+    // The combineTranscripts function in operations.ts now creates the PKL file directly
+    // No additional validation or writing needed here - the file is already saved
 
     // Delete source files
+    const fsPromises = await import('node:fs/promises');
     const deletedFiles: string[] = [];
-    for (const path of absolutePaths) {
+    for (const sourcePath of absolutePaths) {
         try {
-            await unlink(path);
-            deletedFiles.push(path);
+            await fsPromises.unlink(sourcePath);
+            deletedFiles.push(sourcePath);
         } catch {
             // Ignore deletion errors
         }
@@ -938,42 +918,20 @@ export async function handleUpdateTranscriptContent(args: {
     // Find the transcript (returns absolute path for file operations)
     const absolutePath = await findTranscript(args.transcriptPath, args.contextDirectory);
 
-    // Read the original file content
-    const originalContent = await readFile(absolutePath, 'utf-8');
-
-    // Replace the content section while preserving metadata
-    const updatedContent = replaceTranscriptContent(originalContent, args.content);
-
-    // Validate before writing
+    // Ensure we're working with a PKL file
+    const pklPath = ensurePklExtension(absolutePath);
+    
+    const transcript = PklTranscript.open(pklPath, { readOnly: false });
     try {
-        const { parseTranscriptContent } = await import('@/util/frontmatter');
-        const validation = parseTranscriptContent(updatedContent);
-        
-        if (!validation.metadata) {
-            throw new Error('Updated content has no parseable metadata');
-        }
-        if (!updatedContent.trim().startsWith('---')) {
-            throw new Error('Updated content does not start with YAML frontmatter (---)');
-        }
-        // eslint-disable-next-line no-console
-        console.log('✅ Updated transcript content validated successfully');
-    } catch (validationError) {
-        // eslint-disable-next-line no-console
-        console.error('❌ Transcript content update validation failed:', validationError);
-        // eslint-disable-next-line no-console
-        console.error('Generated content (first 500 chars):', updatedContent.substring(0, 500));
-        throw new Error(
-            `Transcript content update validation failed: ${validationError instanceof Error ? validationError.message : String(validationError)}. ` +
-            `The file was NOT saved to prevent corruption.`
-        );
+        // Update the content - PklTranscript handles history tracking automatically
+        transcript.updateContent(args.content);
+    } finally {
+        transcript.close();
     }
-
-    // Write the updated content back to the file
-    await writeFile(absolutePath, updatedContent, 'utf-8');
 
     // Convert to relative path for response
     const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
-    const relativePath = await sanitizePath(absolutePath, outputDirectory);
+    const relativePath = await sanitizePath(pklPath, outputDirectory);
 
     return {
         success: true,
@@ -994,9 +952,6 @@ export async function handleUpdateTranscriptEntityReferences(args: {
 }) {
     // Find the transcript (returns absolute path for file operations)
     const absolutePath = await findTranscript(args.transcriptPath, args.contextDirectory);
-
-    // Read the original file content
-    const originalContent = await readFile(absolutePath, 'utf-8');
 
     // Validate and sanitize entity IDs
     const validateEntityId = (id: string, name: string, type: string): string => {
@@ -1067,249 +1022,26 @@ export async function handleUpdateTranscriptEntityReferences(args: {
         companies: entityReferences.filter(e => e.type === 'company'),
     };
 
-    // Create minimal metadata object with only entities for formatting
-    // formatEntityMetadataMarkdown only uses the entities property
-    const metadataForFormatting: Metadata.TranscriptMetadata = {
-        entities,
-    };
-
-    // Replace Entity References section in the file
-    const updatedContent = replaceEntityReferences(originalContent, metadataForFormatting);
-
-    // Validate before writing
+    // Ensure we're working with a PKL file
+    const pklPath = ensurePklExtension(absolutePath);
+    
+    const transcript = PklTranscript.open(pklPath, { readOnly: false });
     try {
-        const { parseTranscriptContent } = await import('@/util/frontmatter');
-        const validation = parseTranscriptContent(updatedContent);
-        
-        if (!validation.metadata) {
-            throw new Error('Updated content has no parseable metadata');
-        }
-        if (!updatedContent.trim().startsWith('---')) {
-            throw new Error('Updated content does not start with YAML frontmatter (---)');
-        }
-        // eslint-disable-next-line no-console
-        console.log('✅ Entity references update validated successfully');
-    } catch (validationError) {
-        // eslint-disable-next-line no-console
-        console.error('❌ Entity references update validation failed:', validationError);
-        // eslint-disable-next-line no-console
-        console.error('Generated content (first 500 chars):', updatedContent.substring(0, 500));
-        throw new Error(
-            `Entity references update validation failed: ${validationError instanceof Error ? validationError.message : String(validationError)}. ` +
-            `The file was NOT saved to prevent corruption.`
-        );
+        // Update entities in metadata
+        transcript.updateMetadata({ entities });
+    } finally {
+        transcript.close();
     }
-
-    // Write the updated content back to the file
-    await writeFile(absolutePath, updatedContent, 'utf-8');
 
     // Convert to relative path for response
     const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
-    const relativePath = await sanitizePath(absolutePath, outputDirectory);
+    const relativePath = await sanitizePath(pklPath, outputDirectory);
 
     return {
         success: true,
         filePath: relativePath,
         message: 'Transcript entity references updated successfully',
     };
-}
-
-/**
- * Replace the content section of a transcript file while preserving metadata
- * Transcript structure: [metadata section]\n---\n[content section]
- * We preserve everything before and including the --- delimiter, and replace only the content after it
- * 
- * This function is smart enough to detect if the incoming content includes headers/metadata
- * and extract only the actual content section to prevent duplication.
- */
-function replaceTranscriptContent(originalText: string, newContent: string): string {
-    // Check if newContent appears to contain metadata/headers (common mistake from clients)
-    const hasTitle = newContent.trim().startsWith('# ');
-    const hasMetadata = /##\s+Metadata/i.test(newContent);
-    
-    if (hasTitle || hasMetadata) {
-        // Extract only the content section from newContent (everything after the first --- delimiter)
-        const newContentLines = newContent.split('\n');
-        let contentDelimiterIndex = -1;
-        
-        // Find the first --- delimiter in newContent
-        for (let i = 0; i < newContentLines.length; i++) {
-            if (newContentLines[i].trim() === '---') {
-                contentDelimiterIndex = i;
-                break;
-            }
-        }
-        
-        if (contentDelimiterIndex >= 0) {
-            // Found delimiter - extract only content after it
-            let contentStartIndex = contentDelimiterIndex + 1;
-            // Skip empty lines after delimiter
-            while (contentStartIndex < newContentLines.length && newContentLines[contentStartIndex].trim() === '') {
-                contentStartIndex++;
-            }
-            
-            // Find where content ends (before Entity References section if present)
-            let contentEndIndex = newContentLines.length;
-            for (let i = contentStartIndex; i < newContentLines.length; i++) {
-                if (newContentLines[i].trim() === '## Entity References' || 
-                    newContentLines[i].trim().startsWith('## Entity References')) {
-                    contentEndIndex = i;
-                    break;
-                }
-            }
-            
-            // Use only the content section (stop before Entity References)
-            newContent = newContentLines.slice(contentStartIndex, contentEndIndex).join('\n').trim();
-        } else {
-            // Has headers/metadata but no delimiter - this is invalid
-            // Try to find where content might start (after Entity References section)
-            const entityRefsMatch = newContent.match(/##\s+Entity\s+References[\s\S]*?\n\n([\s\S]*)$/i);
-            if (entityRefsMatch) {
-                newContent = entityRefsMatch[1].trim();
-            } else {
-                // If we can't extract content, throw an error
-                throw new Error(
-                    'The content parameter appears to include headers/metadata but no content delimiter (---) was found. ' +
-                    'Please provide only the transcript body content (text after the --- delimiter), not the full transcript file.'
-                );
-            }
-        }
-    }
-    
-    // Now proceed with normal replacement logic
-    // Split by lines to find the exact --- delimiter line in original
-    const lines = originalText.split('\n');
-    let delimiterIndex = -1;
-    
-    // Find the line that is exactly "---" (possibly with whitespace)
-    for (let i = 0; i < lines.length; i++) {
-        if (lines[i].trim() === '---') {
-            delimiterIndex = i;
-            break;
-        }
-    }
-    
-    if (delimiterIndex >= 0) {
-        // Found the delimiter - preserve everything up to and including it
-        const metadataLines = lines.slice(0, delimiterIndex + 1);
-        
-        // Find Entity References section in original (if present) to preserve it
-        let entityRefsStartIndex = -1;
-        for (let i = delimiterIndex + 1; i < lines.length; i++) {
-            if (lines[i].trim() === '## Entity References' || 
-                lines[i].trim().startsWith('## Entity References')) {
-                entityRefsStartIndex = i;
-                break;
-            }
-        }
-        
-        // Reconstruct: metadata section (including ---) + new content + Entity References (if present)
-        let result = metadataLines.join('\n') + '\n' + newContent;
-        
-        if (entityRefsStartIndex >= 0) {
-            // Preserve Entity References section from original
-            result += '\n\n' + lines.slice(entityRefsStartIndex).join('\n');
-        }
-        
-        return result;
-    }
-
-    // Fallback: if no --- delimiter found, preserve the entire file structure
-    // This shouldn't happen in normal transcripts, but handle it gracefully
-    // Try to detect if there's a metadata section pattern
-    const hasMetadataSection = originalText.match(/##\s+Metadata/i);
-    if (hasMetadataSection) {
-        // Has metadata section but no delimiter - add one before new content
-        // Find where metadata likely ends (before content would start)
-        const entityRefsMatch = originalText.match(/^([\s\S]*?##\s+Entity\s+References[\s\S]*?\n\n)([\s\S]*)$/i);
-        if (entityRefsMatch) {
-            return `${entityRefsMatch[1]}---\n\n${newContent}`;
-        }
-    }
-    
-    // Last resort: append delimiter and new content
-    return `${originalText}\n\n---\n\n${newContent}`;
-}
-
-/**
- * Replace the Entity References section of a transcript file while preserving all other content
- * Transcript structure: [title]\n[metadata]\n---\n[content]\n---\n## Entity References\n[entities]
- */
-function replaceEntityReferences(originalText: string, metadata: Metadata.TranscriptMetadata): string {
-    const lines = originalText.split('\n');
-    
-    // Find where Entity References section starts
-    let entityRefsStartIndex = -1;
-    for (let i = 0; i < lines.length; i++) {
-        if (lines[i].trim() === '## Entity References' || 
-            lines[i].trim().startsWith('## Entity References')) {
-            entityRefsStartIndex = i;
-            break;
-        }
-    }
-    
-    // Generate new Entity References section
-    const newEntityRefsSection = Metadata.formatEntityMetadataMarkdown(metadata);
-    
-    if (entityRefsStartIndex >= 0) {
-        // Entity References section exists - replace it
-        // Find the content section delimiter (---) before Entity References
-        // We want to preserve everything up to and including the content section
-        let contentDelimiterIndex = -1;
-        for (let i = entityRefsStartIndex - 1; i >= 0; i--) {
-            if (lines[i].trim() === '---') {
-                contentDelimiterIndex = i;
-                break;
-            }
-        }
-        
-        if (contentDelimiterIndex >= 0) {
-            // Found content delimiter - preserve everything up to end of content
-            // Find where content actually ends (before Entity References)
-            let contentEndIndex = entityRefsStartIndex;
-            // Go backwards to find the last non-empty line before Entity References
-            while (contentEndIndex > contentDelimiterIndex && 
-                   (lines[contentEndIndex - 1].trim() === '' || 
-                    lines[contentEndIndex - 1].trim() === '---')) {
-                contentEndIndex--;
-            }
-            
-            // Reconstruct: everything before Entity References + new Entity References section
-            const beforeEntityRefs = lines.slice(0, contentEndIndex).join('\n');
-            return beforeEntityRefs + newEntityRefsSection;
-        } else {
-            // No content delimiter found - replace from Entity References onwards
-            return lines.slice(0, entityRefsStartIndex).join('\n') + newEntityRefsSection;
-        }
-    } else {
-        // No Entity References section exists - append it
-        // Find the content section delimiter (---) to append after content
-        let contentDelimiterIndex = -1;
-        for (let i = lines.length - 1; i >= 0; i--) {
-            if (lines[i].trim() === '---') {
-                contentDelimiterIndex = i;
-                break;
-            }
-        }
-        
-        if (contentDelimiterIndex >= 0) {
-            // Found delimiter - append Entity References after content
-            // Find where content ends (last non-empty line)
-            let contentEndIndex = lines.length;
-            for (let i = lines.length - 1; i > contentDelimiterIndex; i--) {
-                if (lines[i].trim() !== '') {
-                    contentEndIndex = i + 1;
-                    break;
-                }
-            }
-            
-            const beforeEntityRefs = lines.slice(0, contentEndIndex).join('\n');
-            return beforeEntityRefs + '\n' + newEntityRefsSection;
-        } else {
-            // No delimiter found - just append
-            return originalText + '\n' + newEntityRefsSection;
-        }
-    }
 }
 
 export async function handleProvideFeedback(args: {
@@ -1321,46 +1053,72 @@ export async function handleProvideFeedback(args: {
     // Find the transcript (returns absolute path for file operations)
     const absolutePath = await findTranscript(args.transcriptPath, args.contextDirectory);
 
-    const transcriptContent = await readFile(absolutePath, 'utf-8');
-    const contextDirectories = await getContextDirectories();
-    const context = await Context.create({
-        startingDir: args.contextDirectory || dirname(absolutePath),
-        contextDirectories,
-    });
-    const reasoning = Reasoning.create({ model: args.model || DEFAULT_MODEL });
+    // Ensure we're working with a PKL file
+    const pklPath = ensurePklExtension(absolutePath);
+    
+    const transcript = PklTranscript.open(pklPath, { readOnly: false });
+    try {
+        const transcriptContent = transcript.content;
+        const contextDirectories = await getContextDirectories();
+        const context = await Context.create({
+            startingDir: args.contextDirectory || dirname(pklPath),
+            contextDirectories,
+        });
+        const reasoning = Reasoning.create({ model: args.model || DEFAULT_MODEL });
 
-    const feedbackCtx: Transcript.FeedbackContext = {
-        transcriptPath: absolutePath,
-        transcriptContent,
-        originalContent: transcriptContent,
-        context,
-        changes: [],
-        verbose: false,
-        dryRun: false,
-    };
+        // Create a feedback context
+        const feedbackCtx: Transcript.FeedbackContext = {
+            transcriptPath: pklPath,
+            transcriptContent,
+            originalContent: transcriptContent,
+            context,
+            changes: [],
+            verbose: false,
+            dryRun: true, // Set to dry run so we can apply changes ourselves
+        };
 
-    await Transcript.processFeedback(args.feedback, feedbackCtx, reasoning);
+        await Transcript.processFeedback(args.feedback, feedbackCtx, reasoning);
 
-    let result: { newPath: string; moved: boolean } | null = null;
-    if (feedbackCtx.changes.length > 0) {
-        result = await Transcript.applyChanges(feedbackCtx);
+        // Apply content changes to the PKL file
+        if (feedbackCtx.changes.length > 0) {
+            // Update content if it changed
+            if (feedbackCtx.transcriptContent !== transcriptContent) {
+                transcript.updateContent(feedbackCtx.transcriptContent);
+            }
+            
+            // Handle title changes
+            const titleChange = feedbackCtx.changes.find(c => c.type === 'title_changed');
+            if (titleChange && titleChange.details.new_title) {
+                transcript.updateMetadata({ title: titleChange.details.new_title as string });
+            }
+            
+            // Handle project changes
+            const projectChange = feedbackCtx.changes.find(c => c.type === 'project_changed');
+            if (projectChange && projectChange.details.project_id) {
+                transcript.updateMetadata({ 
+                    projectId: projectChange.details.project_id as string,
+                    project: projectChange.details.project_name as string | undefined,
+                });
+            }
+        }
+
+        // Convert to relative path for response
+        const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
+        const relativeOutputPath = await sanitizePath(pklPath, outputDirectory);
+
+        return {
+            success: true,
+            changesApplied: feedbackCtx.changes.length,
+            changes: feedbackCtx.changes.map(c => ({
+                type: c.type,
+                description: c.description,
+            })),
+            outputPath: relativeOutputPath,
+            moved: false,
+        };
+    } finally {
+        transcript.close();
     }
-
-    // Convert to relative path for response
-    const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
-    const finalAbsolutePath = result?.newPath || absolutePath || '';
-    const relativeOutputPath = await sanitizePath(finalAbsolutePath, outputDirectory);
-
-    return {
-        success: true,
-        changesApplied: feedbackCtx.changes.length,
-        changes: feedbackCtx.changes.map(c => ({
-            type: c.type,
-            description: c.description,
-        })),
-        outputPath: relativeOutputPath,
-        moved: result?.moved || false,
-    };
 }
 
 export async function handleCreateNote(args: {
@@ -1390,7 +1148,8 @@ export async function handleCreateNote(args: {
         .replace(/^-+|-+$/g, '')
         .substring(0, 50); // Limit length
     
-    const filename = `${day}-${hours}${minutes}-${timestamp.substring(0, 14)}-${titleSlug}.md`;
+    // Use .pkl extension for PKL format
+    const filename = `${day}-${hours}${minutes}-${timestamp.substring(0, 14)}-${titleSlug}.pkl`;
     const relativePath = `${year}/${month}/${filename}`;
     const absolutePath = resolve(outputDirectory, relativePath);
     
@@ -1398,12 +1157,7 @@ export async function handleCreateNote(args: {
     validatePathWithinDirectory(absolutePath, outputDirectory);
     
     // Build metadata
-    const metadata: Metadata.TranscriptMetadata = {
-        title: args.title,
-        date: noteDate,
-        projectId: args.projectId,
-        tags: args.tags,
-    };
+    let projectName: string | undefined;
     
     // If projectId is provided, try to get project name from context
     if (args.projectId) {
@@ -1415,42 +1169,48 @@ export async function handleCreateNote(args: {
             });
             const project = await context.getProject(args.projectId);
             if (project) {
-                metadata.project = project.name;
+                projectName = project.name;
             }
         } catch {
             // Ignore errors - project name is optional
         }
     }
     
-    // Build entities for frontmatter
-    const entities: Metadata.TranscriptMetadata['entities'] = {
-        people: [],
-        projects: args.projectId && metadata.project ? [{
+    // Build entities
+    const entities = {
+        people: [] as Metadata.EntityReference[],
+        projects: args.projectId && projectName ? [{
             id: args.projectId,
-            name: metadata.project,
+            name: projectName,
             type: 'project' as const,
-        }] : [],
-        terms: [],
-        companies: [],
+        }] : [] as Metadata.EntityReference[],
+        terms: [] as Metadata.EntityReference[],
+        companies: [] as Metadata.EntityReference[],
     };
     
-    // Build full metadata with entities
-    const fullMetadata: Metadata.TranscriptMetadata = {
-        ...metadata,
+    // Build PKL metadata
+    const pklMetadata = {
+        title: args.title,
+        date: noteDate,
+        projectId: args.projectId,
+        project: projectName,
+        tags: args.tags || [],
         entities,
         status: 'reviewed' as const, // Default status for new notes
     };
     
-    // Use frontmatter stringification for proper YAML format
-    const transcriptContent = await import('@/util/frontmatter').then(fm => 
-        fm.stringifyTranscript(fullMetadata, args.content || '')
-    );
-    
     // Create directory if it doesn't exist
     await mkdir(dirname(absolutePath), { recursive: true });
     
-    // Write the file
-    await writeFile(absolutePath, transcriptContent, 'utf-8');
+    // Create PKL transcript
+    const transcript = PklTranscript.create(absolutePath, pklMetadata);
+    try {
+        if (args.content) {
+            transcript.updateContent(args.content);
+        }
+    } finally {
+        transcript.close();
+    }
     
     // Convert to relative path for response
     const relativeOutputPath = await sanitizePath(absolutePath, outputDirectory);

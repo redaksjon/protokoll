@@ -22,6 +22,14 @@ const cardigantime = Cardigantime.create({
         configDirectory: '.',
         configFile: DEFAULT_CONFIG_FILE,
         isRequired: false,
+        // Tell CardiganTime to resolve these path fields relative to the config file's directory
+        // Note: contextDirectories must be in BOTH pathFields AND resolvePathArray - 
+        // pathFields determines which fields are processed, resolvePathArray determines
+        // if array elements should be resolved individually
+        pathResolution: {
+            pathFields: ['inputDirectory', 'outputDirectory', 'processedDirectory', 'contextDirectories'],
+            resolvePathArray: ['contextDirectories'],
+        },
     },
     configShape: {},
     features: ['config', 'hierarchical'],
@@ -106,17 +114,21 @@ export async function initializeServerConfig(roots: McpRoot[], mode: ServerMode 
     }
 
     try {
+        // CardiganTime resolves path fields (inputDirectory, outputDirectory, etc.)
+        // relative to the config file's directory automatically via pathResolution config
         const configFile = await readConfigFromDirectory(workspaceRoot);
         const resolvedConfigDirs = (configFile as any).resolvedConfigDirs as unknown;
         const configFilePath = Array.isArray(resolvedConfigDirs) && resolvedConfigDirs.length > 0
             ? resolve(resolvedConfigDirs[0], DEFAULT_CONFIG_FILE)
             : null;
+        
+        // For defaults (when no config value), use config directory if available
+        const configDir = Array.isArray(resolvedConfigDirs) && resolvedConfigDirs.length > 0
+            ? resolvedConfigDirs[0]
+            : workspaceRoot;
 
-        // Resolve contextDirectories from config (relative to workspace root)
-        const rawContextDirs = configFile.contextDirectories as string[] | undefined;
-        const resolvedContextDirs = rawContextDirs?.map(dir => 
-            dir.startsWith('/') ? dir : resolve(workspaceRoot, dir)
-        );
+        // contextDirectories are resolved by CardiganTime via resolvePathArray config
+        const resolvedContextDirs = configFile.contextDirectories as string[] | undefined;
 
         // Load context from workspace root, using explicit contextDirectories if provided
         const context = await Context.create({
@@ -134,9 +146,10 @@ export async function initializeServerConfig(roots: McpRoot[], mode: ServerMode 
             mode,
             context,
             workspaceRoot,
-            inputDirectory: resolveDirectory(mergedConfig.inputDirectory as string | undefined, workspaceRoot, './recordings'),
-            outputDirectory: resolveDirectory(mergedConfig.outputDirectory as string | undefined, workspaceRoot, './notes'),
-            processedDirectory: resolveDirectory(mergedConfig.processedDirectory as string | undefined, workspaceRoot, './processed'),
+            // CardiganTime already resolved these paths; just provide defaults if not set
+            inputDirectory: (mergedConfig.inputDirectory as string) || resolve(configDir, './recordings'),
+            outputDirectory: (mergedConfig.outputDirectory as string) || resolve(configDir, './notes'),
+            processedDirectory: (mergedConfig.processedDirectory as string) || resolve(configDir, './processed'),
             configFilePath,
             configFile: configFile ?? null,
             initialized: true,
@@ -148,15 +161,22 @@ export async function initializeServerConfig(roots: McpRoot[], mode: ServerMode 
         const configFilePath = Array.isArray(resolvedConfigDirs) && resolvedConfigDirs.length > 0
             ? resolve(resolvedConfigDirs[0], DEFAULT_CONFIG_FILE)
             : null;
+        
+        // For defaults (when no config value), use config directory if available
+        const configDir = Array.isArray(resolvedConfigDirs) && resolvedConfigDirs.length > 0
+            ? resolvedConfigDirs[0]
+            : workspaceRoot;
+        
         const mergedConfig = (configFile ?? {}) as Record<string, unknown>;
 
         serverConfig = {
             mode,
             context: null,
             workspaceRoot,
-            inputDirectory: resolveDirectory(mergedConfig.inputDirectory as string | undefined, workspaceRoot, './recordings'),
-            outputDirectory: resolveDirectory(mergedConfig.outputDirectory as string | undefined, workspaceRoot, './notes'),
-            processedDirectory: resolveDirectory(mergedConfig.processedDirectory as string | undefined, workspaceRoot, './processed'),
+            // CardiganTime already resolved these paths; just provide defaults if not set
+            inputDirectory: (mergedConfig.inputDirectory as string) || resolve(configDir, './recordings'),
+            outputDirectory: (mergedConfig.outputDirectory as string) || resolve(configDir, './notes'),
+            processedDirectory: (mergedConfig.processedDirectory as string) || resolve(configDir, './processed'),
             configFilePath,
             configFile: configFile ?? null,
             initialized: true,
@@ -293,34 +313,3 @@ export function isRemoteMode(): boolean {
     return serverConfig.mode === 'remote';
 }
 
-// ============================================================================
-// Helpers
-// ============================================================================
-
-/**
- * Resolve a directory path relative to workspace root
- */
-function resolveDirectory(
-    configValue: string | undefined,
-    workspaceRoot: string,
-    defaultRelative: string
-): string {
-    if (configValue) {
-        // Expand ~ to home directory
-        if (configValue.startsWith('~')) {
-            const homeDir = process.env.HOME || process.env.USERPROFILE || '';
-            return resolve(homeDir, configValue.substring(1));
-        }
-        
-        // If absolute, use as-is
-        if (configValue.startsWith('/')) {
-            return configValue;
-        }
-        
-        // Otherwise, resolve relative to workspace
-        return resolve(workspaceRoot, configValue);
-    }
-    
-    // Use default relative to workspace
-    return resolve(workspaceRoot, defaultRelative);
-}
