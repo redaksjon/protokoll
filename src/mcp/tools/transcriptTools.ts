@@ -13,7 +13,7 @@ import { DEFAULT_MODEL } from '@/constants';
 import { fileExists, getConfiguredDirectory, getContextDirectories, sanitizePath, validatePathWithinDirectory, validatePathWithinOutputDirectory, validateNotRemoteMode, resolveTranscriptPath } from './shared.js';
 import * as Metadata from '@redaksjon/protokoll-engine';
 import { Transcript as TranscriptUtils } from '@redaksjon/protokoll-engine';
-const { stripTranscriptExtension, ensurePklExtension, transcriptExists } = TranscriptUtils;
+const { ensurePklExtension, transcriptExists } = TranscriptUtils;
 import { 
     PklTranscript, 
     readTranscript as readTranscriptFromStorage,

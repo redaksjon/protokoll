@@ -1130,7 +1130,8 @@ export async function handleUpdateProject(args: {
         throw new Error('No .protokoll directory found. Initialize context first.');
     }
 
-    const existingProject = findProjectResilient(context, args.id);
+    // Verify project exists
+    findProjectResilient(context, args.id);
 
     const smartConfig = context.getSmartAssistanceConfig();
     if (!smartConfig.enabled) {
@@ -1341,7 +1342,8 @@ export async function handleUpdateTerm(args: {
         throw new Error('No .protokoll directory found. Initialize context first.');
     }
 
-    const existingTerm = findTermResilient(context, args.id);
+    // Verify term exists
+    findTermResilient(context, args.id);
 
     const smartConfig = context.getSmartAssistanceConfig();
     if (!smartConfig.enabled || smartConfig.termsEnabled === false) {
