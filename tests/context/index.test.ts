@@ -201,7 +201,7 @@ sounds_like:
         id: 'test',
         name: 'Test',
         type: 'person',
-      })).rejects.toThrow('No .protokoll directory found');
+      })).rejects.toThrow('No configuration directory found');
     });
   });
   

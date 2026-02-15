@@ -53,6 +53,63 @@ vi.mock('../../src/mcp/tools/shared', async () => {
         },
         // Mock getContextDirectories to return undefined (no server config in tests)
         getContextDirectories: vi.fn().mockResolvedValue(undefined),
+        // Override resolveTranscriptPath to use the mocked getConfiguredDirectory
+        resolveTranscriptPath: async (uriOrPath: string, contextDirectory?: string) => {
+            // Import the actual implementation dependencies
+            const { resolve, isAbsolute } = await import('node:path');
+            const { parseUri, isProtokolUri } = await import('../../src/mcp/uri');
+            const { Transcript } = await import('@redaksjon/protokoll-engine');
+            const { transcriptExists, ensurePklExtension } = Transcript;
+            
+            if (!uriOrPath || typeof uriOrPath !== 'string') {
+                throw new Error('transcriptPath is required and must be a non-empty string');
+            }
+            
+            const outputDirectory = await mockGetConfiguredDirectory('outputDirectory', contextDirectory);
+            
+            let relativePath: string;
+            
+            // Check if input is a Protokoll URI
+            if (isProtokolUri(uriOrPath)) {
+                const parsed = parseUri(uriOrPath);
+                if (parsed.resourceType !== 'transcript') {
+                    throw new Error(`Invalid URI: expected transcript URI, got ${parsed.resourceType}`);
+                }
+                relativePath = (parsed as any).transcriptPath;
+            } else {
+                // Handle as a file path (relative or absolute)
+                if (isAbsolute(uriOrPath)) {
+                    const normalizedAbsolute = resolve(uriOrPath);
+                    const normalizedOutputDir = resolve(outputDirectory);
+                    
+                    if (normalizedAbsolute.startsWith(normalizedOutputDir + '/') || normalizedAbsolute === normalizedOutputDir) {
+                        // Convert absolute path to relative
+                        relativePath = normalizedAbsolute.substring(normalizedOutputDir.length + 1);
+                    } else {
+                        throw new Error(`Path must be within output directory: ${outputDirectory}`);
+                    }
+                } else {
+                    // Relative path - normalize it
+                    relativePath = uriOrPath.replace(/^[/\\]+/, '').replace(/\\/g, '/');
+                }
+            }
+            
+            // Remove .pkl extension if present (we'll add it back)
+            relativePath = relativePath.replace(/\.pkl$/i, '');
+            
+            // Resolve to absolute path
+            const resolvedPath = resolve(outputDirectory, relativePath);
+            actualModule.validatePathWithinDirectory(resolvedPath, outputDirectory);
+            
+            // Ensure .pkl extension and check if file exists
+            const pklPath = ensurePklExtension(resolvedPath);
+            const existsResult = await transcriptExists(pklPath);
+            if (!existsResult.exists || !existsResult.path) {
+                throw new Error(`Transcript not found: ${uriOrPath}`);
+            }
+            
+            return existsResult.path;
+        },
     };
 });
 
@@ -1069,7 +1126,7 @@ routing:
                 transcriptPath: toRelativePath(fakePath),
                 contextDirectory: protokollDir
             }))
-                .rejects.toThrow('No transcript found matching');
+                .rejects.toThrow('Transcript not found');
         });
     });
 
@@ -1201,7 +1258,7 @@ routing:
             await expect(handleCombineTranscripts({
                 transcriptPaths: [transcript1, transcript2],
                 contextDirectory: protokollDir
-            })).rejects.toThrow('No transcript found matching');
+            })).rejects.toThrow('Transcript not found');
         });
     });
 

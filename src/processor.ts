@@ -1,11 +1,13 @@
 import * as Logging from '@/logging';
-import * as TranscribePhase from '@/phases/transcribe';
-import * as SimpleReplacePhase from '@/phases/simple-replace';
-import * as LocatePhase from '@/phases/locate';
+import { Phases, Routing } from '@redaksjon/protokoll-engine';
 import * as Dreadcabinet from '@utilarium/dreadcabinet';
-import * as Context from '@/context';
-import * as Routing from '@/routing';
+import * as Context from '@redaksjon/context';
 import { Config } from '@/types';
+
+// Alias for backward compatibility
+const TranscribePhase = { create: Phases.createTranscribePhase };
+const SimpleReplacePhase = { create: Phases.createSimpleReplacePhase };
+const LocatePhase = { create: Phases.createLocatePhase };
 
 export interface Transcription {
     text: string;
@@ -130,14 +132,14 @@ export const create = (config: Config, operator: Dreadcabinet.Operator): Instanc
     const logger = Logging.getLogger();
     const currentWorkingDir = globalThis.process.cwd();
 
-    const locatePhase: LocatePhase.Instance = LocatePhase.create(config, operator);
-    const simpleReplacePhase: SimpleReplacePhase.Instance = SimpleReplacePhase.create(config, operator);
+    const locatePhase = LocatePhase.create(config, operator);
+    const simpleReplacePhase = SimpleReplacePhase.create(config, operator);
 
     // Initialize systems
     // NOTE: Interactive functionality moved to protokoll-cli
     let context: Context.ContextInstance | null = null;
     let routing: Routing.RoutingInstance | null = null;
-    let transcribePhase: TranscribePhase.Instance | null = null;
+    let transcribePhase: ReturnType<typeof TranscribePhase.create> | null = null;
 
     const initializeAgenticSystems = async () => {
         if (!context) {

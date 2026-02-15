@@ -7,14 +7,11 @@
 import type { McpResourceContents } from '../types';
 import { buildTranscriptUri, buildTranscriptsListUri } from '../uri';
 import { resolve, relative } from 'node:path';
-import { listTranscripts } from '@/transcript';
+import { Transcript } from '@redaksjon/protokoll-engine';
 import * as ServerConfig from '../serverConfig';
 import { sanitizePath } from '../tools/shared';
-import { 
-    resolveTranscriptPath, 
-    readTranscriptContent, 
-    stripTranscriptExtension 
-} from '@/transcript/pkl-utils';
+
+const { listTranscripts, resolveTranscriptPath, readTranscriptContent, stripTranscriptExtension } = Transcript;
 
 /**
  * Read a single transcript resource

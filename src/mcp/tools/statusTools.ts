@@ -8,58 +8,14 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { 
     isValidStatus, 
     VALID_STATUSES,
-} from '@/util/metadata';
-import { getConfiguredDirectory, sanitizePath, validatePathWithinDirectory } from './shared';
-import { resolve, isAbsolute } from 'node:path';
-import { transcriptExists, ensurePklExtension } from '@/transcript/pkl-utils';
+} from '@redaksjon/protokoll-engine';
+import { getConfiguredDirectory, sanitizePath, resolveTranscriptPath } from './shared';
 import { PklTranscript } from '@redaksjon/protokoll-format';
 import type { Task as PklTask, TranscriptStatus } from '@redaksjon/protokoll-format';
 
 // ============================================================================
 // Helper Functions
 // ============================================================================
-
-/**
- * Find a transcript by relative path (relative to output directory)
- * Returns absolute path for internal file operations
- */
-async function findTranscriptPath(
-    relativePath: string,
-    contextDirectory?: string
-): Promise<string> {
-    if (!relativePath || typeof relativePath !== 'string') {
-        throw new Error('transcriptPath is required and must be a non-empty string');
-    }
-    
-    const outputDirectory = await getConfiguredDirectory('outputDirectory', contextDirectory);
-    
-    let resolvedPath: string;
-    
-    if (isAbsolute(relativePath)) {
-        const normalizedAbsolute = resolve(relativePath);
-        const normalizedOutputDir = resolve(outputDirectory);
-        
-        if (normalizedAbsolute.startsWith(normalizedOutputDir + '/') || normalizedAbsolute === normalizedOutputDir) {
-            resolvedPath = normalizedAbsolute;
-        } else {
-            throw new Error(`Path must be within output directory: ${outputDirectory}`);
-        }
-    } else {
-        const normalizedPath = relativePath.replace(/^[/\\]+/, '').replace(/\\/g, '/');
-        resolvedPath = resolve(outputDirectory, normalizedPath);
-    }
-    
-    validatePathWithinDirectory(resolvedPath, outputDirectory);
-    
-    // Ensure .pkl extension and check if file exists
-    const pklPath = ensurePklExtension(resolvedPath);
-    const existsResult = await transcriptExists(pklPath);
-    if (!existsResult.exists || !existsResult.path) {
-        throw new Error(`Transcript not found: ${relativePath}`);
-    }
-    
-    return existsResult.path;
-}
 
 // ============================================================================
 // Tool Definitions
@@ -78,8 +34,9 @@ export const setStatusTool: Tool = {
             transcriptPath: {
                 type: 'string',
                 description:
-                    'Relative path to the transcript from the output directory. ' +
-                    'Examples: "meeting-notes.pkl", "2026/2/01-1325.pkl"',
+                    'Transcript URI (preferred) or relative path from output directory. ' +
+                    'URI format: "protokoll://transcript/2026/2/12-1606-meeting" (no file extension). ' +
+                    'Path format: "2026/2/12-1606-meeting" or "2026/2/12-1606-meeting.pkl"',
             },
             status: {
                 type: 'string',
@@ -112,8 +69,9 @@ export const createTaskTool: Tool = {
             transcriptPath: {
                 type: 'string',
                 description:
-                    'Relative path to the transcript from the output directory. ' +
-                    'Examples: "meeting-notes.pkl", "2026/2/01-1325.pkl"',
+                    'Transcript URI (preferred) or relative path from output directory. ' +
+                    'URI format: "protokoll://transcript/2026/2/12-1606-meeting" (no file extension). ' +
+                    'Path format: "2026/2/12-1606-meeting" or "2026/2/12-1606-meeting.pkl"',
             },
             description: {
                 type: 'string',
@@ -137,8 +95,9 @@ export const completeTaskTool: Tool = {
             transcriptPath: {
                 type: 'string',
                 description:
-                    'Relative path to the transcript from the output directory. ' +
-                    'Examples: "meeting-notes.pkl", "2026/2/01-1325.pkl"',
+                    'Transcript URI (preferred) or relative path from output directory. ' +
+                    'URI format: "protokoll://transcript/2026/2/12-1606-meeting" (no file extension). ' +
+                    'Path format: "2026/2/12-1606-meeting" or "2026/2/12-1606-meeting.pkl"',
             },
             taskId: {
                 type: 'string',
@@ -162,8 +121,9 @@ export const deleteTaskTool: Tool = {
             transcriptPath: {
                 type: 'string',
                 description:
-                    'Relative path to the transcript from the output directory. ' +
-                    'Examples: "meeting-notes.pkl", "2026/2/01-1325.pkl"',
+                    'Transcript URI (preferred) or relative path from output directory. ' +
+                    'URI format: "protokoll://transcript/2026/2/12-1606-meeting" (no file extension). ' +
+                    'Path format: "2026/2/12-1606-meeting" or "2026/2/12-1606-meeting.pkl"',
             },
             taskId: {
                 type: 'string',
@@ -198,7 +158,7 @@ export async function handleSetStatus(args: {
     const newStatus = args.status as TranscriptStatus;
     
     // Find the transcript
-    const absolutePath = await findTranscriptPath(args.transcriptPath, args.contextDirectory);
+    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
     
     const transcript = PklTranscript.open(absolutePath, { readOnly: false });
     try {
@@ -252,7 +212,7 @@ export async function handleCreateTask(args: {
     }
     
     // Find the transcript
-    const absolutePath = await findTranscriptPath(args.transcriptPath, args.contextDirectory);
+    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
     
     const transcript = PklTranscript.open(absolutePath, { readOnly: false });
     try {
@@ -298,7 +258,7 @@ export async function handleCompleteTask(args: {
     }
     
     // Find the transcript
-    const absolutePath = await findTranscriptPath(args.transcriptPath, args.contextDirectory);
+    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
     
     const transcript = PklTranscript.open(absolutePath, { readOnly: false });
     try {
@@ -342,7 +302,7 @@ export async function handleDeleteTask(args: {
     }
     
     // Find the transcript
-    const absolutePath = await findTranscriptPath(args.transcriptPath, args.contextDirectory);
+    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
     
     const transcript = PklTranscript.open(absolutePath, { readOnly: false });
     try {

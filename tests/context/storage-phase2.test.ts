@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { create } from '../../src/context/storage';
+import { createStandaloneStorage as create } from '@redaksjon/context';
 
 describe('src/context/storage.ts - Phase 2 Branch Coverage', () => {
     describe('Storage Creation', () => {

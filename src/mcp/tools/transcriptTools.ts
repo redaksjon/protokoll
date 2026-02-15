@@ -4,16 +4,16 @@
  */
  
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
-import { resolve, dirname, relative, isAbsolute } from 'node:path';
+import { resolve, dirname } from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import * as Context from '@/context';
-import * as Reasoning from '@/reasoning';
+import { Reasoning, Transcript } from '@redaksjon/protokoll-engine';
 import { DEFAULT_MODEL } from '@/constants';
-import * as Transcript from '@/transcript';
 
-import { fileExists, getConfiguredDirectory, getContextDirectories, sanitizePath, validatePathWithinDirectory, validatePathWithinOutputDirectory, validateNotRemoteMode } from './shared.js';
-import * as Metadata from '@/util/metadata';
-import { transcriptExists, stripTranscriptExtension, ensurePklExtension } from '@/transcript/pkl-utils';
+import { fileExists, getConfiguredDirectory, getContextDirectories, sanitizePath, validatePathWithinDirectory, validatePathWithinOutputDirectory, validateNotRemoteMode, resolveTranscriptPath } from './shared.js';
+import * as Metadata from '@redaksjon/protokoll-engine';
+import { Transcript as TranscriptUtils } from '@redaksjon/protokoll-engine';
+const { stripTranscriptExtension, ensurePklExtension, transcriptExists } = TranscriptUtils;
 import { 
     PklTranscript, 
     readTranscript as readTranscriptFromStorage,
@@ -23,124 +23,6 @@ import {
 // ============================================================================
 // Helper Functions
 // ============================================================================
-
-/**
- * Find a transcript by relative path (relative to output directory)
- * Returns absolute path for internal file operations
- */
-async function findTranscript(
-    relativePath: string,
-    contextDirectory?: string
-): Promise<string> {
-    // Guard against undefined/null/empty values
-    if (!relativePath || typeof relativePath !== 'string') {
-        throw new Error('transcriptPath is required and must be a non-empty string');
-    }
-    
-    // Get the output directory from config
-    const outputDirectory = await getConfiguredDirectory('outputDirectory', contextDirectory);
-    
-    let normalizedPath: string;
-    let resolvedPath: string;
-    
-    // Check if the path is absolute
-    if (isAbsolute(relativePath)) {
-        // If it's an absolute path, try to convert it to relative
-        const normalizedAbsolute = resolve(relativePath);
-        const normalizedOutputDir = resolve(outputDirectory);
-        
-        // Check if the absolute path is within the output directory
-        if (normalizedAbsolute.startsWith(normalizedOutputDir + '/') || normalizedAbsolute === normalizedOutputDir) {
-            // Convert to relative path
-            normalizedPath = relative(normalizedOutputDir, normalizedAbsolute);
-            resolvedPath = normalizedAbsolute;
-        } else {
-            // Absolute path outside output directory - extract relative portion
-            // Try to find the part that looks like a relative path (e.g., "2026/2/file.md")
-            // by looking for common patterns
-            const pathParts = relativePath.split(/[/\\]/);
-            // Look for patterns like "notes/2026/..." or just "2026/..."
-            const notesIndex = pathParts.findIndex(p => p.toLowerCase() === 'notes');
-            if (notesIndex >= 0 && notesIndex < pathParts.length - 1) {
-                // Extract everything after "notes/"
-                normalizedPath = pathParts.slice(notesIndex + 1).join('/');
-                resolvedPath = resolve(outputDirectory, normalizedPath);
-            } else {
-                // Fall back to just the filename
-                normalizedPath = pathParts[pathParts.length - 1] || relativePath;
-                resolvedPath = resolve(outputDirectory, normalizedPath);
-            }
-        }
-    } else {
-        // Normalize the relative path (remove leading slashes, handle backslashes on Windows)
-        normalizedPath = relativePath.replace(/^[/\\]+/, '').replace(/\\/g, '/');
-        // Try to resolve as a relative path from the output directory
-        resolvedPath = resolve(outputDirectory, normalizedPath);
-    }
-    
-    // Validate that the resolved path stays within the output directory
-    // This prevents path traversal attacks using ../ sequences
-    validatePathWithinDirectory(resolvedPath, outputDirectory);
-    
-    // Use transcriptExists to check for .pkl files
-    // This handles paths with or without extensions
-    const existsResult = await transcriptExists(resolvedPath);
-    if (existsResult.exists && existsResult.path) {
-        return existsResult.path;
-    }
-    
-    // If direct path resolution didn't work, try searching by filename
-    // Extract just the filename if it's a path, and strip any extension for search
-    const rawSearchTerm = normalizedPath.includes('/')
-        ? normalizedPath.split('/').pop() || normalizedPath
-        : normalizedPath;
-    const searchTerm = stripTranscriptExtension(rawSearchTerm);
-    
-    // Use protokoll-format storage API for search
-    const result = await listTranscriptsFromStorage({
-        directory: outputDirectory,
-        search: searchTerm,
-        limit: 10,
-    });
-
-    if (result.transcripts.length === 0) {
-        throw new Error(
-            `No transcript found matching "${relativePath}" in output directory. ` +
-            `Try using protokoll_list_transcripts to see available transcripts.`
-        );
-    }
-
-    if (result.transcripts.length === 1) {
-        return result.transcripts[0].filePath;
-    }
-
-    // Multiple matches - try exact match by relative path
-    // Compare paths without extensions to handle .pkl files
-    const outputDirNormalized = outputDirectory.replace(/\\/g, '/');
-    const normalizedPathWithoutExt = stripTranscriptExtension(normalizedPath);
-    const exactMatch = result.transcripts.find(t => {
-        const tPathNormalized = t.filePath.replace(/\\/g, '/');
-        const tRelative = tPathNormalized.replace(outputDirNormalized + '/', '');
-        const tRelativeWithoutExt = stripTranscriptExtension(tRelative);
-        const filename = t.filePath.split('/').pop() || '';
-        const filenameWithoutExt = stripTranscriptExtension(filename);
-        return tRelativeWithoutExt === normalizedPathWithoutExt || 
-               filenameWithoutExt === searchTerm ||
-               tRelative === normalizedPath || 
-               filename === searchTerm;
-    });
-    
-    if (exactMatch) {
-        return exactMatch.filePath;
-    }
-
-    // Multiple matches and no exact match
-    const matches = result.transcripts.map(t => t.filePath.split('/').pop() || '').join(', ');
-    throw new Error(
-        `Multiple transcripts match "${relativePath}": ${matches}. ` +
-        `Please be more specific.`
-    );
-}
 
 // ============================================================================
 // Tool Definitions
@@ -158,8 +40,9 @@ export const readTranscriptTool: Tool = {
             transcriptPath: {
                 type: 'string',
                 description: 
-                    'Relative path to the transcript from the output directory. ' +
-                    'Examples: "meeting-notes.pkl", "2026/2/01-1325-02012026091511.pkl"',
+                    'Transcript URI (preferred) or relative path from output directory. ' +
+                    'URI format: "protokoll://transcript/2026/2/12-1606-meeting" (no file extension). ' +
+                    'Path format: "2026/2/12-1606-meeting" or "2026/2/12-1606-meeting.pkl"',
             },
             contextDirectory: {
                 type: 'string',
@@ -239,8 +122,9 @@ export const editTranscriptTool: Tool = {
             transcriptPath: {
                 type: 'string',
                 description: 
-                    'Relative path to the transcript from the output directory. ' +
-                    'Examples: "meeting-notes.pkl", "2026/2/01-1325-02012026091511.pkl"',
+                    'Transcript URI (preferred) or relative path from output directory. ' +
+                    'URI format: "protokoll://transcript/2026/2/12-1606-meeting" (no file extension). ' +
+                    'Path format: "2026/2/12-1606-meeting" or "2026/2/12-1606-meeting.pkl"',
             },
             title: {
                 type: 'string',
@@ -288,8 +172,9 @@ export const changeTranscriptDateTool: Tool = {
             transcriptPath: {
                 type: 'string',
                 description: 
-                    'Relative path to the transcript from the output directory. ' +
-                    'Examples: "meeting-notes.pkl", "2026/2/01-1325-02012026091511.pkl"',
+                    'Transcript URI (preferred) or relative path from output directory. ' +
+                    'URI format: "protokoll://transcript/2026/2/12-1606-meeting" (no file extension). ' +
+                    'Path format: "2026/2/12-1606-meeting" or "2026/2/12-1606-meeting.pkl"',
             },
             newDate: {
                 type: 'string',
@@ -357,8 +242,9 @@ export const provideFeedbackTool: Tool = {
             transcriptPath: {
                 type: 'string',
                 description: 
-                    'Relative path to the transcript from the output directory. ' +
-                    'Examples: "meeting-notes.pkl", "2026/2/01-1325-02012026091511.pkl"',
+                    'Transcript URI (preferred) or relative path from output directory. ' +
+                    'URI format: "protokoll://transcript/2026/2/12-1606-meeting" (no file extension). ' +
+                    'Path format: "2026/2/12-1606-meeting" or "2026/2/12-1606-meeting.pkl"',
             },
             feedback: {
                 type: 'string',
@@ -392,8 +278,9 @@ export const updateTranscriptContentTool: Tool = {
             transcriptPath: {
                 type: 'string',
                 description: 
-                    'Relative path to the transcript from the output directory. ' +
-                    'Examples: "meeting-notes.pkl", "2026/2/01-1325-02012026091511.pkl"',
+                    'Transcript URI (preferred) or relative path from output directory. ' +
+                    'URI format: "protokoll://transcript/2026/2/12-1606-meeting" (no file extension). ' +
+                    'Path format: "2026/2/12-1606-meeting" or "2026/2/12-1606-meeting.pkl"',
             },
             content: {
                 type: 'string',
@@ -424,8 +311,9 @@ export const updateTranscriptEntityReferencesTool: Tool = {
             transcriptPath: {
                 type: 'string',
                 description: 
-                    'Relative path to the transcript from the output directory. ' +
-                    'Examples: "meeting-notes.pkl", "2026/2/01-1325-02012026091511.pkl"',
+                    'Transcript URI (preferred) or relative path from output directory. ' +
+                    'URI format: "protokoll://transcript/2026/2/12-1606-meeting" (no file extension). ' +
+                    'Path format: "2026/2/12-1606-meeting" or "2026/2/12-1606-meeting.pkl"',
             },
             entities: {
                 type: 'object',
@@ -535,7 +423,7 @@ export async function handleReadTranscript(args: {
     contextDirectory?: string;
 }) {
     // Find the transcript (returns absolute path for file operations)
-    const absolutePath = await findTranscript(args.transcriptPath, args.contextDirectory);
+    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
 
     // Use protokoll-format storage API directly - returns structured JSON
     const transcriptData = await readTranscriptFromStorage(absolutePath);
@@ -650,7 +538,7 @@ export async function handleEditTranscript(args: {
     const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
     
     // Find the transcript (returns absolute path for file operations)
-    const absolutePath = await findTranscript(args.transcriptPath, args.contextDirectory);
+    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
 
     // Validate status if provided
     if (args.status && !Metadata.isValidStatus(args.status)) {
@@ -750,7 +638,7 @@ export async function handleChangeTranscriptDate(args: {
     const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
     
     // Find the transcript (returns absolute path)
-    const absolutePath = await findTranscript(args.transcriptPath, args.contextDirectory);
+    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
     
     // Parse the new date
     const newDate = new Date(args.newDate);
@@ -858,7 +746,7 @@ export async function handleCombineTranscripts(args: {
     // Find all transcripts (returns absolute paths for file operations)
     const absolutePaths: string[] = [];
     for (const relativePath of args.transcriptPaths) {
-        const absolute = await findTranscript(relativePath, args.contextDirectory);
+        const absolute = await resolveTranscriptPath(relativePath, args.contextDirectory);
         absolutePaths.push(absolute);
     }
 
@@ -916,7 +804,7 @@ export async function handleUpdateTranscriptContent(args: {
     contextDirectory?: string;
 }) {
     // Find the transcript (returns absolute path for file operations)
-    const absolutePath = await findTranscript(args.transcriptPath, args.contextDirectory);
+    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
 
     // Ensure we're working with a PKL file
     const pklPath = ensurePklExtension(absolutePath);
@@ -951,7 +839,7 @@ export async function handleUpdateTranscriptEntityReferences(args: {
     contextDirectory?: string;
 }) {
     // Find the transcript (returns absolute path for file operations)
-    const absolutePath = await findTranscript(args.transcriptPath, args.contextDirectory);
+    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
 
     // Validate and sanitize entity IDs
     const validateEntityId = (id: string, name: string, type: string): string => {
@@ -1051,7 +939,7 @@ export async function handleProvideFeedback(args: {
     contextDirectory?: string;
 }) {
     // Find the transcript (returns absolute path for file operations)
-    const absolutePath = await findTranscript(args.transcriptPath, args.contextDirectory);
+    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
 
     // Ensure we're working with a PKL file
     const pklPath = ensurePklExtension(absolutePath);

@@ -13,7 +13,7 @@ import {
     findTermResilient, 
     findProjectResilient,
     findIgnoredResilient 
-} from '@/utils/entityFinder';
+} from '@redaksjon/protokoll-engine';
 
 /**
  * Get the context instance from ServerConfig, or create a new one if not available

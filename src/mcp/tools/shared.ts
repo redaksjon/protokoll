@@ -3,11 +3,12 @@
  * Shared types, constants, and utilities for MCP tools
  */
 import { stat } from 'node:fs/promises';
-import { resolve, relative } from 'node:path';
-import * as Media from '@/util/media';
-import * as Storage from '@/util/storage';
+import { resolve, relative, isAbsolute } from 'node:path';
+import { Media, Util as Storage, Transcript as TranscriptUtils } from '@redaksjon/protokoll-engine';
 import { getLogger } from '@/logging';
+const { transcriptExists, ensurePklExtension } = TranscriptUtils;
 import type { Person, Project, Term, Company, IgnoredTerm, Entity } from '@/context/types';
+import { parseUri, isProtokolUri } from '../uri';
 
 // ============================================================================
 // Shared Utilities
@@ -318,4 +319,70 @@ export function mergeArray(
 
     // Return undefined if empty (to remove the field from YAML)
     return result.length > 0 ? result : (existing ? undefined : existing);
+}
+
+/**
+ * Resolve a transcript URI or path to an absolute file path
+ * 
+ * Accepts:
+ * - Protokoll URI: protokoll://transcript/2026/2/12-1606-meeting (preferred)
+ * - Relative path: 2026/2/12-1606-meeting or 2026/2/12-1606-meeting.pkl
+ * - Absolute path: /full/path/to/transcript.pkl (must be within output directory)
+ * 
+ * Returns absolute path for internal file operations
+ */
+export async function resolveTranscriptPath(
+    uriOrPath: string,
+    contextDirectory?: string
+): Promise<string> {
+    if (!uriOrPath || typeof uriOrPath !== 'string') {
+        throw new Error('transcriptPath is required and must be a non-empty string');
+    }
+    
+    const outputDirectory = await getConfiguredDirectory('outputDirectory', contextDirectory);
+    
+    let relativePath: string;
+    
+    // Check if input is a Protokoll URI
+    if (isProtokolUri(uriOrPath)) {
+        const parsed = parseUri(uriOrPath);
+        if (parsed.resourceType !== 'transcript') {
+            throw new Error(`Invalid URI: expected transcript URI, got ${parsed.resourceType}`);
+        }
+        // Extract the transcript path from the URI (without extension)
+        // Type assertion is safe because we checked resourceType === 'transcript'
+        relativePath = (parsed as any).transcriptPath;
+    } else {
+        // Handle as a file path (relative or absolute)
+        if (isAbsolute(uriOrPath)) {
+            const normalizedAbsolute = resolve(uriOrPath);
+            const normalizedOutputDir = resolve(outputDirectory);
+            
+            if (normalizedAbsolute.startsWith(normalizedOutputDir + '/') || normalizedAbsolute === normalizedOutputDir) {
+                // Convert absolute path to relative
+                relativePath = normalizedAbsolute.substring(normalizedOutputDir.length + 1);
+            } else {
+                throw new Error(`Path must be within output directory: ${outputDirectory}`);
+            }
+        } else {
+            // Relative path - normalize it
+            relativePath = uriOrPath.replace(/^[/\\]+/, '').replace(/\\/g, '/');
+        }
+    }
+    
+    // Remove .pkl extension if present (we'll add it back)
+    relativePath = relativePath.replace(/\.pkl$/i, '');
+    
+    // Resolve to absolute path
+    const resolvedPath = resolve(outputDirectory, relativePath);
+    validatePathWithinDirectory(resolvedPath, outputDirectory);
+    
+    // Ensure .pkl extension and check if file exists
+    const pklPath = ensurePklExtension(resolvedPath);
+    const existsResult = await transcriptExists(pklPath);
+    if (!existsResult.exists || !existsResult.path) {
+        throw new Error(`Transcript not found: ${uriOrPath}`);
+    }
+    
+    return existsResult.path;
 }

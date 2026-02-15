@@ -16,9 +16,62 @@ import { PklTranscript } from '@redaksjon/protokoll-format';
 // Mock the shared module to control getConfiguredDirectory
 vi.mock('../../src/mcp/tools/shared', async () => {
     const actual = await vi.importActual('../../src/mcp/tools/shared');
+    const actualModule = actual as any;
+    
+    const mockGetConfiguredDirectory = vi.fn();
+    
     return {
         ...actual,
-        getConfiguredDirectory: vi.fn(),
+        getConfiguredDirectory: mockGetConfiguredDirectory,
+        // Override resolveTranscriptPath to use the mocked getConfiguredDirectory
+        resolveTranscriptPath: async (uriOrPath: string, contextDirectory?: string) => {
+            const { resolve, isAbsolute } = await import('node:path');
+            const { parseUri, isProtokolUri } = await import('../../src/mcp/uri');
+            const { Transcript } = await import('@redaksjon/protokoll-engine');
+            const { transcriptExists, ensurePklExtension } = Transcript;
+            
+            if (!uriOrPath || typeof uriOrPath !== 'string') {
+                throw new Error('transcriptPath is required and must be a non-empty string');
+            }
+            
+            const outputDirectory = await mockGetConfiguredDirectory('outputDirectory', contextDirectory);
+            
+            let relativePath: string;
+            
+            if (isProtokolUri(uriOrPath)) {
+                const parsed = parseUri(uriOrPath);
+                if (parsed.resourceType !== 'transcript') {
+                    throw new Error(`Invalid URI: expected transcript URI, got ${parsed.resourceType}`);
+                }
+                relativePath = (parsed as any).transcriptPath;
+            } else {
+                if (isAbsolute(uriOrPath)) {
+                    const normalizedAbsolute = resolve(uriOrPath);
+                    const normalizedOutputDir = resolve(outputDirectory);
+                    
+                    if (normalizedAbsolute.startsWith(normalizedOutputDir + '/') || normalizedAbsolute === normalizedOutputDir) {
+                        relativePath = normalizedAbsolute.substring(normalizedOutputDir.length + 1);
+                    } else {
+                        throw new Error(`Path must be within output directory: ${outputDirectory}`);
+                    }
+                } else {
+                    relativePath = uriOrPath.replace(/^[/\\]+/, '').replace(/\\/g, '/');
+                }
+            }
+            
+            relativePath = relativePath.replace(/\.pkl$/i, '');
+            
+            const resolvedPath = resolve(outputDirectory, relativePath);
+            actualModule.validatePathWithinDirectory(resolvedPath, outputDirectory);
+            
+            const pklPath = ensurePklExtension(resolvedPath);
+            const existsResult = await transcriptExists(pklPath);
+            if (!existsResult.exists || !existsResult.path) {
+                throw new Error(`Transcript not found: ${uriOrPath}`);
+            }
+            
+            return existsResult.path;
+        },
     };
 });
 

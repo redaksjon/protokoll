@@ -12,7 +12,7 @@ import {
     findCompanyResilient, 
     findProjectResilient,
     findIgnoredResilient 
-} from '@/utils/entityFinder';
+} from '@redaksjon/protokoll-engine';
  
 import { formatEntity, slugify, mergeArray } from './shared.js';
 

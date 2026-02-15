@@ -6,7 +6,7 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { resolve, join, basename } from 'node:path';
 import { readdir } from 'node:fs/promises';
 import { glob } from 'glob';
-import * as Pipeline from '@/pipeline';
+import { Pipeline } from '@redaksjon/protokoll-engine';
 import {
     DEFAULT_AUDIO_EXTENSIONS,
     DEFAULT_OUTPUT_STRUCTURE,
