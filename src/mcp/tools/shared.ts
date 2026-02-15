@@ -4,9 +4,28 @@
  */
 import { stat } from 'node:fs/promises';
 import { resolve, relative, isAbsolute } from 'node:path';
-import { Media, Util as Storage, Transcript as TranscriptUtils } from '@redaksjon/protokoll-engine';
+import { Media, Util as Storage, Transcript } from '@redaksjon/protokoll-engine';
 import { getLogger } from '@/logging';
-const { transcriptExists, ensurePklExtension } = TranscriptUtils;
+
+// Import transcript utilities
+const transcriptExists = Transcript.transcriptExists;
+const ensurePklExtension = Transcript.ensurePklExtension;
+
+/**
+ * Check if input looks like a UUID (8+ hex chars)
+ * Inlined to avoid import issues
+ */
+function isUuidInput(input: string): boolean {
+    return /^[a-f0-9]{8}/.test(input);
+}
+
+/**
+ * Find transcript by UUID
+ * Delegates to protokoll-engine
+ */
+async function findTranscriptByUuid(uuid: string, searchDirectories: string[]): Promise<string | null> {
+    return Transcript.findTranscriptByUuid(uuid, searchDirectories);
+}
 import type { Person, Project, Term, Company, IgnoredTerm, Entity } from '@/context/types';
 import { parseUri, isProtokolUri } from '../uri';
 
@@ -322,9 +341,10 @@ export function mergeArray(
 }
 
 /**
- * Resolve a transcript URI or path to an absolute file path
+ * Resolve a transcript URI, path, or UUID to an absolute file path
  * 
  * Accepts:
+ * - UUID or UUID prefix: "a1b2c3d4" or "a1b2c3d4-5e6f-7890-abcd-ef1234567890"
  * - Protokoll URI: protokoll://transcript/2026/2/12-1606-meeting (preferred)
  * - Relative path: 2026/2/12-1606-meeting or 2026/2/12-1606-meeting.pkl
  * - Absolute path: /full/path/to/transcript.pkl (must be within output directory)
@@ -332,20 +352,29 @@ export function mergeArray(
  * Returns absolute path for internal file operations
  */
 export async function resolveTranscriptPath(
-    uriOrPath: string,
+    uriOrPathOrUuid: string,
     contextDirectory?: string
 ): Promise<string> {
-    if (!uriOrPath || typeof uriOrPath !== 'string') {
+    if (!uriOrPathOrUuid || typeof uriOrPathOrUuid !== 'string') {
         throw new Error('transcriptPath is required and must be a non-empty string');
     }
     
     const outputDirectory = await getConfiguredDirectory('outputDirectory', contextDirectory);
     
+    // Check if input is a UUID
+    if (isUuidInput(uriOrPathOrUuid)) {
+        const foundPath = await findTranscriptByUuid(uriOrPathOrUuid, [outputDirectory]);
+        if (!foundPath) {
+            throw new Error(`Transcript not found for UUID: ${uriOrPathOrUuid}`);
+        }
+        return foundPath;
+    }
+    
     let relativePath: string;
     
     // Check if input is a Protokoll URI
-    if (isProtokolUri(uriOrPath)) {
-        const parsed = parseUri(uriOrPath);
+    if (isProtokolUri(uriOrPathOrUuid)) {
+        const parsed = parseUri(uriOrPathOrUuid);
         if (parsed.resourceType !== 'transcript') {
             throw new Error(`Invalid URI: expected transcript URI, got ${parsed.resourceType}`);
         }
@@ -354,8 +383,8 @@ export async function resolveTranscriptPath(
         relativePath = (parsed as any).transcriptPath;
     } else {
         // Handle as a file path (relative or absolute)
-        if (isAbsolute(uriOrPath)) {
-            const normalizedAbsolute = resolve(uriOrPath);
+        if (isAbsolute(uriOrPathOrUuid)) {
+            const normalizedAbsolute = resolve(uriOrPathOrUuid);
             const normalizedOutputDir = resolve(outputDirectory);
             
             if (normalizedAbsolute.startsWith(normalizedOutputDir + '/') || normalizedAbsolute === normalizedOutputDir) {
@@ -366,7 +395,7 @@ export async function resolveTranscriptPath(
             }
         } else {
             // Relative path - normalize it
-            relativePath = uriOrPath.replace(/^[/\\]+/, '').replace(/\\/g, '/');
+            relativePath = uriOrPathOrUuid.replace(/^[/\\]+/, '').replace(/\\/g, '/');
         }
     }
     
@@ -381,7 +410,7 @@ export async function resolveTranscriptPath(
     const pklPath = ensurePklExtension(resolvedPath);
     const existsResult = await transcriptExists(pklPath);
     if (!existsResult.exists || !existsResult.path) {
-        throw new Error(`Transcript not found: ${uriOrPath}`);
+        throw new Error(`Transcript not found: ${uriOrPathOrUuid}`);
     }
     
     return existsResult.path;

@@ -192,4 +192,4 @@ checkIsMainModule().then((isMain) => {
 // Exports for Testing
 // ============================================================================
 
-export { main };
+export { main, checkIsMainModule };

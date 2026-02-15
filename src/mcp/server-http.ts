@@ -1117,6 +1117,33 @@ function sendNotificationToSession(session: SessionData, notification: {
 // Export notification functions for use by other modules
 export { notifySubscribedClients, notifyAllClients };
 
+/**
+ * Create an HTTP server for testing. Returns the raw Node.js HTTP server.
+ * Use server.listen(0, '127.0.0.1') to bind to a random port.
+ */
+export function createTestableServer() {
+    return createServer(handleRequest);
+}
+
+/**
+ * Handle a single request. For testing with mock req/res.
+ * @internal
+ */
+export async function _handleRequestForTesting(
+    req: IncomingMessage,
+    res: ServerResponse
+): Promise<void> {
+    await handleRequest(req, res);
+}
+
+/**
+ * Clear all sessions. For test isolation only.
+ * @internal
+ */
+export function _clearSessionsForTesting(): void {
+    sessions.clear();
+}
+
 // ES module equivalent of CommonJS `require.main === module`
 // Use realpath() to resolve symlinks before comparison
 async function checkIsMainModule(): Promise<boolean> {
