@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import * as Discovery from '../../src/context/discovery';
+import * as Discovery from '@redaksjon/context';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';

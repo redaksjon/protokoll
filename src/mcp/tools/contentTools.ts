@@ -12,7 +12,7 @@ import {
     findCompanyResilient, 
     findTermResilient, 
     findProjectResilient 
-} from '@/utils/entityFinder';
+} from '@redaksjon/protokoll-engine';
 import {
     createUrlContent,
     createTextContent,

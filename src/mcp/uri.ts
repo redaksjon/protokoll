@@ -85,7 +85,10 @@ function parseTranscriptUri(
     segments: string[],
     params: Record<string, string>
 ): TranscriptUri {
-    // protokoll://transcript/path/to/file.md
+    // protokoll://transcript/path/to/file
+    // Note: URIs should NOT include file extensions (.md or .pkl)
+    // The server resolves the actual file format automatically
+    // 
     // Handle both relative and absolute paths
     // If URI has double slash after transcript, it's an absolute path
     const withoutScheme = uri.substring(`${SCHEME}://`.length);
@@ -114,12 +117,15 @@ function parseTranscriptUri(
         throw new Error(`Invalid transcript URI: ${uri}. No path specified.`);
     }
 
+    // Decode the path - the server will resolve the actual file format
+    const decodedPath = decodeURIComponent(transcriptPath);
+
     return {
         scheme: SCHEME,
         resourceType: 'transcript',
         path: transcriptPath,
         params,
-        transcriptPath: decodeURIComponent(transcriptPath),
+        transcriptPath: decodedPath,
     };
 }
 
@@ -243,6 +249,10 @@ function parseAudioUri(
 
 /**
  * Build a transcript resource URI
+ * 
+ * @param transcriptPath The transcript identifier (should NOT include file extension)
+ *                       e.g., "2026/1/29-1234-meeting" not "2026/1/29-1234-meeting.pkl"
+ *                       The server resolves the actual file format automatically
  */
 export function buildTranscriptUri(transcriptPath: string): string {
     const encoded = encodeURIComponent(transcriptPath).replace(/%2F/g, '/');

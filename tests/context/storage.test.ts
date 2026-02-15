@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import * as Storage from '../../src/context/storage';
+import { createStandaloneStorage as create } from '@redaksjon/context';
+const Storage = { create };
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';

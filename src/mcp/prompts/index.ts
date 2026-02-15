@@ -70,6 +70,12 @@ function fillTemplate(template: string, args: Record<string, string>): string {
 export function getPrompts(): McpPrompt[] {
     return [
         {
+            name: 'how_to_use_protokoll',
+            description: 'Essential instructions for AI assistants on how to properly interact with Protokoll. ' +
+                'READ THIS FIRST before working with transcripts. Explains which tools to use and which to avoid.',
+            arguments: [],
+        },
+        {
             name: 'transcribe_with_context',
             description: 'Intelligently transcribe audio with context discovery and project routing. ' +
                 'Guides you through finding the right configuration and confirms before processing.',
@@ -239,6 +245,8 @@ export async function getPrompt(
 
     // Generate messages based on prompt type
     switch (name) {
+        case 'how_to_use_protokoll':
+            return generateHowToUseProtokolPrompt(args);
         case 'transcribe_with_context':
             return generateTranscribePrompt(args);
         case 'setup_project':
@@ -261,6 +269,22 @@ export async function getPrompt(
 // ============================================================================
 // Prompt Generators
 // ============================================================================
+
+async function generateHowToUseProtokolPrompt(
+    _args: Record<string, string>
+): Promise<McpPromptMessage[]> {
+    const template = loadTemplate('how_to_use_protokoll');
+
+    return [
+        {
+            role: 'user',
+            content: {
+                type: 'text',
+                text: template,
+            },
+        },
+    ];
+}
 
 async function generateTranscribePrompt(
     args: Record<string, string>

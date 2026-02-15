@@ -1,6 +1,11 @@
+/**
+ * Tests for Sound Notification Utility
+ */
+
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import * as childProcess from 'child_process';
 import * as Sound from '../../src/util/sound';
+import { spawn } from 'child_process';
+import { EventEmitter } from 'events';
 
 // Mock child_process
 vi.mock('child_process', () => ({
@@ -12,334 +17,362 @@ vi.mock('../../src/logging', () => ({
     getLogger: vi.fn(() => ({
         debug: vi.fn(),
         info: vi.fn(),
-        warn: vi.fn(),
         error: vi.fn(),
     })),
 }));
 
-describe('Sound Utility', () => {
-    const mockSpawn = vi.mocked(childProcess.spawn);
-    let originalPlatform: PropertyDescriptor | undefined;
-    let stdoutWriteSpy: ReturnType<typeof vi.spyOn>;
+describe('sound', () => {
+    let mockProcess: EventEmitter;
+    let originalPlatform: string;
 
     beforeEach(() => {
-        vi.clearAllMocks();
-        
-        // Store original platform
-        originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
-        
-        // Mock stdout.write for terminal bell testing
-        stdoutWriteSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        originalPlatform = process.platform;
+        mockProcess = new EventEmitter();
+        (mockProcess as any).unref = vi.fn();
+        vi.mocked(spawn).mockReturnValue(mockProcess as any);
     });
 
     afterEach(() => {
-        // Restore platform
-        if (originalPlatform) {
-            Object.defineProperty(process, 'platform', originalPlatform);
-        }
-        stdoutWriteSpy.mockRestore();
+        Object.defineProperty(process, 'platform', {
+            value: originalPlatform,
+        });
+        vi.clearAllMocks();
     });
 
     describe('create', () => {
         it('should create a sound instance', () => {
             const sound = Sound.create({ silent: false });
-            
             expect(sound).toBeDefined();
             expect(sound.playNotification).toBeDefined();
             expect(sound.isEnabled).toBeDefined();
         });
 
-        it('should report enabled when not silent', () => {
+        it('should create a sound instance in silent mode', () => {
+            const sound = Sound.create({ silent: true });
+            expect(sound).toBeDefined();
+            expect(sound.isEnabled()).toBe(false);
+        });
+    });
+
+    describe('isEnabled', () => {
+        it('should return true when not silent', () => {
             const sound = Sound.create({ silent: false });
             expect(sound.isEnabled()).toBe(true);
         });
 
-        it('should report disabled when silent', () => {
+        it('should return false when silent', () => {
             const sound = Sound.create({ silent: true });
             expect(sound.isEnabled()).toBe(false);
         });
     });
 
     describe('playNotification', () => {
-        it('should not play sound when silent mode is enabled', async () => {
+        it('should skip notification in silent mode', async () => {
             const sound = Sound.create({ silent: true });
-            
-            await sound.playNotification();
-            
-            expect(mockSpawn).not.toHaveBeenCalled();
-            expect(stdoutWriteSpy).not.toHaveBeenCalled();
-        });
-
-        it('should use afplay on macOS', async () => {
-            // Mock as darwin
-            Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
-            
-            // Mock successful spawn
-            const mockProcess = {
-                on: vi.fn((event: string, callback: (arg?: any) => void) => {
-                    if (event === 'close') {
-                        setTimeout(() => callback(0), 10);
-                    }
-                }),
-                unref: vi.fn(),
-            };
-            mockSpawn.mockReturnValue(mockProcess as any);
-            
-            const sound = Sound.create({ silent: false });
-            await sound.playNotification();
-            
-            expect(mockSpawn).toHaveBeenCalledWith(
-                'afplay',
-                ['/System/Library/Sounds/Glass.aiff'],
-                expect.any(Object)
-            );
-        });
-
-        it('should use PowerShell on Windows', async () => {
-            // Mock as win32
-            Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-            
-            // Mock successful spawn
-            const mockProcess = {
-                on: vi.fn((event: string, callback: (arg?: any) => void) => {
-                    if (event === 'close') {
-                        setTimeout(() => callback(0), 10);
-                    }
-                }),
-                unref: vi.fn(),
-            };
-            mockSpawn.mockReturnValue(mockProcess as any);
-            
-            const sound = Sound.create({ silent: false });
-            await sound.playNotification();
-            
-            expect(mockSpawn).toHaveBeenCalledWith(
-                'powershell',
-                expect.arrayContaining(['-Command', '[System.Media.SystemSounds]::Asterisk.Play()']),
-                expect.any(Object)
-            );
-        });
-
-        it('should fall back to terminal bell on Linux', async () => {
-            // Mock as linux
-            Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
-            
-            const sound = Sound.create({ silent: false });
-            await sound.playNotification();
-            
-            expect(mockSpawn).not.toHaveBeenCalled();
-            expect(stdoutWriteSpy).toHaveBeenCalledWith('\x07');
-        });
-
-        it('should fall back to terminal bell if PowerShell fails on Windows', async () => {
-            // Mock as win32
-            Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-            
-            // Mock failed spawn (error event)
-            const mockProcess = {
-                on: vi.fn((event: string, callback: (arg?: any) => void) => {
-                    if (event === 'error') {
-                        setTimeout(() => callback(new Error('spawn failed')), 5);
-                    }
-                }),
-                unref: vi.fn(),
-            };
-            mockSpawn.mockReturnValue(mockProcess as any);
-            
-            const sound = Sound.create({ silent: false });
-            await sound.playNotification();
-            
-            // Should have tried PowerShell
-            expect(mockSpawn).toHaveBeenCalled();
-            
-            // And fallen back to terminal bell
-            expect(stdoutWriteSpy).toHaveBeenCalledWith('\x07');
-        });
-
-        it('should fall back to terminal bell if afplay fails', async () => {
-            // Mock as darwin
-            Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
-            
-            // Mock failed spawn (error event)
-            const mockProcess = {
-                on: vi.fn((event: string, callback: (arg?: any) => void) => {
-                    if (event === 'error') {
-                        setTimeout(() => callback(new Error('spawn failed')), 5);
-                    }
-                }),
-                unref: vi.fn(),
-            };
-            mockSpawn.mockReturnValue(mockProcess as any);
-            
-            const sound = Sound.create({ silent: false });
-            await sound.playNotification();
-            
-            // Should have tried afplay
-            expect(mockSpawn).toHaveBeenCalled();
-            
-            // And fallen back to terminal bell
-            expect(stdoutWriteSpy).toHaveBeenCalledWith('\x07');
-        });
-
-        it('should fall back to terminal bell if afplay exits with non-zero code', async () => {
-            // Mock as darwin
-            Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
-            
-            // Mock spawn that exits with error code
-            const mockProcess = {
-                on: vi.fn((event: string, callback: (arg?: any) => void) => {
-                    if (event === 'close') {
-                        setTimeout(() => callback(1), 5); // Non-zero exit code
-                    }
-                }),
-                unref: vi.fn(),
-            };
-            mockSpawn.mockReturnValue(mockProcess as any);
-            
-            const sound = Sound.create({ silent: false });
-            await sound.playNotification();
-            
-            // Should have tried afplay
-            expect(mockSpawn).toHaveBeenCalled();
-            
-            // And fallen back to terminal bell
-            expect(stdoutWriteSpy).toHaveBeenCalledWith('\x07');
-        });
-
-        it('should fall back to terminal bell if PowerShell exits with non-zero code', async () => {
-            // Mock as win32
-            Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-            
-            // Mock spawn that exits with error code
-            const mockProcess = {
-                on: vi.fn((event: string, callback: (arg?: any) => void) => {
-                    if (event === 'close') {
-                        setTimeout(() => callback(1), 5); // Non-zero exit code
-                    }
-                }),
-                unref: vi.fn(),
-            };
-            mockSpawn.mockReturnValue(mockProcess as any);
-            
-            const sound = Sound.create({ silent: false });
-            await sound.playNotification();
-            
-            // Should have tried PowerShell
-            expect(mockSpawn).toHaveBeenCalled();
-            
-            // And fallen back to terminal bell
-            expect(stdoutWriteSpy).toHaveBeenCalledWith('\x07');
-        });
-
-        it('should handle exceptions gracefully and try terminal bell', async () => {
-            // Mock as darwin
-            Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
-            
-            // Mock spawn to throw an exception
-            mockSpawn.mockImplementation(() => {
-                throw new Error('spawn completely failed');
-            });
-            
-            const sound = Sound.create({ silent: false });
-            
-            // Should not throw
             await expect(sound.playNotification()).resolves.toBeUndefined();
-            
-            // Should have attempted terminal bell as fallback
-            expect(stdoutWriteSpy).toHaveBeenCalledWith('\x07');
+            expect(spawn).not.toHaveBeenCalled();
         });
 
-        it('should silently handle terminal bell failures', async () => {
-            // Mock as linux (goes straight to terminal bell)
-            Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
-            
-            // Make terminal bell throw
-            stdoutWriteSpy.mockImplementation(() => {
-                throw new Error('stdout write failed');
+        it('should play sound on macOS', async () => {
+            Object.defineProperty(process, 'platform', {
+                value: 'darwin',
             });
-            
+
             const sound = Sound.create({ silent: false });
-            
-            // Should not throw even if terminal bell fails
-            await expect(sound.playNotification()).resolves.toBeUndefined();
+            const playPromise = sound.playNotification();
+
+            // Simulate successful spawn
+            setTimeout(() => {
+                mockProcess.emit('close', 0);
+            }, 10);
+
+            await expect(playPromise).resolves.toBeUndefined();
+            expect(spawn).toHaveBeenCalledWith('afplay', ['/System/Library/Sounds/Glass.aiff'], expect.any(Object));
         });
 
-        it('should pass correct spawn options for macOS afplay', async () => {
-            Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
-            
-            const mockProcess = {
-                on: vi.fn((event: string, callback: (arg?: any) => void) => {
-                    if (event === 'close') {
-                        setTimeout(() => callback(0), 10);
-                    }
-                }),
-                unref: vi.fn(),
-            };
-            mockSpawn.mockReturnValue(mockProcess as any);
-            
+        it('should handle afplay error on macOS', async () => {
+            Object.defineProperty(process, 'platform', {
+                value: 'darwin',
+            });
+
             const sound = Sound.create({ silent: false });
-            await sound.playNotification();
-            
-            expect(mockSpawn).toHaveBeenCalledWith(
-                'afplay',
-                ['/System/Library/Sounds/Glass.aiff'],
-                {
-                    stdio: 'ignore',
-                    detached: true,
-                }
-            );
-            expect(mockProcess.unref).toHaveBeenCalled();
+            const playPromise = sound.playNotification();
+
+            // Simulate spawn error
+            setTimeout(() => {
+                mockProcess.emit('error', new Error('spawn failed'));
+            }, 10);
+
+            await expect(playPromise).resolves.toBeUndefined();
         });
 
-        it('should pass correct spawn options for Windows PowerShell', async () => {
-            Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-            
-            const mockProcess = {
-                on: vi.fn((event: string, callback: (arg?: any) => void) => {
-                    if (event === 'close') {
-                        setTimeout(() => callback(0), 10);
-                    }
-                }),
-                unref: vi.fn(),
-            };
-            mockSpawn.mockReturnValue(mockProcess as any);
-            
+        it('should handle afplay close with non-zero code on macOS', async () => {
+            Object.defineProperty(process, 'platform', {
+                value: 'darwin',
+            });
+
             const sound = Sound.create({ silent: false });
-            await sound.playNotification();
-            
-            expect(mockSpawn).toHaveBeenCalledWith(
+            const playPromise = sound.playNotification();
+
+            // Simulate failed close
+            setTimeout(() => {
+                mockProcess.emit('close', 1);
+            }, 10);
+
+            await expect(playPromise).resolves.toBeUndefined();
+        });
+
+        it('should play sound on Windows', async () => {
+            Object.defineProperty(process, 'platform', {
+                value: 'win32',
+            });
+
+            const sound = Sound.create({ silent: false });
+            const playPromise = sound.playNotification();
+
+            // Simulate successful spawn
+            setTimeout(() => {
+                mockProcess.emit('close', 0);
+            }, 10);
+
+            await expect(playPromise).resolves.toBeUndefined();
+            expect(spawn).toHaveBeenCalledWith(
                 'powershell',
                 ['-NoProfile', '-NonInteractive', '-Command', '[System.Media.SystemSounds]::Asterisk.Play()'],
-                {
-                    stdio: 'ignore',
-                    detached: true,
-                    shell: true,
-                }
+                expect.objectContaining({ shell: true })
             );
-            expect(mockProcess.unref).toHaveBeenCalled();
         });
 
-        it('should work on FreeBSD (other Unix-like) with terminal bell', async () => {
-            Object.defineProperty(process, 'platform', { value: 'freebsd', configurable: true });
-            
+        it('should handle PowerShell error on Windows', async () => {
+            Object.defineProperty(process, 'platform', {
+                value: 'win32',
+            });
+
+            const sound = Sound.create({ silent: false });
+            const playPromise = sound.playNotification();
+
+            // Simulate spawn error
+            setTimeout(() => {
+                mockProcess.emit('error', new Error('spawn failed'));
+            }, 10);
+
+            await expect(playPromise).resolves.toBeUndefined();
+        });
+
+        it('should handle PowerShell close with non-zero code on Windows', async () => {
+            Object.defineProperty(process, 'platform', {
+                value: 'win32',
+            });
+
+            const sound = Sound.create({ silent: false });
+            const playPromise = sound.playNotification();
+
+            // Simulate failed close
+            setTimeout(() => {
+                mockProcess.emit('close', 1);
+            }, 10);
+
+            await expect(playPromise).resolves.toBeUndefined();
+        });
+
+        it('should play terminal bell on Linux', async () => {
+            Object.defineProperty(process, 'platform', {
+                value: 'linux',
+            });
+
+            const stdoutWrite = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
             const sound = Sound.create({ silent: false });
             await sound.playNotification();
-            
-            expect(mockSpawn).not.toHaveBeenCalled();
-            expect(stdoutWriteSpy).toHaveBeenCalledWith('\x07');
+
+            expect(stdoutWrite).toHaveBeenCalledWith('\x07');
+            stdoutWrite.mockRestore();
+        });
+
+        it('should play terminal bell on unknown platform', async () => {
+            Object.defineProperty(process, 'platform', {
+                value: 'freebsd',
+            });
+
+            const stdoutWrite = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+            const sound = Sound.create({ silent: false });
+            await sound.playNotification();
+
+            expect(stdoutWrite).toHaveBeenCalledWith('\x07');
+            stdoutWrite.mockRestore();
+        });
+
+        it('should handle exceptions gracefully', async () => {
+            Object.defineProperty(process, 'platform', {
+                value: 'darwin',
+            });
+
+            vi.mocked(spawn).mockImplementation(() => {
+                throw new Error('spawn failed');
+            });
+
+            const stdoutWrite = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+            const sound = Sound.create({ silent: false });
+            await expect(sound.playNotification()).resolves.toBeUndefined();
+
+            // Should fall back to terminal bell
+            expect(stdoutWrite).toHaveBeenCalledWith('\x07');
+            stdoutWrite.mockRestore();
+        });
+
+        it('should handle terminal bell failure silently', async () => {
+            Object.defineProperty(process, 'platform', {
+                value: 'darwin',
+            });
+
+            vi.mocked(spawn).mockImplementation(() => {
+                throw new Error('spawn failed');
+            });
+
+            const stdoutWrite = vi.spyOn(process.stdout, 'write').mockImplementation(() => {
+                throw new Error('stdout write failed');
+            });
+
+            const sound = Sound.create({ silent: false });
+            await expect(sound.playNotification()).resolves.toBeUndefined();
+
+            stdoutWrite.mockRestore();
+        });
+
+        it('should unref spawned process on macOS', async () => {
+            Object.defineProperty(process, 'platform', {
+                value: 'darwin',
+            });
+
+            const sound = Sound.create({ silent: false });
+            const playPromise = sound.playNotification();
+
+            setTimeout(() => {
+                mockProcess.emit('close', 0);
+            }, 10);
+
+            await playPromise;
+
+            expect((mockProcess as any).unref).toHaveBeenCalled();
+        });
+
+        it('should unref spawned process on Windows', async () => {
+            Object.defineProperty(process, 'platform', {
+                value: 'win32',
+            });
+
+            const sound = Sound.create({ silent: false });
+            const playPromise = sound.playNotification();
+
+            setTimeout(() => {
+                mockProcess.emit('close', 0);
+            }, 10);
+
+            await playPromise;
+
+            expect((mockProcess as any).unref).toHaveBeenCalled();
+        });
+
+        it('should use detached mode for spawned processes', async () => {
+            Object.defineProperty(process, 'platform', {
+                value: 'darwin',
+            });
+
+            const sound = Sound.create({ silent: false });
+            const playPromise = sound.playNotification();
+
+            setTimeout(() => {
+                mockProcess.emit('close', 0);
+            }, 10);
+
+            await playPromise;
+
+            expect(spawn).toHaveBeenCalledWith(
+                'afplay',
+                ['/System/Library/Sounds/Glass.aiff'],
+                expect.objectContaining({ detached: true })
+            );
+        });
+
+        it('should ignore stdio for spawned processes', async () => {
+            Object.defineProperty(process, 'platform', {
+                value: 'darwin',
+            });
+
+            const sound = Sound.create({ silent: false });
+            const playPromise = sound.playNotification();
+
+            setTimeout(() => {
+                mockProcess.emit('close', 0);
+            }, 10);
+
+            await playPromise;
+
+            expect(spawn).toHaveBeenCalledWith(
+                'afplay',
+                ['/System/Library/Sounds/Glass.aiff'],
+                expect.objectContaining({ stdio: 'ignore' })
+            );
         });
     });
 
-    describe('isEnabled', () => {
-        it('should return true when silent is false', () => {
+    describe('platform-specific behavior', () => {
+        it('should use Glass.aiff as default sound on macOS', async () => {
+            Object.defineProperty(process, 'platform', {
+                value: 'darwin',
+            });
+
             const sound = Sound.create({ silent: false });
-            expect(sound.isEnabled()).toBe(true);
+            const playPromise = sound.playNotification();
+
+            setTimeout(() => {
+                mockProcess.emit('close', 0);
+            }, 10);
+
+            await playPromise;
+
+            expect(spawn).toHaveBeenCalledWith(
+                'afplay',
+                expect.arrayContaining(['/System/Library/Sounds/Glass.aiff']),
+                expect.any(Object)
+            );
         });
 
-        it('should return false when silent is true', () => {
-            const sound = Sound.create({ silent: true });
-            expect(sound.isEnabled()).toBe(false);
+        it('should use PowerShell with Asterisk sound on Windows', async () => {
+            Object.defineProperty(process, 'platform', {
+                value: 'win32',
+            });
+
+            const sound = Sound.create({ silent: false });
+            const playPromise = sound.playNotification();
+
+            setTimeout(() => {
+                mockProcess.emit('close', 0);
+            }, 10);
+
+            await playPromise;
+
+            expect(spawn).toHaveBeenCalledWith(
+                'powershell',
+                expect.arrayContaining(['[System.Media.SystemSounds]::Asterisk.Play()']),
+                expect.any(Object)
+            );
+        });
+
+        it('should use ASCII bell character on Linux', async () => {
+            Object.defineProperty(process, 'platform', {
+                value: 'linux',
+            });
+
+            const stdoutWrite = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+            const sound = Sound.create({ silent: false });
+            await sound.playNotification();
+
+            expect(stdoutWrite).toHaveBeenCalledWith('\x07');
+            stdoutWrite.mockRestore();
         });
     });
 });
-

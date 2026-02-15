@@ -36,6 +36,7 @@ export * from './shared';
 export const tools: Tool[] = [
     // System Information
     SystemTools.getVersionTool,
+    SystemTools.getInfoTool,
 
     // Discovery & Configuration
     DiscoveryTools.discoverConfigTool,
@@ -110,6 +111,8 @@ export async function handleToolCall(name: string, args: unknown): Promise<unkno
         // System Information
         case 'protokoll_get_version':
             return SystemTools.handleGetVersion();
+        case 'protokoll_info':
+            return SystemTools.handleGetInfo();
 
         // Discovery & Configuration
         case 'protokoll_discover_config':

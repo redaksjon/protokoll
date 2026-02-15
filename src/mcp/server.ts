@@ -37,12 +37,17 @@ import { tools, handleToolCall } from './tools';
 import * as ServerConfig from './serverConfig';
 import * as Roots from './roots';
 import type { McpRoot } from './types';
+import { initializeWorkingDirectoryFromArgsAndConfig } from './configDiscovery';
 
 // ============================================================================
 // Server Setup
 // ============================================================================
 
 async function main() {
+    // Allow running `protokoll-mcp` directly from any subdirectory.
+    // We discover `protokoll-config.yaml` (or explicit --config) and set WORKSPACE_ROOT accordingly.
+    await initializeWorkingDirectoryFromArgsAndConfig();
+
     const server = new Server(
         {
             name: 'protokoll',
@@ -187,4 +192,4 @@ checkIsMainModule().then((isMain) => {
 // Exports for Testing
 // ============================================================================
 
-export { main };
+export { main, checkIsMainModule };

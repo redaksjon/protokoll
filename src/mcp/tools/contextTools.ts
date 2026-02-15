@@ -4,6 +4,7 @@
 // eslint-disable-next-line import/extensions
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import * as Context from '@/context';
+import type { ContextInstance } from '@/context';
 import type { Entity, EntityType } from '@/context/types';
 import { formatEntity } from './shared';
 import { 
@@ -12,7 +13,35 @@ import {
     findTermResilient, 
     findProjectResilient,
     findIgnoredResilient 
-} from '@/utils/entityFinder';
+} from '@redaksjon/protokoll-engine';
+
+/**
+ * Get the context instance from ServerConfig, or create a new one if not available
+ */
+async function getContextInstance(contextDirectory?: string): Promise<ContextInstance> {
+    // Import here to avoid circular dependencies
+    const ServerConfig = await import('../serverConfig');
+    
+    // Validate that contextDirectory is not provided in remote mode
+    if (contextDirectory && ServerConfig.isRemoteMode()) {
+        throw new Error(
+            'contextDirectory parameter is not accepted in remote mode. ' +
+            'This server is pre-configured with workspace directories from protokoll-config.yaml. ' +
+            'Use the protokoll_info tool to check server configuration.'
+        );
+    }
+    
+    // If server has an initialized context, use it
+    const serverContext = ServerConfig.getContext();
+    if (serverContext) {
+        return serverContext;
+    }
+    
+    // Fallback: create a new context (for backwards compatibility)
+    return Context.create({
+        startingDir: contextDirectory || process.cwd(),
+    });
+}
 
 // ============================================================================
 // Tool Definitions
@@ -162,9 +191,7 @@ export const getEntityTool: Tool = {
 // ============================================================================
 
 export async function handleContextStatus(args: { contextDirectory?: string }) {
-    const context = await Context.create({
-        startingDir: args.contextDirectory || process.cwd(),
-    });
+    const context = await getContextInstance(args.contextDirectory);
 
     const dirs = context.getDiscoveredDirs();
     const config = context.getConfig();
@@ -192,9 +219,7 @@ export async function handleContextStatus(args: { contextDirectory?: string }) {
 }
 
 export async function handleListProjects(args: { contextDirectory?: string; includeInactive?: boolean }) {
-    const context = await Context.create({
-        startingDir: args.contextDirectory || process.cwd(),
-    });
+    const context = await getContextInstance(args.contextDirectory);
 
     let projects = context.getAllProjects();
     if (!args.includeInactive) {
@@ -216,9 +241,7 @@ export async function handleListProjects(args: { contextDirectory?: string; incl
 }
 
 export async function handleListPeople(args: { contextDirectory?: string }) {
-    const context = await Context.create({
-        startingDir: args.contextDirectory || process.cwd(),
-    });
+    const context = await getContextInstance(args.contextDirectory);
 
     const people = context.getAllPeople();
 
@@ -235,9 +258,7 @@ export async function handleListPeople(args: { contextDirectory?: string }) {
 }
 
 export async function handleListTerms(args: { contextDirectory?: string }) {
-    const context = await Context.create({
-        startingDir: args.contextDirectory || process.cwd(),
-    });
+    const context = await getContextInstance(args.contextDirectory);
 
     const terms = context.getAllTerms();
 
@@ -254,9 +275,7 @@ export async function handleListTerms(args: { contextDirectory?: string }) {
 }
 
 export async function handleListCompanies(args: { contextDirectory?: string }) {
-    const context = await Context.create({
-        startingDir: args.contextDirectory || process.cwd(),
-    });
+    const context = await getContextInstance(args.contextDirectory);
 
     const companies = context.getAllCompanies();
 
@@ -273,9 +292,7 @@ export async function handleListCompanies(args: { contextDirectory?: string }) {
 }
 
 export async function handleSearchContext(args: { query: string; contextDirectory?: string }) {
-    const context = await Context.create({
-        startingDir: args.contextDirectory || process.cwd(),
-    });
+    const context = await getContextInstance(args.contextDirectory);
 
     const results = context.search(args.query);
 
@@ -287,9 +304,7 @@ export async function handleSearchContext(args: { query: string; contextDirector
 }
 
 export async function handleGetEntity(args: { entityType: EntityType; entityId: string; contextDirectory?: string }) {
-    const context = await Context.create({
-        startingDir: args.contextDirectory || process.cwd(),
-    });
+    const context = await getContextInstance(args.contextDirectory);
 
     let entity: Entity;
     switch (args.entityType) {

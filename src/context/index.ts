@@ -1,27 +1,17 @@
 /**
- * Context System
+ * Context System - Protokoll Adapter
  * 
- * Main entry point for the context system. Provides a factory function
- * to create context instances that can discover, load, and manage
- * entity data from hierarchical .protokoll directories.
- * 
- * This module now uses overcontext under the hood for storage and discovery.
+ * This module provides protokoll-specific extensions on top of @redaksjon/context runtime.
+ * Most functionality is now provided by @redaksjon/context; this module adds:
+ * - Smart assistance configuration (LLM model selection, feature flags)
+ * - Protokoll-specific defaults
  */
 
 import { 
-    Entity, 
-    Person, 
-    Project, 
-    Company, 
-    Term,
-    IgnoredTerm,
-    ContextDiscoveryOptions,
-    DiscoveredContextDir,
-    HierarchicalContextResult,
-    SmartAssistanceConfig,
-} from './types';
-import * as Overcontext from '../overcontext';
-import { getProjectRelationshipDistance } from '../overcontext/helpers';
+    create as createContext,
+    type ContextInstance as BaseContextInstance,
+    type CreateOptions as BaseCreateOptions,
+} from '@redaksjon/context';
 import {
     DEFAULT_PHONETIC_MODEL,
     DEFAULT_ANALYSIS_MODEL,
@@ -36,58 +26,13 @@ import {
     DEFAULT_TERM_PROJECT_SUGGESTIONS,
     ASSIST_TIMEOUT_MS
 } from '../constants';
+import type { SmartAssistanceConfig } from './types';
 
-export interface ContextInstance {
-    // Initialization
-    load(): Promise<void>;
-    reload(): Promise<void>;
-  
-    // Discovery info
-    getDiscoveredDirs(): DiscoveredContextDir[];
-    getConfig(): Record<string, unknown>;
-    getContextDirs(): string[];
-  
-    // Smart Assistance config
-    getSmartAssistanceConfig(): SmartAssistanceConfig;
-  
-    // Entity access
-    getPerson(id: string): Person | undefined;
-    getProject(id: string): Project | undefined;
-    getCompany(id: string): Company | undefined;
-    getTerm(id: string): Term | undefined;
-    getIgnored(id: string): IgnoredTerm | undefined;
-  
-    getAllPeople(): Person[];
-    getAllProjects(): Project[];
-    getAllCompanies(): Company[];
-    getAllTerms(): Term[];
-    getAllIgnored(): IgnoredTerm[];
-  
-    // Check if a term is ignored
-    isIgnored(term: string): boolean;
-  
-    // Search
-    search(query: string): Entity[];
-    findBySoundsLike(phonetic: string): Entity | undefined;
-  
-    // Advanced search with context awareness
-    searchWithContext(query: string, contextProjectId?: string): Entity[];
-    getRelatedProjects(projectId: string, maxDistance?: number): Project[];
-  
-    // Modification
-    saveEntity(entity: Entity, allowUpdate?: boolean): Promise<void>;
-    deleteEntity(entity: Entity): Promise<boolean>;
-    getEntityFilePath(entity: Entity): string | undefined;
-  
-    // Check if context is available
-    hasContext(): boolean;
-}
+// Re-export base types
+export type { BaseContextInstance as ContextInstance };
 
-export interface CreateOptions {
-    startingDir?: string;
-    configDirName?: string;
-    configFileName?: string;
-}
+// Use BaseCreateOptions directly (no protokoll-specific extensions needed)
+export type CreateOptions = BaseCreateOptions;
 
 /**
  * Get smart assistance configuration with defaults
@@ -117,165 +62,29 @@ const getSmartAssistanceConfig = (config: Record<string, unknown>): SmartAssista
 };
 
 /**
- * Create a new context instance using overcontext
+ * Extended ContextInstance with protokoll-specific methods
  */
-export const create = async (options: CreateOptions = {}): Promise<ContextInstance> => {
-    const discoveryOptions: ContextDiscoveryOptions = {
-        configDirName: options.configDirName ?? '.protokoll',
-        configFileName: options.configFileName ?? 'config.yaml',
-        startingDir: options.startingDir,
-    };
+export interface ProtokollContextInstance extends BaseContextInstance {
+    getSmartAssistanceConfig(): SmartAssistanceConfig;
+}
 
-    const storage = Overcontext.create();
-    let discoveryResult: HierarchicalContextResult = {
-        config: {},
-        discoveredDirs: [],
-        contextDirs: [],
-    };
-
-    const loadContext = async (): Promise<void> => {
-        discoveryResult = await Overcontext.loadHierarchicalConfig(discoveryOptions);
-        storage.clear();
-        await storage.load(discoveryResult.contextDirs);
-    };
-
-    // Initial load
-    await loadContext();
-
+/**
+ * Create a new context instance with protokoll-specific extensions
+ */
+export const create = async (options: CreateOptions = {}): Promise<ProtokollContextInstance> => {
+    const baseInstance = await createContext(options);
+    
     return {
-        load: loadContext,
-    
-        reload: async () => {
-            storage.clear();
-            await storage.load(discoveryResult.contextDirs);
-        },
-    
-        getDiscoveredDirs: () => discoveryResult.discoveredDirs,
-        getConfig: () => discoveryResult.config,
-        getContextDirs: () => discoveryResult.contextDirs,
-        
-        getSmartAssistanceConfig: () => getSmartAssistanceConfig(discoveryResult.config),
-    
-        getPerson: (id) => storage.get<Person>('person', id),
-        getProject: (id) => storage.get<Project>('project', id),
-        getCompany: (id) => storage.get<Company>('company', id),
-        getTerm: (id) => storage.get<Term>('term', id),
-        getIgnored: (id) => storage.get<IgnoredTerm>('ignored', id),
-    
-        getAllPeople: () => storage.getAll<Person>('person'),
-        getAllProjects: () => storage.getAll<Project>('project'),
-        getAllCompanies: () => storage.getAll<Company>('company'),
-        getAllTerms: () => storage.getAll<Term>('term'),
-        getAllIgnored: () => storage.getAll<IgnoredTerm>('ignored'),
-        
-        isIgnored: (term: string) => {
-            const normalizedTerm = term.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-            const ignoredTerms = storage.getAll<IgnoredTerm>('ignored');
-            return ignoredTerms.some(ignored => 
-                ignored.id === normalizedTerm || 
-                ignored.name.toLowerCase() === term.toLowerCase()
-            );
-        },
-    
-        search: (query) => storage.search(query),
-        findBySoundsLike: (phonetic) => storage.findBySoundsLike(phonetic),
-        
-        searchWithContext: (query, contextProjectId) => {
-            const results = storage.search(query);
-            
-            if (!contextProjectId) {
-                return results;
-            }
-            
-            const contextProject = storage.get<Project>('project', contextProjectId);
-            if (!contextProject) {
-                return results;
-            }
-            
-            const scoredResults = results.map(entity => {
-                let score = 0;
-                
-                if (entity.type === 'project') {
-                    const distance = getProjectRelationshipDistance(contextProject, entity as Project);
-                    if (distance >= 0) {
-                        score += (3 - distance) * 50;
-                    }
-                }
-                
-                if (entity.type === 'term') {
-                    const term = entity as Term;
-                    if (term.projects?.includes(contextProjectId)) {
-                        score += 100;
-                    }
-                }
-                
-                return { entity, score };
-            });
-            
-            return scoredResults
-                .sort((a, b) => b.score - a.score)
-                .map(r => r.entity);
-        },
-        
-        getRelatedProjects: (projectId, maxDistance = 2) => {
-            const project = storage.get<Project>('project', projectId);
-            if (!project) return [];
-            
-            const allProjects = storage.getAll<Project>('project');
-            const related: Array<{ project: Project; distance: number }> = [];
-            
-            for (const otherProject of allProjects) {
-                if (otherProject.id === projectId) continue;
-                
-                const distance = getProjectRelationshipDistance(project, otherProject);
-                if (distance >= 0 && distance <= maxDistance) {
-                    related.push({ project: otherProject, distance });
-                }
-            }
-            
-            return related
-                .sort((a, b) => a.distance - b.distance)
-                .map(r => r.project);
-        },
-    
-        saveEntity: async (entity, allowUpdate = false) => {
-            const closestDir = discoveryResult.discoveredDirs
-                .sort((a, b) => a.level - b.level)[0];
-      
-            if (!closestDir) {
-                throw new Error('No .protokoll directory found. Run with --init-config to create one.');
-            }
-      
-            await storage.save(entity, closestDir.path, allowUpdate);
-        },
-        
-        deleteEntity: async (entity) => {
-            const filePath = storage.getEntityFilePath(entity.type, entity.id, discoveryResult.contextDirs);
-            if (!filePath) {
-                return false;
-            }
-            
-            const contextDir = discoveryResult.contextDirs.find(dir => filePath.startsWith(dir));
-            if (!contextDir) {
-                return false;
-            }
-            
-            return storage.delete(entity.type, entity.id, contextDir);
-        },
-        
-        getEntityFilePath: (entity) => {
-            return storage.getEntityFilePath(entity.type, entity.id, discoveryResult.contextDirs);
-        },
-    
-        hasContext: () => discoveryResult.discoveredDirs.length > 0,
+        ...baseInstance,
+        getSmartAssistanceConfig: () => getSmartAssistanceConfig(baseInstance.getConfig()),
     };
 };
 
-// Re-export types (includes helper functions)
+// Re-export types from @redaksjon/context
+export * from '@redaksjon/context';
+
+// Re-export protokoll-specific types
 export * from './types';
 
-// Re-export discovery utilities
-export { discoverConfigDirectories, loadHierarchicalConfig } from '../overcontext';
-
-// Re-export deepMerge from old discovery for backwards compatibility
-export { deepMerge } from './discovery';
+// Re-export discovery utilities (now from @redaksjon/context)
+export { discoverConfigDirectories, loadHierarchicalConfig, deepMerge } from '@redaksjon/context';
