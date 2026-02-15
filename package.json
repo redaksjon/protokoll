@@ -57,7 +57,7 @@
     "@kjerneverk/riotprompt": "^1.0.6",
     "@modelcontextprotocol/sdk": "^1.25.2",
     "@redaksjon/context": "file:../redaksjon-context",
-    "@redaksjon/protokoll-engine": "file:../protokoll-engine",
+    "@redaksjon/protokoll-engine": "^0.1.3",
     "@redaksjon/protokoll-format": "file:../protokoll-format",
     "@types/fluent-ffmpeg": "^2.1.28",
     "@utilarium/cardigantime": "^0.0.24",
