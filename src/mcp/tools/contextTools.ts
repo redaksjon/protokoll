@@ -242,6 +242,39 @@ export const getEntityTool: Tool = {
     },
 };
 
+export const predictEntitiesTool: Tool = {
+    name: 'protokoll_predict_entities',
+    description:
+        'Predict likely entities based on transcript context using weight model. ' +
+        'Returns ranked entity suggestions based on co-occurrence patterns and project affinity. ' +
+        'Useful for intelligent entity correction suggestions.',
+    inputSchema: {
+        type: 'object',
+        properties: {
+            transcriptPath: {
+                type: 'string',
+                description: 'Path to the transcript file',
+            },
+            maxPredictions: {
+                type: 'number',
+                description: 'Maximum number of predictions to return (default: 10)',
+                minimum: 1,
+                maximum: 50,
+            },
+            minScore: {
+                type: 'number', 
+                description: 'Minimum prediction score (default: 1)',
+                minimum: 0,
+            },
+            contextDirectory: {
+                type: 'string',
+                description: 'Path to the .protokoll context directory',
+            },
+        },
+        required: ['transcriptPath'],
+    },
+};
+
 // ============================================================================
 // Tool Handlers
 // ============================================================================
@@ -504,4 +537,50 @@ export async function handleGetEntity(args: { entityType: EntityType; entityId: 
         ...formatEntity(entity),
         filePath,
     };
+}
+
+export async function handlePredictEntities(args: {
+    transcriptPath: string;
+    maxPredictions?: number;
+    minScore?: number;
+    contextDirectory?: string;
+}) {
+    // Import transcript utilities
+    const { resolveTranscriptPath } = await import('./shared');
+    const { Transcript: TranscriptUtils } = await import('@redaksjon/protokoll-engine');
+    const { ensurePklExtension } = TranscriptUtils;
+    const { PklTranscript } = await import('@redaksjon/protokoll-format');
+    
+    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
+    const pklPath = ensurePklExtension(absolutePath);
+    
+    const transcript = PklTranscript.open(pklPath, { readOnly: true });
+    const projectId = transcript.metadata.project;
+    const entities = transcript.metadata.entities || {};
+    
+    // Extract entity IDs from transcript metadata
+    const knownEntityIds = [
+        ...(entities.people || []).map(e => e.id),
+        ...(entities.projects || []).map(e => e.id), 
+        ...(entities.terms || []).map(e => e.id),
+        ...(entities.companies || []).map(e => e.id)
+    ];
+    
+    transcript.close();
+    
+    const { getWeightModelService } = await import('../services/weightModel');
+    const service = getWeightModelService();
+    
+    if (!service?.isReady || !service.provider) {
+        return { success: true, predictions: [] };
+    }
+    
+    const predictions = service.provider.predictLikelyEntities({
+        knownEntityIds,
+        projectId,
+        maxPredictions: args.maxPredictions || 10,
+        minScore: args.minScore ?? 1
+    });
+    
+    return { success: true, predictions };
 }

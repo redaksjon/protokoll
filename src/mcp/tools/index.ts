@@ -56,6 +56,7 @@ export const tools: Tool[] = [
     ContextTools.listCompaniesTool,
     ContextTools.searchContextTool,
     ContextTools.getEntityTool,
+    ContextTools.predictEntitiesTool,
 
     // Entity CRUD
     EntityTools.addPersonTool,
@@ -68,6 +69,7 @@ export const tools: Tool[] = [
     EntityTools.updateTermTool,
     EntityTools.mergeTermsTool,
     EntityTools.addCompanyTool,
+    EntityTools.editCompanyTool,
     EntityTools.deleteEntityTool,
 
     // Relationship Management
@@ -97,6 +99,7 @@ export const tools: Tool[] = [
     TranscriptTools.updateTranscriptEntityReferencesTool,
     TranscriptTools.createNoteTool,
     TranscriptTools.getEnhancementLogTool,
+    TranscriptTools.correctToEntityTool,
 
     // Lifecycle Status & Tasks
     StatusTools.setStatusTool,
@@ -152,6 +155,8 @@ export async function handleToolCall(name: string, args: unknown): Promise<unkno
             return ContextTools.handleSearchContext(args as Parameters<typeof ContextTools.handleSearchContext>[0]);
         case 'protokoll_get_entity':
             return ContextTools.handleGetEntity(args as Parameters<typeof ContextTools.handleGetEntity>[0]);
+        case 'protokoll_predict_entities':
+            return ContextTools.handlePredictEntities(args as Parameters<typeof ContextTools.handlePredictEntities>[0]);
 
         // Entity CRUD
         case 'protokoll_add_person':
@@ -174,6 +179,8 @@ export async function handleToolCall(name: string, args: unknown): Promise<unkno
             return EntityTools.handleMergeTerms(args as Parameters<typeof EntityTools.handleMergeTerms>[0]);
         case 'protokoll_add_company':
             return EntityTools.handleAddCompany(args as Parameters<typeof EntityTools.handleAddCompany>[0]);
+        case 'protokoll_edit_company':
+            return EntityTools.handleEditCompany(args as Parameters<typeof EntityTools.handleEditCompany>[0]);
         case 'protokoll_delete_entity':
             return EntityTools.handleDeleteEntity(args as Parameters<typeof EntityTools.handleDeleteEntity>[0]);
 
@@ -224,6 +231,8 @@ export async function handleToolCall(name: string, args: unknown): Promise<unkno
             return TranscriptTools.handleCreateNote(args as Parameters<typeof TranscriptTools.handleCreateNote>[0]);
         case 'protokoll_get_enhancement_log':
             return TranscriptTools.handleGetEnhancementLog(args as Parameters<typeof TranscriptTools.handleGetEnhancementLog>[0]);
+        case 'protokoll_correct_to_entity':
+            return TranscriptTools.handleCorrectToEntity(args as Parameters<typeof TranscriptTools.handleCorrectToEntity>[0]);
 
         // Lifecycle Status & Tasks
         case 'protokoll_set_status':

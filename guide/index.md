@@ -16,6 +16,7 @@ Protokoll transforms audio recordings into intelligent, context-enhanced transcr
 - [**Config Command**](./config.md): Interactive configuration editor
 
 ### Understanding Protokoll
+- [**Audio Upload & Transcription**](./audio-upload.md): Upload audio via HTTP, CLI, or MCP tools
 - [**Architecture**](./architecture.md): System design and data flow
 - [**Context System**](./context-system.md): How context storage works
 - [**Context Commands**](./context-commands.md): CLI for managing entities
