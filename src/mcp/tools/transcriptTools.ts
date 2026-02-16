@@ -98,6 +98,15 @@ export const listTranscriptsTool: Tool = {
                 type: 'string',
                 description: 'Search for transcripts containing this text (searches filename and content)',
             },
+            entityId: {
+                type: 'string',
+                description: 'Filter to transcripts that reference this entity ID',
+            },
+            entityType: {
+                type: 'string',
+                enum: ['person', 'project', 'term', 'company'],
+                description: 'Entity type to filter by (used with entityId to narrow search)',
+            },
             contextDirectory: {
                 type: 'string',
                 description: 'Optional: Path to the .protokoll context directory',
@@ -414,6 +423,44 @@ export const createNoteTool: Tool = {
     },
 };
 
+export const getEnhancementLogTool: Tool = {
+    name: 'protokoll_get_enhancement_log',
+    description:
+        'Get the enhancement log for a transcript. ' +
+        'Returns a timestamped audit trail of enhancement pipeline steps (transcribe, enhance, simple-replace phases). ' +
+        'Shows what happened during processing: entities found, corrections applied, tools called, etc.',
+    inputSchema: {
+        type: 'object',
+        properties: {
+            transcriptPath: {
+                type: 'string',
+                description: 
+                    'Transcript URI (preferred) or relative path from output directory. ' +
+                    'URI format: "protokoll://transcript/2026/2/12-1606-meeting" (no file extension). ' +
+                    'Path format: "2026/2/12-1606-meeting" or "2026/2/12-1606-meeting.pkl"',
+            },
+            phase: {
+                type: 'string',
+                enum: ['transcribe', 'enhance', 'simple-replace'],
+                description: 'Optional: Filter to a specific phase',
+            },
+            limit: {
+                type: 'number',
+                description: 'Maximum number of entries to return (default: 100)',
+            },
+            offset: {
+                type: 'number',
+                description: 'Number of entries to skip for pagination (default: 0)',
+            },
+            contextDirectory: {
+                type: 'string',
+                description: 'Optional: Path to the .protokoll context directory',
+            },
+        },
+        required: ['transcriptPath'],
+    },
+};
+
 // ============================================================================
 // Tool Handlers
 // ============================================================================
@@ -465,6 +512,8 @@ export async function handleListTranscripts(args: {
     startDate?: string;
     endDate?: string;
     search?: string;
+    entityId?: string;
+    entityType?: 'person' | 'project' | 'term' | 'company';
     contextDirectory?: string;
 }) {
     // Get directory from args or config
@@ -485,6 +534,8 @@ export async function handleListTranscripts(args: {
         startDate: args.startDate,
         endDate: args.endDate,
         search: args.search,
+        entityId: args.entityId,
+        entityType: args.entityType,
     });
 
     // Convert all paths to relative paths from output directory
@@ -518,6 +569,8 @@ export async function handleListTranscripts(args: {
             startDate: args.startDate,
             endDate: args.endDate,
             search: args.search,
+            entityId: args.entityId,
+            entityType: args.entityType,
         },
     };
 }
@@ -1110,4 +1163,49 @@ export async function handleCreateNote(args: {
         filename: filename,
         message: `Note "${args.title}" created successfully`,
     };
+}
+
+export async function handleGetEnhancementLog(args: {
+    transcriptPath: string;
+    phase?: 'transcribe' | 'enhance' | 'simple-replace';
+    limit?: number;
+    offset?: number;
+    contextDirectory?: string;
+}) {
+    // Find the transcript (returns absolute path for file operations)
+    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
+
+    // Open the transcript in read-only mode
+    const transcript = PklTranscript.open(absolutePath, { readOnly: true });
+    
+    try {
+        // Get enhancement log with optional phase filter
+        const allEntries = transcript.getEnhancementLog(args.phase ? { phase: args.phase } : undefined);
+        
+        // Apply pagination
+        const limit = args.limit ?? 100;
+        const offset = args.offset ?? 0;
+        const total = allEntries.length;
+        const entries = allEntries.slice(offset, offset + limit);
+        
+        // Convert entries to serializable format
+        const serializedEntries = entries.map(entry => ({
+            id: entry.id,
+            timestamp: entry.timestamp.toISOString(),
+            phase: entry.phase,
+            action: entry.action,
+            details: entry.details,
+            entities: entry.entities,
+        }));
+        
+        return {
+            entries: serializedEntries,
+            total,
+            limit,
+            offset,
+            hasMore: offset + limit < total,
+        };
+    } finally {
+        transcript.close();
+    }
 }

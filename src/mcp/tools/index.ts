@@ -94,6 +94,7 @@ export const tools: Tool[] = [
     TranscriptTools.updateTranscriptContentTool,
     TranscriptTools.updateTranscriptEntityReferencesTool,
     TranscriptTools.createNoteTool,
+    TranscriptTools.getEnhancementLogTool,
 
     // Lifecycle Status & Tasks
     StatusTools.setStatusTool,
@@ -211,6 +212,8 @@ export async function handleToolCall(name: string, args: unknown): Promise<unkno
             return TranscriptTools.handleUpdateTranscriptEntityReferences(args as Parameters<typeof TranscriptTools.handleUpdateTranscriptEntityReferences>[0]);
         case 'protokoll_create_note':
             return TranscriptTools.handleCreateNote(args as Parameters<typeof TranscriptTools.handleCreateNote>[0]);
+        case 'protokoll_get_enhancement_log':
+            return TranscriptTools.handleGetEnhancementLog(args as Parameters<typeof TranscriptTools.handleGetEnhancementLog>[0]);
 
         // Lifecycle Status & Tasks
         case 'protokoll_set_status':

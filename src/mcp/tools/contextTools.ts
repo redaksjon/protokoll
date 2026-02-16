@@ -82,6 +82,18 @@ export const listProjectsTool: Tool = {
                 type: 'boolean',
                 description: 'Include inactive projects (default: false)',
             },
+            limit: {
+                type: 'number',
+                description: 'Maximum number of results to return (default: 50)',
+            },
+            offset: {
+                type: 'number',
+                description: 'Number of results to skip for pagination (default: 0)',
+            },
+            search: {
+                type: 'string',
+                description: 'Filter by name/ID substring match (case-insensitive)',
+            },
         },
         required: [],
     },
@@ -100,6 +112,18 @@ export const listPeopleTool: Tool = {
                 type: 'string',
                 description: 'Path to the .protokoll context directory',
             },
+            limit: {
+                type: 'number',
+                description: 'Maximum number of results to return (default: 50)',
+            },
+            offset: {
+                type: 'number',
+                description: 'Number of results to skip for pagination (default: 0)',
+            },
+            search: {
+                type: 'string',
+                description: 'Filter by name/ID substring match (case-insensitive)',
+            },
         },
         required: [],
     },
@@ -117,6 +141,18 @@ export const listTermsTool: Tool = {
                 type: 'string',
                 description: 'Path to the .protokoll context directory',
             },
+            limit: {
+                type: 'number',
+                description: 'Maximum number of results to return (default: 50)',
+            },
+            offset: {
+                type: 'number',
+                description: 'Number of results to skip for pagination (default: 0)',
+            },
+            search: {
+                type: 'string',
+                description: 'Filter by name/ID substring match (case-insensitive)',
+            },
         },
         required: [],
     },
@@ -133,6 +169,18 @@ export const listCompaniesTool: Tool = {
             contextDirectory: {
                 type: 'string',
                 description: 'Path to the .protokoll context directory',
+            },
+            limit: {
+                type: 'number',
+                description: 'Maximum number of results to return (default: 50)',
+            },
+            offset: {
+                type: 'number',
+                description: 'Number of results to skip for pagination (default: 0)',
+            },
+            search: {
+                type: 'string',
+                description: 'Filter by name/ID substring match (case-insensitive)',
             },
         },
         required: [],
@@ -154,6 +202,14 @@ export const searchContextTool: Tool = {
             contextDirectory: {
                 type: 'string',
                 description: 'Path to the .protokoll context directory',
+            },
+            limit: {
+                type: 'number',
+                description: 'Maximum number of results to return (default: 50)',
+            },
+            offset: {
+                type: 'number',
+                description: 'Number of results to skip for pagination (default: 0)',
             },
         },
         required: ['query'],
@@ -218,7 +274,13 @@ export async function handleContextStatus(args: { contextDirectory?: string }) {
     };
 }
 
-export async function handleListProjects(args: { contextDirectory?: string; includeInactive?: boolean }) {
+export async function handleListProjects(args: { 
+    contextDirectory?: string; 
+    includeInactive?: boolean;
+    limit?: number;
+    offset?: number;
+    search?: string;
+}) {
     const context = await getContextInstance(args.contextDirectory);
 
     let projects = context.getAllProjects();
@@ -226,9 +288,28 @@ export async function handleListProjects(args: { contextDirectory?: string; incl
         projects = projects.filter(p => p.active !== false);
     }
 
+    // Apply search filter
+    if (args.search) {
+        const searchLower = args.search.toLowerCase();
+        projects = projects.filter(p => 
+            p.name.toLowerCase().includes(searchLower) ||
+            p.id.toLowerCase().includes(searchLower)
+        );
+    }
+
+    const total = projects.length;
+    const limit = args.limit ?? 50;
+    const offset = args.offset ?? 0;
+
+    // Apply pagination
+    const paginatedProjects = projects.slice(offset, offset + limit);
+
     return {
-        count: projects.length,
-        projects: projects.map(p => ({
+        total,
+        limit,
+        offset,
+        count: paginatedProjects.length,
+        projects: paginatedProjects.map(p => ({
             id: p.id,
             name: p.name,
             active: p.active !== false,
@@ -240,14 +321,39 @@ export async function handleListProjects(args: { contextDirectory?: string; incl
     };
 }
 
-export async function handleListPeople(args: { contextDirectory?: string }) {
+export async function handleListPeople(args: { 
+    contextDirectory?: string;
+    limit?: number;
+    offset?: number;
+    search?: string;
+}) {
     const context = await getContextInstance(args.contextDirectory);
 
-    const people = context.getAllPeople();
+    let people = context.getAllPeople();
+
+    // Apply search filter
+    if (args.search) {
+        const searchLower = args.search.toLowerCase();
+        people = people.filter(p => 
+            p.name.toLowerCase().includes(searchLower) ||
+            p.id.toLowerCase().includes(searchLower) ||
+            p.sounds_like?.some(s => s.toLowerCase().includes(searchLower))
+        );
+    }
+
+    const total = people.length;
+    const limit = args.limit ?? 50;
+    const offset = args.offset ?? 0;
+
+    // Apply pagination
+    const paginatedPeople = people.slice(offset, offset + limit);
 
     return {
-        count: people.length,
-        people: people.map(p => ({
+        total,
+        limit,
+        offset,
+        count: paginatedPeople.length,
+        people: paginatedPeople.map(p => ({
             id: p.id,
             name: p.name,
             company: p.company,
@@ -257,14 +363,39 @@ export async function handleListPeople(args: { contextDirectory?: string }) {
     };
 }
 
-export async function handleListTerms(args: { contextDirectory?: string }) {
+export async function handleListTerms(args: { 
+    contextDirectory?: string;
+    limit?: number;
+    offset?: number;
+    search?: string;
+}) {
     const context = await getContextInstance(args.contextDirectory);
 
-    const terms = context.getAllTerms();
+    let terms = context.getAllTerms();
+
+    // Apply search filter
+    if (args.search) {
+        const searchLower = args.search.toLowerCase();
+        terms = terms.filter(t => 
+            t.name.toLowerCase().includes(searchLower) ||
+            t.id.toLowerCase().includes(searchLower) ||
+            t.sounds_like?.some(s => s.toLowerCase().includes(searchLower))
+        );
+    }
+
+    const total = terms.length;
+    const limit = args.limit ?? 50;
+    const offset = args.offset ?? 0;
+
+    // Apply pagination
+    const paginatedTerms = terms.slice(offset, offset + limit);
 
     return {
-        count: terms.length,
-        terms: terms.map(t => ({
+        total,
+        limit,
+        offset,
+        count: paginatedTerms.length,
+        terms: paginatedTerms.map(t => ({
             id: t.id,
             name: t.name,
             expansion: t.expansion,
@@ -274,14 +405,39 @@ export async function handleListTerms(args: { contextDirectory?: string }) {
     };
 }
 
-export async function handleListCompanies(args: { contextDirectory?: string }) {
+export async function handleListCompanies(args: { 
+    contextDirectory?: string;
+    limit?: number;
+    offset?: number;
+    search?: string;
+}) {
     const context = await getContextInstance(args.contextDirectory);
 
-    const companies = context.getAllCompanies();
+    let companies = context.getAllCompanies();
+
+    // Apply search filter
+    if (args.search) {
+        const searchLower = args.search.toLowerCase();
+        companies = companies.filter(c => 
+            c.name.toLowerCase().includes(searchLower) ||
+            c.id.toLowerCase().includes(searchLower) ||
+            c.sounds_like?.some(s => s.toLowerCase().includes(searchLower))
+        );
+    }
+
+    const total = companies.length;
+    const limit = args.limit ?? 50;
+    const offset = args.offset ?? 0;
+
+    // Apply pagination
+    const paginatedCompanies = companies.slice(offset, offset + limit);
 
     return {
-        count: companies.length,
-        companies: companies.map(c => ({
+        total,
+        limit,
+        offset,
+        count: paginatedCompanies.length,
+        companies: paginatedCompanies.map(c => ({
             id: c.id,
             name: c.name,
             fullName: c.fullName,
@@ -291,15 +447,30 @@ export async function handleListCompanies(args: { contextDirectory?: string }) {
     };
 }
 
-export async function handleSearchContext(args: { query: string; contextDirectory?: string }) {
+export async function handleSearchContext(args: { 
+    query: string; 
+    contextDirectory?: string;
+    limit?: number;
+    offset?: number;
+}) {
     const context = await getContextInstance(args.contextDirectory);
 
     const results = context.search(args.query);
 
+    const total = results.length;
+    const limit = args.limit ?? 50;
+    const offset = args.offset ?? 0;
+
+    // Apply pagination
+    const paginatedResults = results.slice(offset, offset + limit);
+
     return {
         query: args.query,
-        count: results.length,
-        results: results.map(formatEntity),
+        total,
+        limit,
+        offset,
+        count: paginatedResults.length,
+        results: paginatedResults.map(formatEntity),
     };
 }
 
