@@ -15,6 +15,7 @@ import * as SystemTools from './systemTools';
 import * as RelationshipTools from './relationshipTools';
 import * as ContentTools from './contentTools';
 import * as StatusTools from './statusTools';
+import * as QueueTools from './queueTools';
 
 // Re-export all handlers for testing
 export * from './discoveryTools';
@@ -27,6 +28,7 @@ export * from './systemTools';
 export * from './relationshipTools';
 export * from './contentTools';
 export * from './statusTools';
+export * from './queueTools';
 export * from './shared';
 
 // ============================================================================
@@ -101,6 +103,14 @@ export const tools: Tool[] = [
     StatusTools.createTaskTool,
     StatusTools.completeTaskTool,
     StatusTools.deleteTaskTool,
+
+    // Queue Management
+    QueueTools.queueStatusTool,
+    QueueTools.getTranscriptByUuidTool,
+    QueueTools.retryTranscriptionTool,
+    QueueTools.cancelTranscriptionTool,
+    QueueTools.workerStatusTool,
+    QueueTools.restartWorkerTool,
 ];
 
 // ============================================================================
@@ -224,6 +234,20 @@ export async function handleToolCall(name: string, args: unknown): Promise<unkno
             return StatusTools.handleCompleteTask(args as Parameters<typeof StatusTools.handleCompleteTask>[0]);
         case 'protokoll_delete_task':
             return StatusTools.handleDeleteTask(args as Parameters<typeof StatusTools.handleDeleteTask>[0]);
+
+        // Queue Management
+        case 'protokoll_queue_status':
+            return QueueTools.handleQueueStatus();
+        case 'protokoll_get_transcript_by_uuid':
+            return QueueTools.handleGetTranscriptByUuid(args as Parameters<typeof QueueTools.handleGetTranscriptByUuid>[0]);
+        case 'protokoll_retry_transcription':
+            return QueueTools.handleRetryTranscription(args as Parameters<typeof QueueTools.handleRetryTranscription>[0]);
+        case 'protokoll_cancel_transcription':
+            return QueueTools.handleCancelTranscription(args as Parameters<typeof QueueTools.handleCancelTranscription>[0]);
+        case 'protokoll_worker_status':
+            return QueueTools.handleWorkerStatus();
+        case 'protokoll_restart_worker':
+            return QueueTools.handleRestartWorker();
 
         default:
             throw new Error(`Unknown tool: ${name}`);

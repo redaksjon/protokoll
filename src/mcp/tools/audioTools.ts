@@ -189,6 +189,10 @@ export async function handleProcessAudio(args: {
     // Get audio file metadata (creation time and hash)
     const { creationTime, hash } = await getAudioMetadata(audioFile);
 
+    // Get weight model service for pipeline integration
+    const { getWeightModelService, updateTranscriptInWeightModel } = await import('../services/weightModel');
+    const weightModelService = getWeightModelService();
+
     // Create pipeline
     const pipeline = await Pipeline.create({
         model: args.model || DEFAULT_MODEL,
@@ -208,6 +212,10 @@ export async function handleProcessAudio(args: {
         processedDirectory: processedDirectory || undefined,
         maxAudioSize: DEFAULT_MAX_AUDIO_SIZE,
         tempDirectory: DEFAULT_TEMP_DIRECTORY,
+        weightModelProvider: weightModelService?.provider,
+        onTranscriptEntitiesUpdated: (uuid: string, entityIds: string[], projectId?: string) => {
+            updateTranscriptInWeightModel(uuid, entityIds, projectId);
+        },
     });
 
     // Process through pipeline
