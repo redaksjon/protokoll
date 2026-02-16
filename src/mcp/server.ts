@@ -38,6 +38,7 @@ import * as ServerConfig from './serverConfig';
 import * as Roots from './roots';
 import type { McpRoot } from './types';
 import { initializeWorkingDirectoryFromArgsAndConfig } from './configDiscovery';
+import { initializeWeightModel } from './services/weightModel';
 
 // ============================================================================
 // Server Setup
@@ -152,6 +153,13 @@ async function main() {
     
     Roots.setRoots(initialRoots);
     await ServerConfig.initializeServerConfig(initialRoots);
+
+    // Initialize weight model
+    // eslint-disable-next-line no-console
+    console.log('[MCP Server] Initializing weight model...');
+    await initializeWeightModel(workspaceRoot);
+    // eslint-disable-next-line no-console
+    console.log('[MCP Server] Weight model initialization complete');
 
     // Keep the process alive - MCP servers should run indefinitely
     // The StdioServerTransport will handle stdin/stdout until the connection closes

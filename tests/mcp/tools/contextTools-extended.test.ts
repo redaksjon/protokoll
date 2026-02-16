@@ -167,6 +167,35 @@ describe('contextTools handlers (extended)', () => {
             const result = await handleListProjects({ includeInactive: true });
             expect(result.projects).toHaveLength(2);
         });
+
+        it('applies pagination with limit and offset', async () => {
+            mockContext.getAllProjects.mockReturnValue([
+                { id: 'p1', name: 'Project 1', active: true, routing: {}, classification: {} },
+                { id: 'p2', name: 'Project 2', active: true, routing: {}, classification: {} },
+                { id: 'p3', name: 'Project 3', active: true, routing: {}, classification: {} },
+            ]);
+
+            const result = await handleListProjects({ limit: 2, offset: 1 });
+            expect(result.total).toBe(3);
+            expect(result.limit).toBe(2);
+            expect(result.offset).toBe(1);
+            expect(result.count).toBe(2);
+            expect(result.projects).toHaveLength(2);
+            expect(result.projects[0].id).toBe('p2');
+            expect(result.projects[1].id).toBe('p3');
+        });
+
+        it('filters by search query', async () => {
+            mockContext.getAllProjects.mockReturnValue([
+                { id: 'alpha-project', name: 'Alpha Project', active: true, routing: {}, classification: {} },
+                { id: 'beta-project', name: 'Beta Project', active: true, routing: {}, classification: {} },
+            ]);
+
+            const result = await handleListProjects({ search: 'alpha' });
+            expect(result.total).toBe(1);
+            expect(result.projects).toHaveLength(1);
+            expect(result.projects[0].id).toBe('alpha-project');
+        });
     });
 
     describe('handleListPeople', () => {
@@ -183,6 +212,30 @@ describe('contextTools handlers (extended)', () => {
                 company: 'Acme',
                 role: 'Engineer',
             });
+        });
+
+        it('applies pagination', async () => {
+            mockContext.getAllPeople.mockReturnValue([
+                { id: 'alice', name: 'Alice', company: 'Acme', role: 'Engineer', sounds_like: [] },
+                { id: 'bob', name: 'Bob', company: 'Acme', role: 'Manager', sounds_like: [] },
+                { id: 'charlie', name: 'Charlie', company: 'Acme', role: 'Designer', sounds_like: [] },
+            ]);
+
+            const result = await handleListPeople({ limit: 2, offset: 1 });
+            expect(result.total).toBe(3);
+            expect(result.count).toBe(2);
+            expect(result.people[0].id).toBe('bob');
+        });
+
+        it('filters by search including sounds_like', async () => {
+            mockContext.getAllPeople.mockReturnValue([
+                { id: 'alice', name: 'Alice', company: 'Acme', role: 'Engineer', sounds_like: ['Alicia'] },
+                { id: 'bob', name: 'Bob', company: 'Acme', role: 'Manager', sounds_like: [] },
+            ]);
+
+            const result = await handleListPeople({ search: 'Alicia' });
+            expect(result.total).toBe(1);
+            expect(result.people[0].id).toBe('alice');
         });
     });
 
@@ -228,6 +281,19 @@ describe('contextTools handlers (extended)', () => {
             expect(result.query).toBe('alpha');
             expect(result.count).toBe(1);
             expect(result.results[0]).toMatchObject({ id: 'p1', name: 'Project Alpha', type: 'project' });
+        });
+
+        it('applies pagination to search results', async () => {
+            mockContext.search.mockReturnValue([
+                { id: 'p1', name: 'Project Alpha', type: 'project' },
+                { id: 'p2', name: 'Project Beta', type: 'project' },
+                { id: 'p3', name: 'Project Gamma', type: 'project' },
+            ]);
+
+            const result = await handleSearchContext({ query: 'project', limit: 2, offset: 1 });
+            expect(result.total).toBe(3);
+            expect(result.count).toBe(2);
+            expect(result.results[0].id).toBe('p2');
         });
     });
 

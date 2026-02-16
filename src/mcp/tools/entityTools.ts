@@ -613,6 +613,54 @@ export const addCompanyTool: Tool = {
     },
 };
 
+export const editCompanyTool: Tool = {
+    name: 'protokoll_edit_company',
+    description:
+        'Edit an existing company with manual modifications. ' +
+        'Can update company details and manage sounds_like variants.',
+    inputSchema: {
+        type: 'object',
+        properties: {
+            id: {
+                type: 'string',
+                description: 'Company ID to edit',
+            },
+            name: {
+                type: 'string',
+                description: 'Update company name',
+            },
+            fullName: {
+                type: 'string',
+                description: 'Set full legal name',
+            },
+            industry: {
+                type: 'string',
+                description: 'Set industry',
+            },
+            sounds_like: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Replace entire sounds_like array',
+            },
+            add_sounds_like: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Add sounds_like variants',
+            },
+            remove_sounds_like: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Remove sounds_like variants',
+            },
+            contextDirectory: {
+                type: 'string',
+                description: 'Path to the .protokoll context directory',
+            },
+        },
+        required: ['id'],
+    },
+};
+
 export const deleteEntityTool: Tool = {
     name: 'protokoll_delete_entity',
     description:
@@ -1519,6 +1567,68 @@ export async function handleAddCompany(args: {
         success: true,
         message: `Company "${args.name}" added successfully`,
         entity: formatEntity(company),
+    };
+}
+
+export async function handleEditCompany(args: {
+    id: string;
+    name?: string;
+    fullName?: string;
+    industry?: string;
+    sounds_like?: string[];
+    add_sounds_like?: string[];
+    remove_sounds_like?: string[];
+    contextDirectory?: string;
+}) {
+    const context = await Context.create({
+        startingDir: args.contextDirectory || process.cwd(),
+    });
+
+    if (!context.hasContext()) {
+        throw new Error('No .protokoll directory found. Initialize context first.');
+    }
+
+    const existingCompany = findCompanyResilient(context, args.id);
+
+    const updatedSoundsLike = mergeArray(
+        existingCompany.sounds_like,
+        args.sounds_like,
+        args.add_sounds_like,
+        args.remove_sounds_like
+    );
+
+    // Build updated company
+    const updatedCompany: Company = {
+        ...existingCompany,
+        ...(args.name !== undefined && { name: args.name }),
+        ...(args.fullName !== undefined && { fullName: args.fullName }),
+        ...(args.industry !== undefined && { industry: args.industry }),
+        updatedAt: new Date(),
+    };
+
+    // Handle sounds_like array
+    if (updatedSoundsLike !== undefined) {
+        updatedCompany.sounds_like = updatedSoundsLike;
+    } else if (existingCompany.sounds_like && (args.sounds_like !== undefined || args.remove_sounds_like)) {
+        delete updatedCompany.sounds_like;
+    }
+
+    await context.saveEntity(updatedCompany, true);
+
+    // Build summary of changes
+    const changes: string[] = [];
+    if (args.name !== undefined) changes.push(`name: "${args.name}"`);
+    if (args.fullName !== undefined) changes.push(`fullName: "${args.fullName}"`);
+    if (args.industry !== undefined) changes.push(`industry: "${args.industry}"`);
+    if (args.sounds_like !== undefined) changes.push(`sounds_like replaced with ${args.sounds_like.length} items`);
+    if (args.add_sounds_like?.length) changes.push(`added ${args.add_sounds_like.length} sounds_like variants`);
+    if (args.remove_sounds_like?.length) changes.push(`removed ${args.remove_sounds_like.length} sounds_like variants`);
+
+    return {
+        success: true,
+        message: `Updated company "${existingCompany.name}"`,
+        changes,
+        company: formatEntity(updatedCompany),
     };
 }
 

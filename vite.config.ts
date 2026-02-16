@@ -68,6 +68,11 @@ export default defineConfig({
                 '@utilarium/dreadcabinet',
                 '@utilarium/overcontext',
                 '@types/fluent-ffmpeg',
+                // Hono dependencies
+                'hono',
+                'hono/cors',
+                '@hono/node-server',
+                '@hono/mcp',
                 // Native modules - must not be bundled
                 'better-sqlite3',
                 'dayjs',
@@ -88,6 +93,7 @@ export default defineConfig({
                 index: 'src/index.ts',
                 'mcp/server': 'src/mcp/server.ts',
                 'mcp/server-http': 'src/mcp/server-http.ts',
+                'mcp/server-hono': 'src/mcp/server-hono.ts',
             },
             output: {
                 format: 'esm',
