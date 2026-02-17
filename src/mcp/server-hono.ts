@@ -236,7 +236,7 @@ const app = new Hono();
 // CORS middleware for /mcp endpoint
 app.use('/mcp', cors({
     origin: '*',
-    allowHeaders: ['Content-Type', 'Mcp-Session-Id', 'Mcp-Protocol-Version', 'Last-Event-Id'],
+    allowHeaders: ['Content-Type', 'Accept', 'Mcp-Session-Id', 'Mcp-Protocol-Version', 'Last-Event-Id'],
     exposeHeaders: ['Mcp-Session-Id', 'Mcp-Protocol-Version'],
     allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
 }));
@@ -638,13 +638,13 @@ app.get('/mcp', async (c) => {
 
     // Use Hono's streamSSE for Server-Sent Events
     return streamSSE(c, async (stream) => {
-        // Send initial connection message
-        await stream.writeSSE({ data: 'connected', event: 'comment' });
+        // Send initial connection message as a comment
+        await stream.write(': connected\n\n');
 
         // Keep connection alive with periodic pings
         const pingInterval = setInterval(async () => {
             try {
-                await stream.writeSSE({ data: 'ping', event: 'comment' });
+                await stream.write(': ping\n\n');
             } catch {
                 clearInterval(pingInterval);
             }
@@ -657,8 +657,17 @@ app.get('/mcp', async (c) => {
             console.log(`SSE client disconnected from session ${sessionId}`);
         });
 
-        // Keep the stream open
-        await stream.sleep(Number.MAX_SAFE_INTEGER);
+        // Keep the stream open indefinitely
+        // Use a loop with reasonable sleep intervals instead of MAX_SAFE_INTEGER
+        let keepAlive = true;
+        while (keepAlive) {
+            try {
+                await stream.sleep(86400000); // Sleep for 24 hours at a time
+            } catch {
+                // Stream was closed
+                keepAlive = false;
+            }
+        }
     });
 });
 

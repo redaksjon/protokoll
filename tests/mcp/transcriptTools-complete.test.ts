@@ -195,7 +195,7 @@ describe('transcriptTools - complete (edge cases and uncovered paths)', () => {
                         people: [{ id: 'a,b', name: 'Person' }],
                     },
                 })
-            ).rejects.toThrow('Entity IDs should be slugified');
+            ).rejects.toThrow('Entity IDs should be UUIDs or slugified identifiers');
         });
 
         it('should throw for entity ID with curly braces', async () => {
@@ -208,7 +208,7 @@ describe('transcriptTools - complete (edge cases and uncovered paths)', () => {
                         people: [{ id: 'id-with-{brace', name: 'Person' }],
                     },
                 })
-            ).rejects.toThrow('Entity IDs should be slugified');
+            ).rejects.toThrow('Entity IDs should be UUIDs or slugified identifiers');
         });
 
         it('should accept valid entity ID with underscores', async () => {
