@@ -3,6 +3,7 @@
  * Entity Tools - Create, update, delete, and manage context entities
  */
  
+import { randomUUID } from 'crypto';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import * as Context from '@/context';
 import type { Person, Project, Term, Company, Entity, EntityRelationship } from '@/context/types';
@@ -15,6 +16,14 @@ import {
 } from '@redaksjon/protokoll-engine';
  
 import { formatEntity, slugify, mergeArray } from './shared.js';
+
+/**
+ * Check if a string is a valid UUID
+ */
+function isValidUUID(str: string): boolean {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    return uuidRegex.test(str);
+}
 
 // ============================================================================
 // Tool Definitions
@@ -710,7 +719,9 @@ export async function handleAddPerson(args: {
         throw new Error('No .protokoll directory found. Initialize context first.');
     }
 
-    const id = args.id || slugify(args.name);
+    // Generate UUID for new entities, or use provided ID if it's a valid UUID
+    const id = args.id && isValidUUID(args.id) ? args.id : randomUUID();
+    const slug = slugify(args.name);
 
     if (context.getPerson(id)) {
         throw new Error(`Person with ID "${id}" already exists`);
@@ -718,6 +729,7 @@ export async function handleAddPerson(args: {
 
     const person: Person = {
         id,
+        slug,
         name: args.name,
         type: 'person',
         ...(args.firstName && { firstName: args.firstName }),
@@ -830,7 +842,9 @@ export async function handleAddProject(args: {
         throw new Error('No .protokoll directory found. Initialize context first.');
     }
 
-    const id = args.id || slugify(args.name);
+    // Generate UUID for new entities, or use provided ID if it's a valid UUID
+    const id = args.id && isValidUUID(args.id) ? args.id : randomUUID();
+    const slug = slugify(args.name);
 
     if (context.getProject(id)) {
         throw new Error(`Project with ID "${id}" already exists`);
@@ -887,6 +901,7 @@ export async function handleAddProject(args: {
 
     const project: Project = {
         id,
+        slug,
         name: args.name,
         type: 'project',
         classification: {
@@ -1246,7 +1261,9 @@ export async function handleAddTerm(args: {
         throw new Error('No .protokoll directory found. Initialize context first.');
     }
 
-    const id = args.id || slugify(args.term);
+    // Generate UUID for new entities, or use provided ID if it's a valid UUID
+    const id = args.id && isValidUUID(args.id) ? args.id : randomUUID();
+    const slug = slugify(args.term);
 
     if (context.getTerm(id)) {
         throw new Error(`Term with ID "${id}" already exists`);
@@ -1254,6 +1271,7 @@ export async function handleAddTerm(args: {
 
     const term: Term = {
         id,
+        slug,
         name: args.term,
         type: 'term',
         ...(args.expansion && { expansion: args.expansion }),
@@ -1546,7 +1564,9 @@ export async function handleAddCompany(args: {
         throw new Error('No .protokoll directory found. Initialize context first.');
     }
 
-    const id = args.id || slugify(args.name);
+    // Generate UUID for new entities, or use provided ID if it's a valid UUID
+    const id = args.id && isValidUUID(args.id) ? args.id : randomUUID();
+    const slug = slugify(args.name);
 
     if (context.getCompany(id)) {
         throw new Error(`Company with ID "${id}" already exists`);
@@ -1554,6 +1574,7 @@ export async function handleAddCompany(args: {
 
     const company: Company = {
         id,
+        slug,
         name: args.name,
         type: 'company',
         ...(args.fullName && { fullName: args.fullName }),

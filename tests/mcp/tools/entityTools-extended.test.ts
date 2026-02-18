@@ -80,11 +80,12 @@ describe('entityTools handlers (extended)', () => {
         });
 
         it('throws when person with ID already exists', async () => {
-            mockContext.getPerson.mockReturnValue({ id: 'john-doe', name: 'John Doe', type: 'person' });
+            const existingId = '61f1f507-1d93-47d4-887e-9c427e79fda6';
+            mockContext.getPerson.mockReturnValue({ id: existingId, name: 'John Doe', type: 'person' });
 
             await expect(
                 handleAddPerson({ name: 'John Doe' })
-            ).rejects.toThrow('Person with ID "john-doe" already exists');
+            ).rejects.toThrow('already exists');
         });
 
         it('adds person successfully with minimal args', async () => {
@@ -93,23 +94,24 @@ describe('entityTools handlers (extended)', () => {
             expect(result.success).toBe(true);
             expect(result.message).toContain('Jane Smith');
             expect(result.entity).toMatchObject({
-                id: 'jane-smith',
                 name: 'Jane Smith',
                 type: 'person',
             });
+            expect(result.entity.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
             expect(mockContext.saveEntity).toHaveBeenCalledWith(
                 expect.objectContaining({
-                    id: 'jane-smith',
                     name: 'Jane Smith',
                     type: 'person',
+                    slug: 'jane-smith',
                 })
             );
         });
 
         it('adds person with custom id and optional fields', async () => {
+            const customId = '31bc410f-6983-48b8-b7a8-c7f9160267e9';
             const result = await handleAddPerson({
                 name: 'Alice',
-                id: 'alice-custom',
+                id: customId,
                 firstName: 'Alice',
                 lastName: 'Wonder',
                 company: 'acme',
@@ -122,7 +124,7 @@ describe('entityTools handlers (extended)', () => {
             expect(result.success).toBe(true);
             expect(mockContext.saveEntity).toHaveBeenCalledWith(
                 expect.objectContaining({
-                    id: 'alice-custom',
+                    id: customId,
                     name: 'Alice',
                     firstName: 'Alice',
                     lastName: 'Wonder',
@@ -212,11 +214,12 @@ describe('entityTools handlers (extended)', () => {
         });
 
         it('throws when project with ID already exists', async () => {
-            mockContext.getProject.mockReturnValue({ id: 'my-project', name: 'My Project', type: 'project' });
+            const existingId = '3e5e886c-882d-4c31-baac-9e2d5e6cf418';
+            mockContext.getProject.mockReturnValue({ id: existingId, name: 'My Project', type: 'project' });
 
             await expect(
                 handleAddProject({ name: 'My Project' })
-            ).rejects.toThrow('Project with ID "my-project" already exists');
+            ).rejects.toThrow('already exists');
         });
 
         it('throws when smart assistance enabled (temporarily unavailable)', async () => {
@@ -242,16 +245,16 @@ describe('entityTools handlers (extended)', () => {
 
             expect(result.success).toBe(true);
             expect(result.entity).toMatchObject({
-                id: 'test-project',
                 name: 'Test Project',
                 type: 'project',
             });
+            expect(result.entity.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
             expect(result.smartAssistUsed).toBe(false);
             expect(mockContext.saveEntity).toHaveBeenCalledWith(
                 expect.objectContaining({
-                    id: 'test-project',
                     name: 'Test Project',
                     type: 'project',
+                    slug: 'test-project',
                     classification: expect.objectContaining({
                         context_type: 'work',
                         explicit_phrases: ['test phrase'],
@@ -432,17 +435,19 @@ describe('entityTools handlers (extended)', () => {
         });
 
         it('throws when term with ID already exists', async () => {
-            mockContext.getTerm.mockReturnValue({ id: 'k8s', name: 'K8s', type: 'term' });
+            const existingId = 'b564e7dc-3c82-4db6-af89-a21dce8a67da';
+            mockContext.getTerm.mockReturnValue({ id: existingId, name: 'K8s', type: 'term' });
 
             await expect(
                 handleAddTerm({ term: 'K8s' })
-            ).rejects.toThrow('Term with ID "k8s" already exists');
+            ).rejects.toThrow('already exists');
         });
 
         it('adds term successfully with all optional fields', async () => {
+            const customId = 'f024011c-ec35-400b-8c7a-fbd311d5b98e';
             const result = await handleAddTerm({
                 term: 'Kubernetes',
-                id: 'k8s-custom',
+                id: customId,
                 expansion: 'K8s',
                 domain: 'devops',
                 description: 'Container orchestration',
@@ -455,7 +460,7 @@ describe('entityTools handlers (extended)', () => {
             expect(result.success).toBe(true);
             expect(mockContext.saveEntity).toHaveBeenCalledWith(
                 expect.objectContaining({
-                    id: 'k8s-custom',
+                    id: customId,
                     name: 'Kubernetes',
                     type: 'term',
                     expansion: 'K8s',
@@ -698,17 +703,19 @@ describe('entityTools handlers (extended)', () => {
         });
 
         it('throws when company with ID already exists', async () => {
-            mockContext.getCompany.mockReturnValue({ id: 'acme-corp', name: 'Acme Corp', type: 'company' });
+            const existingId = 'b33ee56b-56dc-47a8-99ec-dd9ebbc6be97';
+            mockContext.getCompany.mockReturnValue({ id: existingId, name: 'Acme Corp', type: 'company' });
 
             await expect(
                 handleAddCompany({ name: 'Acme Corp' })
-            ).rejects.toThrow('Company with ID "acme-corp" already exists');
+            ).rejects.toThrow('already exists');
         });
 
         it('adds company successfully with optional fields', async () => {
+            const customId = '8c7a4011-ec35-400b-8c7a-fbd311d5b98e';
             const result = await handleAddCompany({
                 name: 'Acme',
-                id: 'acme-custom',
+                id: customId,
                 fullName: 'Acme Corporation',
                 industry: 'Technology',
                 sounds_like: ['akme'],
@@ -718,7 +725,7 @@ describe('entityTools handlers (extended)', () => {
             expect(result.success).toBe(true);
             expect(mockContext.saveEntity).toHaveBeenCalledWith(
                 expect.objectContaining({
-                    id: 'acme-custom',
+                    id: customId,
                     name: 'Acme',
                     type: 'company',
                     fullName: 'Acme Corporation',

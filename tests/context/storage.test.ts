@@ -151,8 +151,9 @@ role: Manager`
   
   describe('save', () => {
     it('should save entity to correct directory', async () => {
+      const testId = 'a1b2c3d4-e5f6-4789-abcd-ef0123456789';
       const person: Person = {
-        id: 'jane-doe',
+        id: testId,
         name: 'Jane Doe',
         type: 'person',
         firstName: 'Jane',
@@ -161,15 +162,22 @@ role: Manager`
       
       await storage.save(person, tempDir);
       
-      const filePath = path.join(tempDir, 'context', 'people', 'jane-doe.yaml');
-      const content = await fs.readFile(filePath, 'utf-8');
+      // Find file with UUID prefix (first 10 chars of UUID)
+      const peopleDir = path.join(tempDir, 'context', 'people');
+      const files = await fs.readdir(peopleDir);
+      const uuidPrefix = testId.substring(0, 10);
+      const savedFile = files.find(f => f.startsWith(uuidPrefix) && f.endsWith('.yaml'));
+      expect(savedFile).toBeDefined();
+      
+      const content = await fs.readFile(path.join(peopleDir, savedFile!), 'utf-8');
       expect(content).toContain('name: Jane Doe');
       expect(content).not.toContain('type:'); // Type should not be in file
     });
     
     it('should create directories if they do not exist', async () => {
+      const testId = 'b1c2d3e4-f5a6-4789-bcde-f01234567890';
       const term: Term = {
-        id: 'new-term',
+        id: testId,
         name: 'New Term',
         type: 'term',
         expansion: 'New Term Expansion',
@@ -177,7 +185,14 @@ role: Manager`
       
       await storage.save(term, tempDir);
       
-      const filePath = path.join(tempDir, 'context', 'terms', 'new-term.yaml');
+      // Find file with UUID prefix (first 10 chars of UUID)
+      const termsDir = path.join(tempDir, 'context', 'terms');
+      const files = await fs.readdir(termsDir);
+      const uuidPrefix = testId.substring(0, 10);
+      const savedFile = files.find(f => f.startsWith(uuidPrefix) && f.endsWith('.yaml'));
+      expect(savedFile).toBeDefined();
+      
+      const filePath = path.join(termsDir, savedFile!);
       const stat = await fs.stat(filePath);
       expect(stat.isFile()).toBe(true);
     });
@@ -611,8 +626,9 @@ sounds_like:
     });
 
     it('should save project with sounds_like field', async () => {
+      const testId = 'c1d2e3f4-a5b6-4789-cdef-012345678901';
       const project: Project = {
-        id: 'redaksjon',
+        id: testId,
         name: 'Redaksjon',
         type: 'project',
         classification: {
@@ -630,8 +646,14 @@ sounds_like:
       
       await storage.save(project, tempDir);
       
-      const filePath = path.join(tempDir, 'context', 'projects', 'redaksjon.yaml');
-      const content = await fs.readFile(filePath, 'utf-8');
+      // Find file with UUID prefix (first 10 chars of UUID)
+      const projectsDir = path.join(tempDir, 'context', 'projects');
+      const files = await fs.readdir(projectsDir);
+      const uuidPrefix = testId.substring(0, 10);
+      const savedFile = files.find(f => f.startsWith(uuidPrefix) && f.endsWith('.yaml'));
+      expect(savedFile).toBeDefined();
+      
+      const content = await fs.readFile(path.join(projectsDir, savedFile!), 'utf-8');
       expect(content).toContain('sounds_like:');
       expect(content).toContain('redaction');
       expect(content).toContain('red action');
@@ -743,14 +765,21 @@ sounds_like:
     });
 
     it('should save ignored entities', async () => {
+      const testId = 'd1e2f3a4-b5c6-4789-defa-123456789012';
       await storage.save({
-        id: 'test-ignored',
+        id: testId,
         name: 'Test Ignored',
         type: 'ignored',
       }, tempDir);
       
-      const filePath = path.join(tempDir, 'context', 'ignored', 'test-ignored.yaml');
-      const content = await fs.readFile(filePath, 'utf-8');
+      // Find file with UUID prefix (first 10 chars of UUID)
+      const ignoredDir = path.join(tempDir, 'context', 'ignored');
+      const files = await fs.readdir(ignoredDir);
+      const uuidPrefix = testId.substring(0, 10);
+      const savedFile = files.find(f => f.startsWith(uuidPrefix) && f.endsWith('.yaml'));
+      expect(savedFile).toBeDefined();
+      
+      const content = await fs.readFile(path.join(ignoredDir, savedFile!), 'utf-8');
       expect(content).toContain('name: Test Ignored');
     });
   });

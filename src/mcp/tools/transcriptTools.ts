@@ -944,20 +944,27 @@ export async function handleUpdateTranscriptEntityReferences(args: {
         if (id.includes('},') || id.includes('{') || id.includes('}') || id.includes(',')) {
             throw new Error(
                 `Invalid entity ID "${id}" for ${type} "${name}". ` +
-                `Entity IDs should be slugified identifiers (e.g., "jack-smith", "discursive"), ` +
-                `not JSON syntax. Please provide a valid slugified ID.`
+                `Entity IDs should be UUIDs or slugified identifiers (e.g., "a1b2c3d4-...", "jack-smith"), ` +
+                `not JSON syntax. Please provide a valid ID.`
             );
         }
         
-        // Basic validation: entity IDs should be alphanumeric with hyphens/underscores
-        if (!/^[a-z0-9_-]+$/i.test(id)) {
-            throw new Error(
-                `Invalid entity ID "${id}" for ${type} "${name}". ` +
-                `Entity IDs should only contain letters, numbers, hyphens, and underscores.`
-            );
+        // Accept UUID format
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (uuidRegex.test(id)) {
+            return id.trim();
         }
         
-        return id.trim();
+        // Accept slug format for backward compatibility
+        const slugRegex = /^[a-z0-9_-]+$/i;
+        if (slugRegex.test(id)) {
+            return id.trim();
+        }
+        
+        throw new Error(
+            `Invalid entity ID "${id}" for ${type} "${name}". ` +
+            `Entity IDs should be UUIDs or slugified identifiers (letters, numbers, hyphens, underscores).`
+        );
     };
 
     // Convert incoming entities to EntityReference format with validation

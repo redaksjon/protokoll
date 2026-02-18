@@ -477,7 +477,7 @@ describe('transcriptTools - extended handlers', () => {
                         people: [{ id: '{"id":"x"}', name: 'Person' }],
                     },
                 })
-            ).rejects.toThrow('Entity IDs should be slugified');
+            ).rejects.toThrow('Entity IDs should be UUIDs or slugified identifiers');
         });
 
         it('should update all entity types', async () => {

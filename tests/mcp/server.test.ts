@@ -113,6 +113,19 @@ vi.mock('../../src/mcp/tools/shared', async () => {
     };
 });
 
+// Helper function to generate consistent test UUIDs
+// Uses a deterministic UUID v5 namespace for test consistency
+function testUUID(name: string): string {
+    // Use a simple hash-based approach for deterministic UUIDs in tests
+    // Format: 8-4-4-4-12 hex digits
+    const hash = name.split('').reduce((acc, char) => {
+        return ((acc << 5) - acc) + char.charCodeAt(0);
+    }, 0);
+    
+    const hex = Math.abs(hash).toString(16).padStart(32, '0').substring(0, 32);
+    return `${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20, 32)}`;
+}
+
 import {
     fileExists,
     getAudioMetadata,
@@ -488,8 +501,9 @@ routing:
         it('should return all projects when includeInactive is true', async () => {
             // This test verifies that includeInactive=true doesn't filter any projects
             // First add some projects
+            const testId = testUUID('include-test-project');
             await handleAddProject({
-                id: 'include-test-project',
+                id: testId,
                 name: 'Include Test Project',
                 destination: '/tmp/include-test',
                 sounds_like: [],  // Bypass smart assistance
@@ -508,7 +522,7 @@ routing:
             // Should have at least the project we just added
             expect(result.projects.length).toBeGreaterThan(0);
             // The include-test-project should be in the list
-            const testProject = result.projects.find((p: { id: string }) => p.id === 'include-test-project');
+            const testProject = result.projects.find((p: { id: string }) => p.id === testId);
             expect(testProject).toBeDefined();
         });
     });
@@ -575,8 +589,9 @@ routing:
 
     describe('handleGetEntity', () => {
         it('should get a specific person', async () => {
+            const testId = testUUID('get-test-person');
             await handleAddPerson({
-                id: 'get-test-person',
+                id: testId,
                 name: 'Get Test Person',
                 role: 'Developer',
                 contextDirectory: protokollDir
@@ -584,11 +599,11 @@ routing:
 
             const result = await handleGetEntity({
                 entityType: 'person',
-                entityId: 'get-test-person',
+                entityId: testId,
                 contextDirectory: protokollDir
             });
 
-            expect(result.id).toBe('get-test-person');
+            expect(result.id).toBe(testId);
             expect(result.name).toBe('Get Test Person');
             expect(result.filePath).toBeTruthy();
         });
@@ -602,8 +617,9 @@ routing:
         });
 
         it('should get a specific project', async () => {
+            const testId = testUUID('get-test-project');
             await handleAddProject({
-                id: 'get-test-project',
+                id: testId,
                 name: 'Get Test Project',
                 destination: '/tmp/get-test',
                 sounds_like: [],  // Bypass smart assistance
@@ -614,11 +630,11 @@ routing:
 
             const result = await handleGetEntity({
                 entityType: 'project',
-                entityId: 'get-test-project',
+                entityId: testId,
                 contextDirectory: protokollDir
             });
 
-            expect(result.id).toBe('get-test-project');
+            expect(result.id).toBe(testId);
             expect(result.name).toBe('Get Test Project');
         });
     });
@@ -643,14 +659,15 @@ routing:
         });
 
         it('should handle custom ID', async () => {
+            const testId = testUUID('custom-person-id');
             const result = await handleAddPerson({
-                id: 'custom-person-id',
+                id: testId,
                 name: 'Custom Person',
                 contextDirectory: protokollDir
             });
 
             expect(result.success).toBe(true);
-            expect(result.entity.id).toBe('custom-person-id');
+            expect(result.entity.id).toBe(testId);
         });
     });
 
@@ -759,8 +776,9 @@ routing:
         });
 
         it('should add project with custom id and sounds_like', async () => {
+            const testId = testUUID('custom-norwegian-id');
             const result = await handleAddProject({
-                id: 'custom-norwegian-id',
+                id: testId,
                 name: 'Redaksjon',
                 destination: '/tmp/redaksjon',
                 sounds_like: ['redaction', 'red action', 'red ox on'],
@@ -769,7 +787,7 @@ routing:
             });
 
             expect(result.success).toBe(true);
-            expect(result.entity.id).toBe('custom-norwegian-id');
+            expect(result.entity.id).toBe(testId);
             expect(result.entity.name).toBe('Redaksjon');
             expect(result.entity.sounds_like).toContain('redaction');
         });
@@ -838,8 +856,9 @@ routing:
     describe('handleEditPerson', () => {
         it('should add sounds_like variants to existing person', async () => {
             // First add a person
+            const testId = testUUID('edit-person-test');
             await handleAddPerson({
-                id: 'edit-person-test',
+                id: testId,
                 name: 'John Doe',
                 sounds_like: ['john do'],
                 contextDirectory: protokollDir
@@ -847,7 +866,7 @@ routing:
 
             // Edit to add more sounds_like
             const result = await handleEditPerson({
-                id: 'edit-person-test',
+                id: testId,
                 add_sounds_like: ['jon doe', 'john dough'],
                 contextDirectory: protokollDir
             });
@@ -860,14 +879,15 @@ routing:
         });
 
         it('should update multiple fields at once', async () => {
+            const testId = testUUID('edit-person-multi');
             await handleAddPerson({
-                id: 'edit-person-multi',
+                id: testId,
                 name: 'Jane Smith',
                 contextDirectory: protokollDir
             });
 
             const result = await handleEditPerson({
-                id: 'edit-person-multi',
+                id: testId,
                 company: 'acme-corp',
                 role: 'Engineer',
                 add_sounds_like: ['jane smyth'],
@@ -881,15 +901,16 @@ routing:
         });
 
         it('should remove sounds_like variants', async () => {
+            const testId = testUUID('edit-person-remove');
             await handleAddPerson({
-                id: 'edit-person-remove',
+                id: testId,
                 name: 'Remove Test',
                 sounds_like: ['variant1', 'variant2', 'variant3'],
                 contextDirectory: protokollDir
             });
 
             const result = await handleEditPerson({
-                id: 'edit-person-remove',
+                id: testId,
                 remove_sounds_like: ['variant2'],
                 contextDirectory: protokollDir
             });
@@ -911,15 +932,16 @@ routing:
 
     describe('handleEditTerm', () => {
         it('should add sounds_like variants to existing term', async () => {
+            const testId = testUUID('edit-term-test');
             await handleAddTerm({
-                id: 'edit-term-test',
+                id: testId,
                 term: 'CardiganTime',
                 sounds_like: ['cardigan time'],
                 contextDirectory: protokollDir
             });
 
             const result = await handleEditTerm({
-                id: 'edit-term-test',
+                id: testId,
                 add_sounds_like: ['Cartesian Time', 'card again time'],
                 contextDirectory: protokollDir
             });
@@ -932,14 +954,15 @@ routing:
         });
 
         it('should update domain and description', async () => {
+            const testId = testUUID('edit-term-domain');
             await handleAddTerm({
-                id: 'edit-term-domain',
+                id: testId,
                 term: 'Kubernetes',
                 contextDirectory: protokollDir
             });
 
             const result = await handleEditTerm({
-                id: 'edit-term-domain',
+                id: testId,
                 domain: 'devops',
                 description: 'Container orchestration platform',
                 contextDirectory: protokollDir
@@ -951,14 +974,15 @@ routing:
         });
 
         it('should add topics and projects', async () => {
+            const testId = testUUID('edit-term-topics');
             await handleAddTerm({
-                id: 'edit-term-topics',
+                id: testId,
                 term: 'Docker',
                 contextDirectory: protokollDir
             });
 
             const result = await handleEditTerm({
-                id: 'edit-term-topics',
+                id: testId,
                 add_topics: ['containers', 'devops'],
                 add_projects: ['infrastructure'],
                 contextDirectory: protokollDir
@@ -971,15 +995,16 @@ routing:
         });
 
         it('should replace entire sounds_like array', async () => {
+            const testId = testUUID('edit-term-replace');
             await handleAddTerm({
-                id: 'edit-term-replace',
+                id: testId,
                 term: 'ReplaceTest',
                 sounds_like: ['old1', 'old2'],
                 contextDirectory: protokollDir
             });
 
             const result = await handleEditTerm({
-                id: 'edit-term-replace',
+                id: testId,
                 sounds_like: ['new1', 'new2', 'new3'],
                 contextDirectory: protokollDir
             });
@@ -999,8 +1024,9 @@ routing:
 
     describe('handleEditProject', () => {
         it('should add sounds_like variants to existing project', async () => {
+            const testId = testUUID('edit-project-test');
             await handleAddProject({
-                id: 'edit-project-test',
+                id: testId,
                 name: 'Protokoll',
                 destination: '/tmp/protokoll',
                 sounds_like: ['protocol'],
@@ -1010,7 +1036,7 @@ routing:
             });
 
             const result = await handleEditProject({
-                id: 'edit-project-test',
+                id: testId,
                 add_sounds_like: ['pro to call', 'proto call'],
                 contextDirectory: protokollDir
             });
@@ -1023,8 +1049,9 @@ routing:
         });
 
         it('should update routing configuration', async () => {
+            const testId = testUUID('edit-project-routing');
             await handleAddProject({
-                id: 'edit-project-routing',
+                id: testId,
                 name: 'Routing Test',
                 destination: '/tmp/old-path',
                 sounds_like: [],
@@ -1034,7 +1061,7 @@ routing:
             });
 
             const result = await handleEditProject({
-                id: 'edit-project-routing',
+                id: testId,
                 destination: '/tmp/new-path',
                 structure: 'day',
                 contextDirectory: protokollDir
@@ -1046,8 +1073,9 @@ routing:
         });
 
         it('should add explicit_phrases and topics', async () => {
+            const testId = testUUID('edit-project-phrases');
             await handleAddProject({
-                id: 'edit-project-phrases',
+                id: testId,
                 name: 'Phrases Test',
                 destination: '/tmp/phrases',
                 sounds_like: [],
@@ -1057,7 +1085,7 @@ routing:
             });
 
             const result = await handleEditProject({
-                id: 'edit-project-phrases',
+                id: testId,
                 add_explicit_phrases: ['new phrase', 'another phrase'],
                 add_topics: ['topic1', 'topic2'],
                 contextDirectory: protokollDir
@@ -1070,8 +1098,9 @@ routing:
         });
 
         it('should update active status', async () => {
+            const testId = testUUID('edit-project-active');
             await handleAddProject({
-                id: 'edit-project-active',
+                id: testId,
                 name: 'Active Test',
                 destination: '/tmp/active',
                 sounds_like: [],
@@ -1081,7 +1110,7 @@ routing:
             });
 
             const result = await handleEditProject({
-                id: 'edit-project-active',
+                id: testId,
                 active: false,
                 contextDirectory: protokollDir
             });
@@ -1265,15 +1294,16 @@ routing:
     describe('handleAddPerson error cases', () => {
         it('should throw error when person already exists', async () => {
             // First add a person
+            const testId = testUUID('duplicate-person');
             await handleAddPerson({
-                id: 'duplicate-person',
+                id: testId,
                 name: 'Duplicate Person',
                 contextDirectory: protokollDir
             });
 
             // Try to add again
             await expect(handleAddPerson({
-                id: 'duplicate-person',
+                id: testId,
                 name: 'Duplicate Person Again',
                 contextDirectory: protokollDir
             })).rejects.toThrow('already exists');
@@ -1283,8 +1313,9 @@ routing:
     describe('handleAddProject error cases', () => {
         it('should throw error when project already exists', async () => {
             // First add a project
+            const testId = testUUID('duplicate-project');
             await handleAddProject({
-                id: 'duplicate-project',
+                id: testId,
                 name: 'Duplicate Project',
                 destination: '/tmp/dup',
                 sounds_like: [],  // Bypass smart assistance
@@ -1295,7 +1326,7 @@ routing:
 
             // Try to add again
             await expect(handleAddProject({
-                id: 'duplicate-project',
+                id: testId,
                 name: 'Duplicate Project Again',
                 destination: '/tmp/dup2',
                 sounds_like: [],  // Bypass smart assistance
@@ -1309,15 +1340,16 @@ routing:
     describe('handleAddTerm error cases', () => {
         it('should throw error when term already exists', async () => {
             // First add a term
+            const testId = testUUID('duplicate-term');
             await handleAddTerm({
-                id: 'duplicate-term',
+                id: testId,
                 term: 'Duplicate Term',
                 contextDirectory: protokollDir
             });
 
             // Try to add again
             await expect(handleAddTerm({
-                id: 'duplicate-term',
+                id: testId,
                 term: 'Duplicate Term Again',
                 contextDirectory: protokollDir
             })).rejects.toThrow('already exists');
@@ -1327,15 +1359,16 @@ routing:
     describe('handleAddCompany error cases', () => {
         it('should throw error when company already exists', async () => {
             // First add a company
+            const testId = testUUID('duplicate-company');
             await handleAddCompany({
-                id: 'duplicate-company',
+                id: testId,
                 name: 'Duplicate Company',
                 contextDirectory: protokollDir
             });
 
             // Try to add again
             await expect(handleAddCompany({
-                id: 'duplicate-company',
+                id: testId,
                 name: 'Duplicate Company Again',
                 contextDirectory: protokollDir
             })).rejects.toThrow('already exists');
