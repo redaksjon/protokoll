@@ -132,6 +132,22 @@ export async function readTranscriptsListResource(options: {
     // Use provided directory or fall back to configured outputDirectory
     const directory = options.directory || outputDirectory;
 
+    // Resolve projectId to project name for fallback filtering (transcripts may have project name but not projectId)
+    let projectName: string | undefined;
+    if (projectId && ServerConfig.isInitialized()) {
+        const context = ServerConfig.getContext();
+        if (context) {
+            try {
+                const project = context.getProject(projectId);
+                if (project) {
+                    projectName = project.name;
+                }
+            } catch {
+                // Project not found - filter by projectId only
+            }
+        }
+    }
+
     // Log request parameters
     // eslint-disable-next-line no-console
     console.log(`📋 Reading transcripts list:`);
@@ -156,6 +172,7 @@ export async function readTranscriptsListResource(options: {
         startDate,
         endDate,
         projectId,
+        project: projectName,
     });
 
     // Log results
@@ -204,11 +221,13 @@ export async function readTranscriptsListResource(options: {
             total: result.total,
             limit: result.limit,
             offset: result.offset,
-            hasMore: result.hasMore,
+            hasMore: result.hasMore ?? (result.offset + result.limit < result.total),
+            nextOffset: result.hasMore ? result.offset + result.limit : null,
         },
         filters: {
             startDate,
             endDate,
+            projectId,
         },
     };
 

@@ -405,12 +405,20 @@ app.post('/audio/upload',
             const uploadedPath = join(uploadDir, `${hash}.${ext}`);
             await fs.writeFile(uploadedPath, Buffer.from(buffer));
             
+            // Extract optional title and project hints from form data
+            const rawTitle = body['title'];
+            const rawProject = body['project'];
+            const title = (typeof rawTitle === 'string' && rawTitle.trim()) ? rawTitle.trim() : undefined;
+            const project = (typeof rawProject === 'string' && rawProject.trim()) ? rawProject.trim() : undefined;
+            
             // Create transcript PKL with uploaded status
             const { uuid } = await createUploadTranscript({
                 audioFile: basename(uploadedPath), // Store just the filename
                 originalFilename: file.name,
                 audioHash: hash,
                 outputDirectory: outputDir,
+                title,
+                project,
             });
             
             // eslint-disable-next-line no-console
@@ -422,6 +430,8 @@ app.post('/audio/upload',
                 message: 'Audio uploaded successfully. Use protokoll_get_transcript_by_uuid to track progress.',
                 filename: file.name,
                 size: buffer.byteLength,
+                title: title ?? null,
+                project: project ?? null,
             });
             
         } catch (error) {

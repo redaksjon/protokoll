@@ -140,7 +140,7 @@ describe('src/mcp/uri.ts - Phase 1 Branch Coverage', () => {
 
         it('should handle invalid pagination params', () => {
             const result = parseUri('protokoll://transcripts?limit=abc');
-            expect(result.limit).toBeNaN();
+            expect(result.limit).toBeUndefined();
         });
     });
 

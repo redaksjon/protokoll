@@ -37,9 +37,9 @@ export const resourceTemplates: McpResourceTemplate[] = [
         mimeType: 'application/json',
     },
     {
-        uriTemplate: 'protokoll://transcripts?directory={directory}',
+        uriTemplate: 'protokoll://transcripts?directory={directory}&projectId={projectId}&limit={limit}&offset={offset}',
         name: 'Transcripts List',
-        description: 'List of transcripts in a directory',
+        description: 'List of transcripts in a directory. Filter by projectId (UUID) to show only transcripts for that project.',
         mimeType: 'application/json',
     },
     {

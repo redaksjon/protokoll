@@ -56,6 +56,29 @@ describe('Transcripts list integration (projectId filter)', () => {
     t3.close();
   });
 
+  it('should return hasMore and pagination for infinite scroll', async () => {
+    const result = await readTranscriptsListResource({
+      limit: 2,
+      offset: 0,
+    });
+
+    const data = JSON.parse(result.text);
+    expect(data.pagination).toBeDefined();
+    expect(data.pagination.total).toBe(3);
+    expect(data.pagination.limit).toBe(2);
+    expect(data.pagination.offset).toBe(0);
+    expect(data.pagination.hasMore).toBe(true);
+    expect(data.transcripts).toHaveLength(2);
+
+    const result2 = await readTranscriptsListResource({
+      limit: 2,
+      offset: 2,
+    });
+    const data2 = JSON.parse(result2.text);
+    expect(data2.pagination.hasMore).toBe(false);
+    expect(data2.transcripts).toHaveLength(1);
+  });
+
   afterEach(async () => {
     vi.restoreAllMocks();
     try {
