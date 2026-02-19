@@ -26,6 +26,8 @@ function isUuidInput(input: string): boolean {
 async function findTranscriptByUuid(uuid: string, searchDirectories: string[]): Promise<string | null> {
     return Transcript.findTranscriptByUuid(uuid, searchDirectories);
 }
+import * as Context from '@/context';
+import type { ProtokollContextInstance } from '@/context';
 import type { Person, Project, Term, Company, IgnoredTerm, Entity } from '@/context/types';
 import { parseUri, isProtokolUri } from '../uri';
 
@@ -117,6 +119,32 @@ export async function getContextDirectories(): Promise<string[] | undefined> {
     
     const config = ServerConfig.getServerConfig();
     return config.configFile?.contextDirectories as string[] | undefined;
+}
+
+/**
+ * Create a context instance for tool handlers.
+ * Uses contextDirectories from server config (protokoll-config.yaml) when available,
+ * matching the behavior of entity resource handlers.
+ * Falls back to standard .protokoll discovery from the given directory.
+ */
+export async function createToolContext(contextDirectory?: string): Promise<ProtokollContextInstance> {
+    const ServerConfig = await import('../serverConfig');
+
+    const configFile = ServerConfig.isInitialized()
+        ? ServerConfig.getServerConfig().configFile as { contextDirectories?: string[] } | null
+        : null;
+    const rawDirs = configFile?.contextDirectories;
+    const effectiveDir = contextDirectory
+        || (ServerConfig.isInitialized() ? ServerConfig.getWorkspaceRoot() : null)
+        || process.cwd();
+    const contextDirs = rawDirs && rawDirs.length > 0
+        ? rawDirs.map((d: string) => (isAbsolute(d) ? d : resolve(effectiveDir, d)))
+        : undefined;
+
+    return Context.create({
+        startingDir: effectiveDir,
+        contextDirectories: contextDirs,
+    });
 }
 
 /**

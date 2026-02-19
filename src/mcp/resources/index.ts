@@ -15,6 +15,7 @@ import type {
     AudioProcessedUri,
 } from '../types';
 import { parseUri } from '../uri';
+import * as ServerConfig from '../serverConfig';
 
 // Re-export all resource modules
 export * from './definitions';
@@ -58,12 +59,21 @@ export async function handleListResources(contextDirectory?: string): Promise<{
 export async function handleReadResource(uri: string): Promise<McpResourceContents> {
     const parsed = parseUri(uri);
 
+    // Debug: log entity read attempts
+    if (parsed.resourceType === 'entity') {
+        const entityUri = parsed as EntityUri;
+        // eslint-disable-next-line no-console
+        console.log(`\n🔍 [resources/read] Loading entity: type=${entityUri.entityType} id=${entityUri.entityId}`);
+    }
+
     switch (parsed.resourceType) {
         case 'transcript':
             return readTranscriptResource((parsed as TranscriptUri).transcriptPath);
         case 'entity': {
             const entityUri = parsed as EntityUri;
-            return readEntityResource(entityUri.entityType, entityUri.entityId);
+            // Use server's workspace root when in remote mode (HTTP server)
+            const contextDir = ServerConfig.isInitialized() ? ServerConfig.getWorkspaceRoot() ?? undefined : undefined;
+            return readEntityResource(entityUri.entityType, entityUri.entityId, contextDir ?? undefined);
         }
         case 'config':
             return readConfigResource((parsed as ConfigUri).configPath);
@@ -78,8 +88,11 @@ export async function handleReadResource(uri: string): Promise<McpResourceConten
                 projectId: listUri.projectId,
             });
         }
-        case 'entities-list':
-            return readEntitiesListResource((parsed as EntitiesListUri).entityType);
+        case 'entities-list': {
+            const listUri = parsed as EntitiesListUri;
+            const contextDir = ServerConfig.isInitialized() ? ServerConfig.getWorkspaceRoot() ?? undefined : undefined;
+            return readEntitiesListResource(listUri.entityType, contextDir ?? undefined);
+        }
         case 'audio-inbound':
             return readAudioInboundResource((parsed as AudioInboundUri).directory);
         case 'audio-processed':

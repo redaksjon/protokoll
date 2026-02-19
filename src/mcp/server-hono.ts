@@ -106,9 +106,99 @@ interface SessionData {
     initialized: boolean;
     lastActivity: number;
     subscriptions: Set<string>; // Set of resource URIs this session is subscribed to
+    sseWriters: Set<(data: string) => Promise<void>>; // SSE stream writers for push notifications
 }
 
 const sessions = new Map<string, SessionData>();
+
+// ============================================================================
+// Push Notification Helpers
+// ============================================================================
+
+/**
+ * Send a notifications/resource_changed event to all sessions subscribed to the given URI.
+ * Used to keep connected clients (e.g. the VSCode extension) in sync when an entity is
+ * mutated by a different session (e.g. an AI assistant).
+ */
+async function notifyEntityChanged(entityType: string, entityId: string): Promise<void> {
+    const entityUri = `protokoll://entity/${entityType}/${entityId}`;
+    const notification = JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'notifications/resource_changed',
+        params: { uri: entityUri },
+    });
+    const sseMessage = `event: notification\ndata: ${notification}\n\n`;
+
+    let notified = 0;
+    for (const [, session] of sessions) {
+        if (session.subscriptions.has(entityUri)) {
+            for (const writer of session.sseWriters) {
+                try {
+                    await writer(sseMessage);
+                    notified++;
+                } catch {
+                    // Stale writer — will be cleaned up on SSE abort
+                }
+            }
+        }
+    }
+
+    // eslint-disable-next-line no-console
+    console.log(`🔔 Entity change notification sent for ${entityUri} (${notified} writer(s) notified)`);
+}
+
+/**
+ * Inspect a completed tool call and fire entity-change notifications for any
+ * entity that was mutated.  Failures are swallowed so they never affect the
+ * tool result returned to the caller.
+ */
+async function sendEntityChangeNotifications(
+    toolName: string,
+    args: Record<string, unknown> | undefined,
+): Promise<void> {
+    if (!args) return;
+
+    type EntityRef = { entityType: string; entityId: string };
+
+    // Map each mutating tool to a function that extracts the affected entity
+    const extractors: Record<string, (a: Record<string, unknown>) => EntityRef | null> = {
+        protokoll_add_relationship: (a) => (
+            a.entityType && a.entityId
+                ? { entityType: a.entityType as string, entityId: a.entityId as string }
+                : null
+        ),
+        protokoll_remove_relationship: (a) => (
+            a.entityType && a.entityId
+                ? { entityType: a.entityType as string, entityId: a.entityId as string }
+                : null
+        ),
+        protokoll_edit_person: (a) => (
+            a.id ? { entityType: 'person', entityId: a.id as string } : null
+        ),
+        protokoll_edit_project: (a) => (
+            a.id ? { entityType: 'project', entityId: a.id as string } : null
+        ),
+        protokoll_edit_term: (a) => (
+            a.id ? { entityType: 'term', entityId: a.id as string } : null
+        ),
+        protokoll_edit_company: (a) => (
+            a.id ? { entityType: 'company', entityId: a.id as string } : null
+        ),
+    };
+
+    const extractor = extractors[toolName];
+    if (!extractor) return;
+
+    try {
+        const ref = extractor(args);
+        if (ref) {
+            await notifyEntityChanged(ref.entityType, ref.entityId);
+        }
+    } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn(`sendEntityChangeNotifications: error for ${toolName}:`, err);
+    }
+}
 
 // Clean up inactive sessions after 1 hour
 const SESSION_TIMEOUT = 60 * 60 * 1000;
@@ -149,7 +239,7 @@ function createMcpServer(): Server {
             capabilities: {
                 tools: {},
                 resources: {
-                    subscribe: false,
+                    subscribe: true,
                     listChanged: true,
                 },
                 prompts: {
@@ -176,6 +266,13 @@ function createMcpServer(): Server {
 
         try {
             const result = await handleToolCall(name, args);
+
+            // Send push notifications to sessions subscribed to affected entity resources
+            sendEntityChangeNotifications(name, args).catch((err) => {
+                // eslint-disable-next-line no-console
+                console.error('Failed to send entity change notifications:', err);
+            });
+
             return {
                 content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
             };
@@ -479,6 +576,7 @@ app.post('/mcp', async (c) => {
             initialized: false,
             lastActivity: Date.now(),
             subscriptions: new Set(),
+            sseWriters: new Set(),
         };
         
         sessions.set(newSessionId, session);
@@ -504,10 +602,8 @@ app.post('/mcp', async (c) => {
         // Get the full initialized config from ServerConfig
         const serverConfig = ServerConfig.getServerConfig();
         const context = ServerConfig.getContext();
-        const contextConfig = context?.getConfig();
-        
-        // Extract context directories if available
-        const contextDirs = contextConfig?.contextDirectories;
+        // Use getContextDirs() (actual loaded dirs) or fall back to configFile.contextDirectories
+        const contextDirs = context?.getContextDirs?.() ?? (serverConfig.configFile as { contextDirectories?: string[] })?.contextDirectories;
         const contextDirsDisplay = Array.isArray(contextDirs) && contextDirs.length > 0 
             ? contextDirs.join(', ') 
             : 'NONE';
@@ -617,6 +713,32 @@ app.post('/mcp', async (c) => {
         return c.body(null, 202);
     }
 
+    // Handle resources/subscribe and resources/unsubscribe before passing to transport
+    // so we can track subscriptions for cross-session push notifications
+    if (jsonRpcMessage.method === 'resources/subscribe') {
+        const uri = jsonRpcMessage.params?.uri as string | undefined;
+        if (uri) {
+            session.subscriptions.add(uri);
+            // eslint-disable-next-line no-console
+            console.log(`\n📝 SUBSCRIPTION CREATED: ${uri} (session: ${session.sessionId})`);
+            // eslint-disable-next-line no-console
+            console.log(`   Total subscriptions for session: ${session.subscriptions.size}\n`);
+        }
+        return c.json({ jsonrpc: '2.0', result: {}, id: jsonRpcMessage.id });
+    }
+
+    if (jsonRpcMessage.method === 'resources/unsubscribe') {
+        const uri = jsonRpcMessage.params?.uri as string | undefined;
+        if (uri) {
+            session.subscriptions.delete(uri);
+            // eslint-disable-next-line no-console
+            console.log(`\n📝 SUBSCRIPTION REMOVED: ${uri} (session: ${session.sessionId})`);
+            // eslint-disable-next-line no-console
+            console.log(`   Total subscriptions for session: ${session.subscriptions.size}\n`);
+        }
+        return c.json({ jsonrpc: '2.0', result: {}, id: jsonRpcMessage.id });
+    }
+
     // Handle regular requests through transport
     return session.transport.handleRequest(c);
 });
@@ -641,6 +763,16 @@ app.get('/mcp', async (c) => {
         // Send initial connection message as a comment
         await stream.write(': connected\n\n');
 
+        // Register this stream writer for push notifications
+        const writer = async (data: string) => {
+            try {
+                await stream.write(data);
+            } catch {
+                // Stream may be closed; writer will be cleaned up on abort
+            }
+        };
+        session.sseWriters.add(writer);
+
         // Keep connection alive with periodic pings
         const pingInterval = setInterval(async () => {
             try {
@@ -653,6 +785,7 @@ app.get('/mcp', async (c) => {
         // Handle cleanup on disconnect
         stream.onAbort(() => {
             clearInterval(pingInterval);
+            session.sseWriters.delete(writer);
             // eslint-disable-next-line no-console
             console.log(`SSE client disconnected from session ${sessionId}`);
         });
@@ -668,6 +801,9 @@ app.get('/mcp', async (c) => {
                 keepAlive = false;
             }
         }
+
+        // Clean up writer when stream ends naturally
+        session.sseWriters.delete(writer);
     });
 });
 

@@ -5,7 +5,6 @@
  
 import { randomUUID } from 'crypto';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
-import * as Context from '@/context';
 import type { Person, Project, Term, Company, Entity, EntityRelationship } from '@/context/types';
 import { 
     findPersonResilient, 
@@ -15,7 +14,7 @@ import {
     findIgnoredResilient 
 } from '@redaksjon/protokoll-engine';
  
-import { formatEntity, slugify, mergeArray } from './shared.js';
+import { formatEntity, slugify, mergeArray, createToolContext } from './shared.js';
 
 /**
  * Check if a string is a valid UUID
@@ -465,6 +464,10 @@ export const editTermTool: Tool = {
                 type: 'string',
                 description: 'Term ID to edit',
             },
+            name: {
+                type: 'string',
+                description: 'Update the display name',
+            },
             expansion: {
                 type: 'string',
                 description: 'Set the expansion (full form if acronym)',
@@ -711,9 +714,7 @@ export async function handleAddPerson(args: {
     context?: string;
     contextDirectory?: string;
 }) {
-    const context = await Context.create({
-        startingDir: args.contextDirectory || process.cwd(),
-    });
+    const context = await createToolContext(args.contextDirectory);
 
     if (!context.hasContext()) {
         throw new Error('No .protokoll directory found. Initialize context first.');
@@ -762,9 +763,7 @@ export async function handleEditPerson(args: {
     remove_sounds_like?: string[];
     contextDirectory?: string;
 }) {
-    const context = await Context.create({
-        startingDir: args.contextDirectory || process.cwd(),
-    });
+    const context = await createToolContext(args.contextDirectory);
 
     if (!context.hasContext()) {
         throw new Error('No .protokoll directory found. Initialize context first.');
@@ -834,9 +833,7 @@ export async function handleAddProject(args: {
     useSmartAssist?: boolean;
     contextDirectory?: string;
 }) {
-    const context = await Context.create({
-        startingDir: args.contextDirectory || process.cwd(),
-    });
+    const context = await createToolContext(args.contextDirectory);
 
     if (!context.hasContext()) {
         throw new Error('No .protokoll directory found. Initialize context first.');
@@ -969,9 +966,7 @@ export async function handleEditProject(args: {
     remove_related_terms?: string[];
     contextDirectory?: string;
 }) {
-    const context = await Context.create({
-        startingDir: args.contextDirectory || process.cwd(),
-    });
+    const context = await createToolContext(args.contextDirectory);
 
     if (!context.hasContext()) {
         throw new Error('No .protokoll directory found. Initialize context first.');
@@ -1185,9 +1180,7 @@ export async function handleUpdateProject(args: {
     name?: string;
     contextDirectory?: string;
 }) {
-    const context = await Context.create({
-        startingDir: args.contextDirectory || process.cwd(),
-    });
+    const context = await createToolContext(args.contextDirectory);
 
     if (!context.hasContext()) {
         throw new Error('No .protokoll directory found. Initialize context first.');
@@ -1253,9 +1246,7 @@ export async function handleAddTerm(args: {
     projects?: string[];
     contextDirectory?: string;
 }) {
-    const context = await Context.create({
-        startingDir: args.contextDirectory || process.cwd(),
-    });
+    const context = await createToolContext(args.contextDirectory);
 
     if (!context.hasContext()) {
         throw new Error('No .protokoll directory found. Initialize context first.');
@@ -1293,6 +1284,7 @@ export async function handleAddTerm(args: {
 
 export async function handleEditTerm(args: {
     id: string;
+    name?: string;
     expansion?: string;
     domain?: string;
     description?: string;
@@ -1307,9 +1299,7 @@ export async function handleEditTerm(args: {
     remove_projects?: string[];
     contextDirectory?: string;
 }) {
-    const context = await Context.create({
-        startingDir: args.contextDirectory || process.cwd(),
-    });
+    const context = await createToolContext(args.contextDirectory);
 
     if (!context.hasContext()) {
         throw new Error('No .protokoll directory found. Initialize context first.');
@@ -1344,6 +1334,7 @@ export async function handleEditTerm(args: {
     // Build updated term
     const updatedTerm: Term = {
         ...existingTerm,
+        ...(args.name !== undefined && { name: args.name }),
         ...(args.expansion !== undefined && { expansion: args.expansion }),
         ...(args.domain !== undefined && { domain: args.domain }),
         ...(args.description !== undefined && { description: args.description }),
@@ -1373,6 +1364,7 @@ export async function handleEditTerm(args: {
 
     // Build summary of changes
     const changes: string[] = [];
+    if (args.name !== undefined) changes.push(`name: "${args.name}"`);
     if (args.expansion !== undefined) changes.push(`expansion: "${args.expansion}"`);
     if (args.domain !== undefined) changes.push(`domain: "${args.domain}"`);
     if (args.description !== undefined) changes.push(`description updated`);
@@ -1400,9 +1392,7 @@ export async function handleUpdateTerm(args: {
     expansion?: string;
     contextDirectory?: string;
 }) {
-    const context = await Context.create({
-        startingDir: args.contextDirectory || process.cwd(),
-    });
+    const context = await createToolContext(args.contextDirectory);
 
     if (!context.hasContext()) {
         throw new Error('No .protokoll directory found. Initialize context first.');
@@ -1492,9 +1482,7 @@ export async function handleMergeTerms(args: {
     targetId: string;
     contextDirectory?: string;
 }) {
-    const context = await Context.create({
-        startingDir: args.contextDirectory || process.cwd(),
-    });
+    const context = await createToolContext(args.contextDirectory);
 
     if (!context.hasContext()) {
         throw new Error('No .protokoll directory found. Initialize context first.');
@@ -1556,9 +1544,7 @@ export async function handleAddCompany(args: {
     sounds_like?: string[];
     contextDirectory?: string;
 }) {
-    const context = await Context.create({
-        startingDir: args.contextDirectory || process.cwd(),
-    });
+    const context = await createToolContext(args.contextDirectory);
 
     if (!context.hasContext()) {
         throw new Error('No .protokoll directory found. Initialize context first.');
@@ -1601,9 +1587,7 @@ export async function handleEditCompany(args: {
     remove_sounds_like?: string[];
     contextDirectory?: string;
 }) {
-    const context = await Context.create({
-        startingDir: args.contextDirectory || process.cwd(),
-    });
+    const context = await createToolContext(args.contextDirectory);
 
     if (!context.hasContext()) {
         throw new Error('No .protokoll directory found. Initialize context first.');
@@ -1654,9 +1638,7 @@ export async function handleEditCompany(args: {
 }
 
 export async function handleDeleteEntity(args: { entityType: string; entityId: string; contextDirectory?: string }) {
-    const context = await Context.create({
-        startingDir: args.contextDirectory || process.cwd(),
-    });
+    const context = await createToolContext(args.contextDirectory);
 
     let entity: Entity;
     switch (args.entityType) {
