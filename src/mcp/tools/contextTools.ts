@@ -3,10 +3,9 @@
  */
 // eslint-disable-next-line import/extensions
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
-import * as Context from '@/context';
 import type { ContextInstance } from '@/context';
 import type { Entity, EntityType } from '@/context/types';
-import { formatEntity } from './shared';
+import { formatEntity, createToolContext } from './shared';
 import { 
     findPersonResilient, 
     findCompanyResilient, 
@@ -37,10 +36,8 @@ async function getContextInstance(contextDirectory?: string): Promise<ContextIns
         return serverContext;
     }
     
-    // Fallback: create a new context (for backwards compatibility)
-    return Context.create({
-        startingDir: contextDirectory || process.cwd(),
-    });
+    // Fallback: create context using server config's contextDirectories
+    return createToolContext(contextDirectory);
 }
 
 // ============================================================================

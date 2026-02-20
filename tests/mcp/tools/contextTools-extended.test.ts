@@ -19,10 +19,16 @@ vi.mock('@/context', () => ({
     create: (...args: unknown[]) => mockCreate(...args),
 }));
 
-vi.mock('@/mcp/serverConfig', () => ({
-    getContext: () => mockGetContext(),
-    isRemoteMode: () => mockIsRemoteMode(),
-}));
+vi.mock('@/mcp/serverConfig', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('@/mcp/serverConfig')>();
+    return {
+        ...actual,
+        getContext: () => mockGetContext(),
+        isRemoteMode: () => mockIsRemoteMode(),
+        isInitialized: () => false,
+        getServerConfig: () => ({ configFile: null, workspaceRoot: process.cwd() }),
+    };
+});
 
 vi.mock('@redaksjon/protokoll-engine', async (importOriginal) => {
     const actual = await importOriginal<typeof import('@redaksjon/protokoll-engine')>();

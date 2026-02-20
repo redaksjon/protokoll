@@ -54,6 +54,8 @@ vi.mock('@redaksjon/protokoll-format', () => ({
 
 vi.mock('../../../src/mcp/serverConfig', () => ({
     getOutputDirectory: vi.fn().mockReturnValue('/test/output'),
+    isInitialized: vi.fn().mockReturnValue(false),
+    getContext: vi.fn().mockReturnValue(null),
 }));
 
 vi.mock('../../../src/mcp/tools/shared', () => ({

@@ -467,7 +467,8 @@ export const correctToEntityTool: Tool = {
         'Correct misheard text in transcript by mapping to existing or new entity. ' +
         'Atomically updates transcript content, adds misspelling to entity sounds_like array, ' +
         'updates entity references, and logs the correction to enhancement_log. ' +
-        'This is the primary mechanism for training the transcription system.',
+        'This is the primary mechanism for training the transcription system. ' +
+        'Context directory is resolved from server configuration.',
     inputSchema: {
         type: 'object',
         properties: {
@@ -492,9 +493,21 @@ export const correctToEntityTool: Tool = {
                 type: 'string',
                 description: 'Name of new entity to create (for create-new flow)',
             },
-            contextDirectory: {
+            firstName: {
                 type: 'string',
-                description: 'Path to .protokoll context directory',
+                description: 'First name (person entities only)',
+            },
+            lastName: {
+                type: 'string',
+                description: 'Last name (person entities only)',
+            },
+            description: {
+                type: 'string',
+                description: 'Description/context for the new entity',
+            },
+            projectId: {
+                type: 'string',
+                description: 'Associated project ID (person entities only)',
             },
         },
         required: ['transcriptPath', 'selectedText', 'entityType'],
@@ -574,8 +587,8 @@ export async function handleListTranscripts(args: {
         startDate: args.startDate,
         endDate: args.endDate,
         search: args.search,
-        // entityId: args.entityId,
-        // entityType: args.entityType,
+        entityId: args.entityId,
+        entityType: args.entityType,
     });
 
     // Convert all paths to relative paths from output directory
@@ -1291,60 +1304,64 @@ export async function handleCorrectToEntity(args: {
     entityType: 'person' | 'project' | 'term' | 'company';
     entityId?: string;
     entityName?: string;
-    contextDirectory?: string;
+    firstName?: string;
+    lastName?: string;
+    description?: string;
+    projectId?: string;
 }) {
-    const context = await Context.create({ startingDir: args.contextDirectory || process.cwd() });
-    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
+    const { randomUUID } = await import('node:crypto');
+    const { slugify } = await import('./shared.js');
+    const ServerConfig = await import('../serverConfig');
+    
+    const context = ServerConfig.getContext();
+    if (!context) {
+        throw new Error('Server context not initialized. Check server configuration.');
+    }
+    
+    const absolutePath = await resolveTranscriptPath(args.transcriptPath);
     const pklPath = ensurePklExtension(absolutePath);
     
     let finalEntityId: string;
     let finalEntityName: string;
     let isNewEntity = false;
     
-    // Step 1: Create entity if entityName provided, or get existing entity
+    // Step 1: Create or look up entity using the server's pre-initialized context
     if (args.entityName) {
-        // Import entity tools
-        const EntityTools = await import('./entityTools');
-        const createArgs = { name: args.entityName, contextDirectory: args.contextDirectory };
+        const id = randomUUID();
+        const slug = slugify(args.entityName);
         
-        try {
-            let result: any;
-            switch (args.entityType) {
-                case 'person': 
-                    result = await EntityTools.handleAddPerson(createArgs); 
-                    break;
-                case 'project': 
-                    result = await EntityTools.handleAddProject(createArgs); 
-                    break; 
-                case 'term': 
-                    result = await EntityTools.handleAddTerm({ term: args.entityName, contextDirectory: args.contextDirectory }); 
-                    break;
-                case 'company': 
-                    result = await EntityTools.handleAddCompany(createArgs); 
-                    break;
-            }
-            finalEntityId = result.entity.id;
-            finalEntityName = result.entity.name;
-            isNewEntity = true;
-        } catch (error: any) {
-            // Handle 'already exists' case
-            const match = error.message?.match(/ID\s+["']([^"']+)["']\s+already exists/i);
-            if (match) {
-                finalEntityId = match[1];
-                // Get the entity to find its canonical name
-                const { findPersonResilient, findProjectResilient, findTermResilient, findCompanyResilient } = await import('@redaksjon/protokoll-engine');
-                let entity: any;
-                switch (args.entityType) {
-                    case 'person': entity = findPersonResilient(context, finalEntityId); break;
-                    case 'project': entity = findProjectResilient(context, finalEntityId); break;
-                    case 'term': entity = findTermResilient(context, finalEntityId); break;
-                    case 'company': entity = findCompanyResilient(context, finalEntityId); break;
-                }
-                finalEntityName = entity.name;
-            } else {
-                throw error;
-            }
+        const entityBase = {
+            id,
+            slug,
+            name: args.entityName,
+        };
+        
+        let newEntity: any;
+        switch (args.entityType) {
+            case 'person':
+                newEntity = {
+                    ...entityBase,
+                    type: 'person' as const,
+                    ...(args.firstName && { firstName: args.firstName }),
+                    ...(args.lastName && { lastName: args.lastName }),
+                    ...(args.description && { context: args.description }),
+                };
+                break;
+            case 'project':
+                newEntity = { ...entityBase, type: 'project' as const };
+                break;
+            case 'term':
+                newEntity = { ...entityBase, type: 'term' as const };
+                break;
+            case 'company':
+                newEntity = { ...entityBase, type: 'company' as const };
+                break;
         }
+        
+        await context.saveEntity(newEntity);
+        finalEntityId = id;
+        finalEntityName = args.entityName;
+        isNewEntity = true;
     } else if (args.entityId) {
         finalEntityId = args.entityId;
         const { findPersonResilient, findProjectResilient, findTermResilient, findCompanyResilient } = await import('@redaksjon/protokoll-engine');
@@ -1360,89 +1377,101 @@ export async function handleCorrectToEntity(args: {
         throw new Error('Either entityId or entityName must be provided');
     }
     
-    // Step 2: Replace text in transcript content
+    // Step 2: Update sounds_like on the entity (before opening transcript to avoid interleaving)
+    if (args.selectedText.toLowerCase() !== finalEntityName.toLowerCase()) {
+        const existingEntity = (() => {
+            switch (args.entityType) {
+                case 'person': return context.getPerson(finalEntityId);
+                case 'project': return context.getProject(finalEntityId);
+                case 'term': return context.getTerm(finalEntityId);
+                case 'company': return context.getCompany(finalEntityId);
+            }
+        })();
+        
+        if (existingEntity) {
+            const soundsLike = (existingEntity as any).sounds_like || [];
+            if (!soundsLike.includes(args.selectedText)) {
+                await context.saveEntity(
+                    { ...existingEntity, sounds_like: [...soundsLike, args.selectedText] },
+                    true
+                );
+            }
+        }
+    }
+    
+    // Step 3: All transcript operations in one block with guaranteed close
     const transcript = PklTranscript.open(pklPath, { readOnly: false });
-    const originalContent = transcript.content;
-    const corrections = new Map([[args.selectedText, finalEntityName]]);
-    const correctedContent = applyCorrections(originalContent, corrections);
-    transcript.updateContent(correctedContent);
+    let transcriptId: string;
+    let transcriptProject: string | undefined;
+    let allEntityIds: string[];
     
-    // Step 3: Add selectedText to entity sounds_like
-    const EntityTools = await import('./entityTools');
-    const editArgs = { 
-        id: finalEntityId, 
-        add_sounds_like: [args.selectedText],
-        contextDirectory: args.contextDirectory 
-    };
-    
-    switch (args.entityType) {
-        case 'person': await EntityTools.handleEditPerson(editArgs); break;
-        case 'project': await EntityTools.handleEditProject(editArgs); break;
-        case 'term': await EntityTools.handleEditTerm(editArgs); break;
-        case 'company': await EntityTools.handleEditCompany(editArgs); break;
+    try {
+        // Replace text in content
+        const originalContent = transcript.content;
+        const corrections = new Map([[args.selectedText, finalEntityName]]);
+        const correctedContent = applyCorrections(originalContent, corrections);
+        transcript.updateContent(correctedContent);
+        
+        // Build a fresh entities object (same pattern as handleUpdateTranscriptEntityReferences)
+        const existing = transcript.metadata.entities;
+        const newEntityRef: Metadata.EntityReference = { id: finalEntityId, name: finalEntityName, type: args.entityType };
+        
+        const addIfMissing = (arr: Metadata.EntityReference[] | undefined, ref: Metadata.EntityReference): Metadata.EntityReference[] => {
+            const list = arr ? [...arr] : [];
+            if (!list.some(e => e.id === ref.id)) {
+                list.push(ref);
+            }
+            return list;
+        };
+        
+        const updatedEntities = {
+            people: args.entityType === 'person' ? addIfMissing(existing?.people, newEntityRef) : [...(existing?.people || [])],
+            projects: args.entityType === 'project' ? addIfMissing(existing?.projects, newEntityRef) : [...(existing?.projects || [])],
+            terms: args.entityType === 'term' ? addIfMissing(existing?.terms, newEntityRef) : [...(existing?.terms || [])],
+            companies: args.entityType === 'company' ? addIfMissing(existing?.companies, newEntityRef) : [...(existing?.companies || [])],
+        };
+        
+        transcript.updateMetadata({ entities: updatedEntities });
+        
+        // Log to enhancement_log
+        try {
+            transcript.enhancementLog.logStep(
+                new Date(),
+                'user-correction' as any,
+                'correction_applied',
+                {
+                    original: args.selectedText,
+                    replacement: finalEntityName,
+                    entityId: finalEntityId,
+                    entityType: args.entityType,
+                    isNewEntity
+                },
+                [{ id: finalEntityId, name: finalEntityName, type: args.entityType }]
+            );
+        } catch {
+            // Enhancement log is not critical
+        }
+        
+        // Capture metadata before closing
+        transcriptId = transcript.metadata.id;
+        transcriptProject = transcript.metadata.project;
+        allEntityIds = [
+            ...updatedEntities.people.map(e => e.id),
+            ...updatedEntities.projects.map(e => e.id),
+            ...updatedEntities.terms.map(e => e.id),
+            ...updatedEntities.companies.map(e => e.id),
+        ];
+    } finally {
+        transcript.close();
     }
     
-    // Step 4: Update transcript entity references
-    const entities = transcript.metadata.entities || { people: [], projects: [], terms: [], companies: [] };
-    const entityRef = { id: finalEntityId, name: finalEntityName, type: args.entityType };
-    
-    // Type-safe entity array access
-    let entityArray: Metadata.EntityReference[];
-    switch (args.entityType) {
-        case 'person':
-            entityArray = entities.people || [];
-            if (!entityArray.some(e => e.id === finalEntityId)) {
-                entities.people = [...entityArray, entityRef];
-            }
-            break;
-        case 'project':
-            entityArray = entities.projects || [];
-            if (!entityArray.some(e => e.id === finalEntityId)) {
-                entities.projects = [...entityArray, entityRef];
-            }
-            break;
-        case 'term':
-            entityArray = entities.terms || [];
-            if (!entityArray.some(e => e.id === finalEntityId)) {
-                entities.terms = [...entityArray, entityRef];
-            }
-            break;
-        case 'company':
-            entityArray = entities.companies || [];
-            if (!entityArray.some(e => e.id === finalEntityId)) {
-                entities.companies = [...entityArray, entityRef];
-            }
-            break;
+    // Step 4: Trigger weight model update (best-effort, after transcript is closed)
+    try {
+        const { updateTranscriptInWeightModel } = await import('../services/weightModel');
+        updateTranscriptInWeightModel(transcriptId, allEntityIds, transcriptProject);
+    } catch {
+        // Weight model update is best-effort
     }
-    
-    transcript.updateMetadata({ entities });
-    
-    // Step 5: Log to enhancement_log
-    transcript.enhancementLog.logStep(
-        new Date(),
-        'user-correction' as any, // Type will be correct after protokoll-format link
-        'correction_applied',
-        {
-            original: args.selectedText,
-            replacement: finalEntityName,
-            entityId: finalEntityId,
-            entityType: args.entityType,
-            isNewEntity
-        },
-        [{ id: finalEntityId, name: finalEntityName, type: args.entityType }]
-    );
-    
-    transcript.close();
-    
-    // Step 6: Trigger weight model update
-    const allEntityIds = [
-        ...(entities.people || []).map(e => e.id),
-        ...(entities.projects || []).map(e => e.id),
-        ...(entities.terms || []).map(e => e.id),
-        ...(entities.companies || []).map(e => e.id),
-    ];
-    const { updateTranscriptInWeightModel } = await import('../services/weightModel');
-    updateTranscriptInWeightModel(transcript.metadata.id, allEntityIds, transcript.metadata.project);
     
     return {
         success: true,

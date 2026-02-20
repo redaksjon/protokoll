@@ -179,8 +179,11 @@ function parseTranscriptsListUri(
     segments: string[],
     params: Record<string, string>
 ): TranscriptsListUri {
-    // protokoll://transcripts?directory={dir}&startDate={date}&projectId={id}&...
+    // protokoll://transcripts?directory={dir}&startDate={date}&projectId={id}&limit=&offset=...
     const directory = params.directory || '';
+
+    const limitRaw = params.limit ? parseInt(params.limit, 10) : NaN;
+    const offsetRaw = params.offset ? parseInt(params.offset, 10) : NaN;
 
     return {
         scheme: SCHEME,
@@ -190,8 +193,8 @@ function parseTranscriptsListUri(
         directory,
         startDate: params.startDate,
         endDate: params.endDate,
-        limit: params.limit ? parseInt(params.limit, 10) : undefined,
-        offset: params.offset ? parseInt(params.offset, 10) : undefined,
+        limit: Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined,
+        offset: Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : undefined,
         projectId: params.projectId,
     };
 }

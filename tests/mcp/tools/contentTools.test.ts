@@ -27,12 +27,16 @@ vi.mock('@/context', () => ({
     }),
 }));
 
-vi.mock('@redaksjon/protokoll-engine', () => ({
-    findPersonResilient: (...args: unknown[]) => mockFindPersonResilient(...args),
-    findCompanyResilient: (...args: unknown[]) => mockFindCompanyResilient(...args),
-    findTermResilient: (...args: unknown[]) => mockFindTermResilient(...args),
-    findProjectResilient: (...args: unknown[]) => mockFindProjectResilient(...args),
-}));
+vi.mock('@redaksjon/protokoll-engine', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('@redaksjon/protokoll-engine')>();
+    return {
+        ...actual,
+        findPersonResilient: (...args: unknown[]) => mockFindPersonResilient(...args),
+        findCompanyResilient: (...args: unknown[]) => mockFindCompanyResilient(...args),
+        findTermResilient: (...args: unknown[]) => mockFindTermResilient(...args),
+        findProjectResilient: (...args: unknown[]) => mockFindProjectResilient(...args),
+    };
+});
 
 // @redaksjon/context - use real implementations (createUrlContent, etc.) - no mock needed
 

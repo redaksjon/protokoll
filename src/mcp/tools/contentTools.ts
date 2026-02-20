@@ -4,7 +4,6 @@
  */
 
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
-import * as Context from '@/context';
 import type { Entity } from '@/context/types';
 import type { ContextInstance } from '@/context';
 import { 
@@ -21,6 +20,7 @@ import {
     createDocumentContent,
     type EntityContentItem,
 } from '@redaksjon/context';
+import { createToolContext } from './shared.js';
 
 // ============================================================================
 // Type Extensions
@@ -234,9 +234,7 @@ export async function handleAddContent(args: {
     const { entityType, entityId, type, content, title, mimeType, source, notes, metadata, contextDirectory } = args;
 
     // Get context
-    const contextInstance = await Context.create({
-        startingDir: contextDirectory || process.cwd(),
-    });
+    const contextInstance = await createToolContext(contextDirectory);
 
     // Get the entity
     const entity = getEntityByType(contextInstance, entityType, entityId);
@@ -313,9 +311,7 @@ export async function handleRemoveContent(args: {
     }
 
     // Get context
-    const contextInstance = await Context.create({
-        startingDir: contextDirectory || process.cwd(),
-    });
+    const contextInstance = await createToolContext(contextDirectory);
 
     // Get the entity
     const entity = getEntityByType(contextInstance, entityType, entityId);
@@ -381,9 +377,7 @@ export async function handleListContent(args: {
     const { entityType, entityId, contentType, contextDirectory } = args;
 
     // Get context
-    const contextInstance = await Context.create({
-        startingDir: contextDirectory || process.cwd(),
-    });
+    const contextInstance = await createToolContext(contextDirectory);
 
     // Get the entity
     const entity = getEntityByType(contextInstance, entityType, entityId);
@@ -432,9 +426,7 @@ export async function handleGetContent(args: {
     }
 
     // Get context
-    const contextInstance = await Context.create({
-        startingDir: contextDirectory || process.cwd(),
-    });
+    const contextInstance = await createToolContext(contextDirectory);
 
     // Get the entity
     const entity = getEntityByType(contextInstance, entityType, entityId);

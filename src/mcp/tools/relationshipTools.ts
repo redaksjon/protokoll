@@ -4,7 +4,6 @@
  */
 
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
-import * as Context from '@/context';
 import type { Entity } from '@/context/types';
 import type { ContextInstance } from '@/context';
 import { parseEntityUri, createRelationship, type EntityRelationship } from '@redaksjon/context';
@@ -14,6 +13,7 @@ import {
     findTermResilient, 
     findProjectResilient 
 } from '@redaksjon/protokoll-engine';
+import { createToolContext } from './shared.js';
 
 // ============================================================================
 // Type Extensions
@@ -218,9 +218,7 @@ export async function handleAddRelationship(args: {
     const { entityType, entityId, targetType, targetId, relationship, notes, metadata, contextDirectory } = args;
 
     // Get context
-    const contextInstance = await Context.create({
-        startingDir: contextDirectory || process.cwd(),
-    });
+    const contextInstance = await createToolContext(contextDirectory);
 
     // Get the entity
     const entity = getEntityByType(contextInstance, entityType, entityId);
@@ -237,14 +235,23 @@ export async function handleAddRelationship(args: {
     // Create the relationship
     const newRelationship = createRelationship(targetType, targetId, relationship, notes, metadata);
 
+    // Prevent duplicate (same uri + relationship type)
+    const existingRelationships = (entity as EntityWithRelationships).relationships || [];
+    const alreadyExists = existingRelationships.some(
+        (r: EntityRelationship) => r.uri === newRelationship.uri && r.relationship === relationship
+    );
+    if (alreadyExists) {
+        throw new Error(`Relationship already exists: ${relationship} to ${newRelationship.uri}`);
+    }
+
     // Add to entity's relationships array
     const updatedEntity = {
         ...entity,
-        relationships: [...((entity as EntityWithRelationships).relationships || []), newRelationship],
+        relationships: [...existingRelationships, newRelationship],
     };
 
-    // Save the entity
-    await contextInstance.saveEntity(updatedEntity as Entity);
+    // Save the entity (allowUpdate = true since entity already exists)
+    await contextInstance.saveEntity(updatedEntity as Entity, true);
 
     return {
         success: true,
@@ -263,9 +270,7 @@ export async function handleRemoveRelationship(args: {
     const { entityType, entityId, targetUri, relationship, contextDirectory } = args;
 
     // Get context
-    const contextInstance = await Context.create({
-        startingDir: contextDirectory || process.cwd(),
-    });
+    const contextInstance = await createToolContext(contextDirectory);
 
     // Get the entity
     const entity = getEntityByType(contextInstance, entityType, entityId);
@@ -289,8 +294,8 @@ export async function handleRemoveRelationship(args: {
         relationships: filteredRelationships,
     };
 
-    // Save the entity
-    await contextInstance.saveEntity(updatedEntity as Entity);
+    // Save the entity (allowUpdate = true since entity already exists)
+    await contextInstance.saveEntity(updatedEntity as Entity, true);
 
     return {
         success: true,
@@ -307,9 +312,7 @@ export async function handleListRelationships(args: {
     const { entityType, entityId, relationshipType, contextDirectory } = args;
 
     // Get context
-    const contextInstance = await Context.create({
-        startingDir: contextDirectory || process.cwd(),
-    });
+    const contextInstance = await createToolContext(contextDirectory);
 
     // Get the entity
     const entity = getEntityByType(contextInstance, entityType, entityId);
@@ -352,9 +355,7 @@ export async function handleFindRelatedEntities(args: {
     const { entityType, entityId, relationshipType, targetType, contextDirectory } = args;
 
     // Get context
-    const contextInstance = await Context.create({
-        startingDir: contextDirectory || process.cwd(),
-    });
+    const contextInstance = await createToolContext(contextDirectory);
 
     // Get the entity
     const entity = getEntityByType(contextInstance, entityType, entityId);
