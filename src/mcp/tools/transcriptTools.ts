@@ -1247,8 +1247,7 @@ export async function handleGetEnhancementLog(args: {
     
     try {
         // Get enhancement log with optional phase filter
-        // TODO: Re-enable when getEnhancementLog is available in protokoll-format
-        const allEntries: any[] = []; // transcript.getEnhancementLog(args.phase ? { phase: args.phase } : undefined);
+        const allEntries = transcript.getEnhancementLog(args.phase ? { phase: args.phase } : undefined);
         
         // Apply pagination
         const limit = args.limit ?? 100;

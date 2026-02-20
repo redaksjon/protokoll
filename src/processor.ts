@@ -133,7 +133,7 @@ export const create = (config: Config, operator: Dreadcabinet.Operator): Instanc
     const currentWorkingDir = globalThis.process.cwd();
 
     const locatePhase = LocatePhase.create(config, operator);
-    const simpleReplacePhase = SimpleReplacePhase.create(config, operator);
+    const simpleReplacePhase = SimpleReplacePhase.create({ debug: config.debug });
 
     // Initialize systems
     // NOTE: Interactive functionality moved to protokoll-cli
