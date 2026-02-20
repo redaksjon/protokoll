@@ -924,6 +924,11 @@ async function main() {
         transcriptionWorker = new TranscriptionWorker({
             outputDirectory: outputDir,
             contextDirectory: process.cwd(),
+            // Pass the resolved contextDirectories from the config file so the pipeline
+            // uses the same entity store as the rest of the server (not guessed from CWD).
+            contextDirectories: Array.isArray(contextDirs) && contextDirs.length > 0
+                ? contextDirs
+                : undefined,
             uploadDirectory,
             scanInterval: 5000, // 5 second scan interval
             model: (cardigantimeConfig as any).model,

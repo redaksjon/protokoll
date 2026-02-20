@@ -137,13 +137,12 @@ export async function readTranscriptsListResource(options: {
     if (projectId && ServerConfig.isInitialized()) {
         const context = ServerConfig.getContext();
         if (context) {
-            try {
-                const project = context.getProject(projectId);
-                if (project) {
-                    projectName = project.name;
-                }
-            } catch {
-                // Project not found - filter by projectId only
+            const project = context.getProject(projectId);
+            if (project) {
+                projectName = project.name;
+            } else {
+                // projectId isn't a known UUID — treat it as a project name
+                projectName = projectId;
             }
         }
     }
