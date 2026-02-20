@@ -20,3 +20,4 @@ tsconfig (1).tsbuildinfo
 package-lock.json
 .kodrdriv*
 .DS_Store
+.transcript/weight-model.json
