@@ -3,25 +3,25 @@
  * Protokoll MCP Server - Hono HTTP Transport
  *
  * Runs the Protokoll MCP server with Hono framework and Streamable HTTP transport.
- * This replaces the manual node:http implementation with a modern framework.
  *
- * Configuration:
- * - MCP_PORT: Port to listen on (default: 3000)
- * - WORKSPACE_ROOT: Directory containing protokoll.yaml config (default: cwd)
- * - PROTOKOLL_CONFIG: Path to protokoll.yaml (overrides WORKSPACE_ROOT discovery)
+ * Configuration (in priority order):
+ * - CLI flags:  --port, --host, --cwd, -c/--config, --config-directory
+ * - Env vars:   MCP_PORT, PROTOKOLL_MCP_PORT, PORT, WORKSPACE_ROOT, PROTOKOLL_CONFIG
+ * - Config file: protokoll-config.yaml (discovered hierarchically from working directory)
  *
  * Security:
  * - Binds to localhost only (127.0.0.1) by default
  * - No authentication (local development only)
- * - Origin validation disabled (can be added later)
  *
  * Usage:
  *   node dist/mcp/server-hono.js
- *   MCP_PORT=3001 node dist/mcp/server-hono.js
+ *   node dist/mcp/server-hono.js --port 3001
+ *   node dist/mcp/server-hono.js --cwd /my/project -c /my/project/protokoll-config.yaml
  */
 
 import 'dotenv/config';
 import { randomUUID, createHash } from 'node:crypto';
+import { Command } from 'commander';
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { StreamableHTTPTransport } from '@hono/mcp';
@@ -31,7 +31,7 @@ import { bodyLimit } from 'hono/body-limit';
 // eslint-disable-next-line no-restricted-imports
 import { createReadStream } from 'node:fs';
 import * as fs from 'node:fs/promises';
-import { join, extname, basename } from 'node:path';
+import { join, extname, basename, dirname } from 'node:path';
 // eslint-disable-next-line import/extensions
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
@@ -45,13 +45,14 @@ import {
 // eslint-disable-next-line import/extensions
 } from '@modelcontextprotocol/sdk/types.js';
 import { resolve } from 'node:path';
+import * as Cardigantime from '@utilarium/cardigantime';
 import * as Resources from './resources';
 import * as Prompts from './prompts';
 import { tools, handleToolCall } from './tools';
 import * as ServerConfig from './serverConfig';
 import * as Roots from './roots';
 import type { McpRoot } from './types';
-import { initializeWorkingDirectoryFromArgsAndConfig, loadCardigantimeConfig, DEFAULT_CONFIG_FILE } from './configDiscovery';
+import { DEFAULT_CONFIG_FILE, createQuietLogger } from './configDiscovery';
 import { TranscriptionWorker } from './worker/transcription-worker';
 import { setWorkerInstance } from './tools/queueTools';
 import { Transcript as TranscriptOps } from '@redaksjon/protokoll-engine';
@@ -61,35 +62,11 @@ import { glob } from 'glob';
 const { createUploadTranscript, findTranscriptByUuid } = TranscriptOps;
 
 // ============================================================================
-// Configuration
+// Configuration (resolved at startup — see main())
 // ============================================================================
 
-// Port priority: MCP_PORT > PROTOKOLL_MCP_PORT > PORT > 3000
-function getPortConfig(): { port: number; source: string } {
-    if (process.env.MCP_PORT) {
-        const port = Number.parseInt(process.env.MCP_PORT, 10);
-        if (!Number.isNaN(port) && port > 0 && port < 65536) {
-            return { port, source: 'MCP_PORT' };
-        }
-    }
-    if (process.env.PROTOKOLL_MCP_PORT) {
-        const port = Number.parseInt(process.env.PROTOKOLL_MCP_PORT, 10);
-        if (!Number.isNaN(port) && port > 0 && port < 65536) {
-            return { port, source: 'PROTOKOLL_MCP_PORT' };
-        }
-    }
-    if (process.env.PORT) {
-        const port = Number.parseInt(process.env.PORT, 10);
-        if (!Number.isNaN(port) && port > 0 && port < 65536) {
-            return { port, source: 'PORT' };
-        }
-    }
-    return { port: 3000, source: 'default' };
-}
-
-const PORT_CONFIG = getPortConfig();
-const MCP_PORT = PORT_CONFIG.port;
-const HOST = '127.0.0.1'; // Localhost only for security
+/** Cached config loaded in main() — available to the session init handler. */
+let startupConfig: Record<string, unknown> = {};
 
 // Audio upload constants
 const DEFAULT_MAX_AUDIO_SIZE = 25 * 1024 * 1024; // 25MB
@@ -591,8 +568,8 @@ app.post('/mcp', async (c) => {
         
         sessions.set(newSessionId, session);
         
-        // Initialize configuration
-        const cardigantimeConfig = await loadCardigantimeConfig();
+        // Use the config loaded once at startup
+        const cardigantimeConfig = startupConfig;
 
         const resolvedConfigDirs = (cardigantimeConfig as any).resolvedConfigDirs as unknown;
         const configRoot = Array.isArray(resolvedConfigDirs) && resolvedConfigDirs.length > 0
@@ -857,28 +834,122 @@ export function getTranscriptionWorker(): TranscriptionWorker | null {
 // ============================================================================
 
 async function main() {
-    await initializeWorkingDirectoryFromArgsAndConfig();
-    
-    // Load config to display in startup banner
-    const cardigantimeConfig = await loadCardigantimeConfig();
-    const resolvedConfigDirs = (cardigantimeConfig as any).resolvedConfigDirs as unknown;
-    const configRoot = Array.isArray(resolvedConfigDirs) && resolvedConfigDirs.length > 0
-        ? resolvedConfigDirs[0]
-        : (process.env.WORKSPACE_ROOT || process.cwd());
+    // ── CLI parsing ───────────────────────────────────────────────────────────
+    const cardigantime = Cardigantime.create({
+        defaults: {
+            configDirectory: '.',
+            configFile: DEFAULT_CONFIG_FILE,
+            isRequired: false,
+            pathResolution: {
+                pathFields: ['inputDirectory', 'outputDirectory', 'processedDirectory', 'contextDirectories'],
+                resolvePathArray: ['contextDirectories'],
+            },
+        },
+        configShape: {},
+        features: ['config', 'hierarchical'],
+        logger: createQuietLogger(),
+    });
+
+    const program = new Command();
+    program
+        .name('protokoll-mcp-http')
+        .description('Protokoll MCP HTTP server (Hono)')
+        .option('-p, --port <number>', 'HTTP port to listen on (env: MCP_PORT)', '3000')
+        .option('--host <address>', 'Host address to bind to', '127.0.0.1')
+        .option('--cwd <dir>', 'Set working directory before loading configuration')
+        .option('--config <path>', 'Path to configuration file (env: PROTOKOLL_CONFIG)');
+
+    await cardigantime.configure(program); // adds -c/--config-directory
+    program.parse();
+    const args = program.opts();
+
+    // Apply working directory before config loading
+    if (args.cwd) {
+        process.chdir(resolve(args.cwd as string));
+    }
+
+    // CardiganTime diagnostic/utility flags — run and exit without starting the server.
+    // These need a verbose logger so their output is actually visible.
+    if (args.checkConfig || args.initConfig) {
+        cardigantime.setLogger({
+            // eslint-disable-next-line no-console
+            debug: (msg, ...a) => console.log(`[debug] ${msg}`, ...a),
+            // eslint-disable-next-line no-console
+            info: (msg, ...a) => console.log(msg, ...a),
+            // eslint-disable-next-line no-console
+            warn: (msg, ...a) => console.warn(msg, ...a),
+            // eslint-disable-next-line no-console
+            error: (msg, ...a) => console.error(msg, ...a),
+            // eslint-disable-next-line no-console
+            verbose: (msg, ...a) => console.log(msg, ...a),
+            silly: () => { /* intentionally empty */ },
+        });
+        if (args.checkConfig) {
+            await cardigantime.checkConfig(args);
+        } else {
+            await cardigantime.generateConfig(args.configDirectory || '.');
+        }
+        process.exit(0);
+    }
+
+    // Handle explicit config path (sets env vars for downstream ServerConfig)
+    if (args.config) {
+        const configPath = resolve(args.config as string);
+        process.env.PROTOKOLL_CONFIG = configPath;
+        process.env.WORKSPACE_ROOT = dirname(configPath);
+    }
+
+    // Load config — CLI args merge with file values via CardiganTime
+    const cardigantimeConfig = await cardigantime.read(args);
+
+    // Set WORKSPACE_ROOT from resolved config dirs (when no explicit --config)
+    if (!args.config) {
+        const resolvedConfigDirs = (cardigantimeConfig as any).resolvedConfigDirs as string[] | undefined;
+        process.env.WORKSPACE_ROOT = resolvedConfigDirs?.[0] ?? process.env.WORKSPACE_ROOT ?? process.cwd();
+    }
+
+    // Cache for session init handler (avoids reloading config on every new session)
+    startupConfig = cardigantimeConfig as Record<string, unknown>;
+
+    // ── Port / host resolution ────────────────────────────────────────────────
+    // Priority: --port CLI > MCP_PORT env > PROTOKOLL_MCP_PORT env > PORT env > default 3000
+    function resolvePort(cliArg: string): { port: number; source: string } {
+        const cliPort = Number.parseInt(cliArg, 10);
+        // Commander default is '3000'; treat an explicitly different value as user-provided
+        if (program.getOptionValueSource('port') === 'cli') {
+            if (!Number.isNaN(cliPort) && cliPort > 0 && cliPort < 65536) {
+                return { port: cliPort, source: '--port' };
+            }
+        }
+        for (const [name, val] of [
+            ['MCP_PORT', process.env.MCP_PORT],
+            ['PROTOKOLL_MCP_PORT', process.env.PROTOKOLL_MCP_PORT],
+            ['PORT', process.env.PORT],
+        ] as [string, string | undefined][]) {
+            if (val) {
+                const p = Number.parseInt(val, 10);
+                if (!Number.isNaN(p) && p > 0 && p < 65536) return { port: p, source: name };
+            }
+        }
+        return { port: cliPort || 3000, source: 'default' };
+    }
+
+    const portConfig = resolvePort(args.port as string);
+    const port = portConfig.port;
+    const host = (args.host as string | undefined) || '127.0.0.1';
+    const portSource = portConfig.source === 'default' ? '(default)' : `(from ${portConfig.source})`;
+
+    // ── Display startup banner ────────────────────────────────────────────────
+    const resolvedConfigDirsForBanner = (cardigantimeConfig as any).resolvedConfigDirs as string[] | undefined;
+    const configRoot = resolvedConfigDirsForBanner?.[0] ?? process.env.WORKSPACE_ROOT ?? process.cwd();
     const configPathDisplay = resolve(configRoot, DEFAULT_CONFIG_FILE);
-    
-    // Extract directory settings from config
+
     const inputDir = (cardigantimeConfig as any).inputDirectory || 'NOT SET';
     const outputDir = (cardigantimeConfig as any).outputDirectory || 'NOT SET';
     const contextDirs = (cardigantimeConfig as any).contextDirectories;
-    const contextDirsDisplay = Array.isArray(contextDirs) && contextDirs.length > 0 
-        ? contextDirs.join(', ') 
+    const contextDirsDisplay = Array.isArray(contextDirs) && contextDirs.length > 0
+        ? contextDirs.join(', ')
         : 'NOT SET';
-    
-    // Start the server
-    const portSource = PORT_CONFIG.source === 'default' 
-        ? '(default)' 
-        : `(from ${PORT_CONFIG.source})`;
     
     // eslint-disable-next-line no-console
     console.log('\n=================================================================');
@@ -887,11 +958,11 @@ async function main() {
     // eslint-disable-next-line no-console
     console.log('=================================================================');
     // eslint-disable-next-line no-console
-    console.log(`🌐 Server URL:        http://${HOST}:${MCP_PORT} ${portSource}`);
+    console.log(`🌐 Server URL:        http://${host}:${port} ${portSource}`);
     // eslint-disable-next-line no-console
-    console.log(`💚 Health Check:      http://${HOST}:${MCP_PORT}/health`);
+    console.log(`💚 Health Check:      http://${host}:${port}/health`);
     // eslint-disable-next-line no-console
-    console.log(`🔌 MCP Endpoint:      http://${HOST}:${MCP_PORT}/mcp`);
+    console.log(`🔌 MCP Endpoint:      http://${host}:${port}/mcp`);
     // eslint-disable-next-line no-console
     console.log(`📁 Working Directory: ${process.cwd()}`);
     // eslint-disable-next-line no-console
@@ -965,8 +1036,8 @@ async function main() {
 
     serve({
         fetch: app.fetch,
-        port: MCP_PORT,
-        hostname: HOST,
+        port,
+        hostname: host,
     });
 }
 
