@@ -68,6 +68,8 @@ export default defineConfig({
                 '@utilarium/dreadcabinet',
                 '@utilarium/overcontext',
                 '@types/fluent-ffmpeg',
+                // CLI
+                'commander',
                 // Hono dependencies
                 'hono',
                 'hono/cors',
@@ -92,7 +94,6 @@ export default defineConfig({
             input: {
                 index: 'src/index.ts',
                 'mcp/server': 'src/mcp/server.ts',
-                'mcp/server-http': 'src/mcp/server-http.ts',
                 'mcp/server-hono': 'src/mcp/server-hono.ts',
             },
             output: {

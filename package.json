@@ -6,8 +6,7 @@
   "type": "module",
   "bin": {
     "protokoll-mcp": "./dist/mcp/server.js",
-    "protokoll-mcp-http": "./dist/mcp/server-hono.js",
-    "protokoll-mcp-http-legacy": "./dist/mcp/server-http.js"
+    "protokoll-mcp-http": "./dist/mcp/server-hono.js"
   },
   "repository": {
     "type": "git",
@@ -15,7 +14,7 @@
   },
   "homepage": "https://github.com/redaksjon/protokoll",
   "scripts": {
-    "build": "npm run lint && tsc --noEmit && vite build && chmod +x dist/mcp/server.js dist/mcp/server-http.js dist/mcp/server-hono.js",
+    "build": "npm run lint && tsc --noEmit && vite build && chmod +x dist/mcp/server.js dist/mcp/server-hono.js",
     "dev": "vite",
     "watch": "vite build --watch",
     "test": "vitest run --coverage",
@@ -33,7 +32,6 @@
     "mcp:start": "node dist/mcp/server.js",
     "mcp:http": "node dist/mcp/server-hono.js",
     "mcp:http:dev": "nodemon --watch src --ext ts,yaml,json --ignore 'src/**/*.test.ts' --exec 'npm run build && npm run mcp:http'",
-    "mcp:http:legacy": "node dist/mcp/server-http.js",
     "fix-delimiters": "npm run build && node dist/scripts/fix-duplicate-delimiters.js",
     "fix-delimiters:dry-run": "npm run build && node dist/scripts/fix-duplicate-delimiters.js --dry-run",
     "migrate-titles": "npm run build && node dist/scripts/migrate-titles-to-frontmatter.js",
@@ -68,6 +66,7 @@
     "@utilarium/cardigantime": "^0.0.27",
     "@utilarium/dreadcabinet": "^0.0.18",
     "@utilarium/overcontext": "^0.0.7",
+    "commander": "^14.0.3",
     "dayjs": "^1.11.19",
     "dotenv": "^17.2.3",
     "fluent-ffmpeg": "^2.1.3",
