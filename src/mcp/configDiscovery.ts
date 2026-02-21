@@ -3,7 +3,7 @@
  * 
  * Uses CardiganTime to discover protokoll-config.yaml files hierarchically,
  * matching the behavior of protokoll-cli. This module is shared between
- * the stdio server (server.ts) and HTTP server (server-http.ts).
+ * the stdio server (server.ts) and HTTP server (server-hono.ts).
  */
 
 import * as Cardigantime from '@utilarium/cardigantime';
@@ -23,7 +23,7 @@ function isDebugEnabled(): boolean {
  * Create a quiet logger that only outputs when debug is enabled
  * and formats messages in a cleaner way
  */
-function createQuietLogger(): Logger {
+export function createQuietLogger(): Logger {
     const debugEnabled = isDebugEnabled();
     
     const noop = () => { /* intentionally empty */ };
