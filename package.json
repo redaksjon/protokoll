@@ -1,6 +1,6 @@
 {
   "name": "@redaksjon/protokoll",
-  "version": "1.0.17",
+  "version": "1.0.18",
   "description": "Focused audio transcription with intelligent context integration",
   "main": "dist/index.js",
   "type": "module",
@@ -62,7 +62,7 @@
     "@kjerneverk/riotprompt": "^1.0.6",
     "@modelcontextprotocol/sdk": "^1.25.2",
     "@redaksjon/context": "^0.0.10",
-    "@redaksjon/protokoll-engine": "^0.1.7",
+    "@redaksjon/protokoll-engine": "^0.1.8",
     "@redaksjon/protokoll-format": "^0.1.5",
     "@types/fluent-ffmpeg": "^2.1.28",
     "@utilarium/cardigantime": "^0.0.27",
