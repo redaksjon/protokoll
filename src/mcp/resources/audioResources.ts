@@ -10,6 +10,16 @@ import { readdir, stat } from 'node:fs/promises';
 import { resolve, join, extname } from 'node:path';
 import * as Context from '@/context';
 import { DEFAULT_AUDIO_EXTENSIONS } from '@/constants';
+import * as ServerConfig from '../serverConfig';
+
+function isServerConfigInitialized(): boolean {
+    try {
+        return typeof (ServerConfig as any).isInitialized === 'function' &&
+            (ServerConfig as any).isInitialized();
+    } catch {
+        return false;
+    }
+}
 
 /**
  * List audio files in a directory
@@ -78,16 +88,34 @@ function formatBytes(bytes: number): string {
 export async function readAudioInboundResource(
     directory?: string
 ): Promise<McpResourceContents> {
-    const context = await Context.create({
-        startingDir: directory || process.cwd(),
-    });
+    const serverConfigReady = isServerConfigInitialized();
 
-    if (!context.hasContext()) {
-        throw new Error('No Protokoll context found');
+    let inputDirectory = directory;
+    if (!inputDirectory) {
+        if (serverConfigReady && typeof (ServerConfig as any).getInputDirectory === 'function') {
+            inputDirectory = (ServerConfig as any).getInputDirectory();
+        } else {
+            const context = await Context.create({
+                startingDir: process.cwd(),
+            });
+            if (!context.hasContext()) {
+                throw new Error('No Protokoll context found');
+            }
+            const config = context.getConfig();
+            inputDirectory = (config.inputDirectory as string) || './recordings';
+        }
+    } else if (!serverConfigReady) {
+        // Preserve local-mode behavior: explicit directories still require context discovery.
+        const context = await Context.create({
+            startingDir: directory,
+        });
+        if (!context.hasContext()) {
+            throw new Error('No Protokoll context found');
+        }
     }
-
-    const config = context.getConfig();
-    const inputDirectory = directory || (config.inputDirectory as string) || './recordings';
+    if (!inputDirectory) {
+        throw new Error('Input directory is not configured');
+    }
     const audioFiles = await listAudioFiles(inputDirectory);
     
     const responseData = {
@@ -118,16 +146,34 @@ export async function readAudioInboundResource(
 export async function readAudioProcessedResource(
     directory?: string
 ): Promise<McpResourceContents> {
-    const context = await Context.create({
-        startingDir: directory || process.cwd(),
-    });
+    const serverConfigReady = isServerConfigInitialized();
 
-    if (!context.hasContext()) {
-        throw new Error('No Protokoll context found');
+    let processedDirectory = directory;
+    if (!processedDirectory) {
+        if (serverConfigReady && typeof (ServerConfig as any).getProcessedDirectory === 'function') {
+            processedDirectory = (ServerConfig as any).getProcessedDirectory() || './processed';
+        } else {
+            const context = await Context.create({
+                startingDir: process.cwd(),
+            });
+            if (!context.hasContext()) {
+                throw new Error('No Protokoll context found');
+            }
+            const config = context.getConfig();
+            processedDirectory = (config.processedDirectory as string) || './processed';
+        }
+    } else if (!serverConfigReady) {
+        // Preserve local-mode behavior: explicit directories still require context discovery.
+        const context = await Context.create({
+            startingDir: directory,
+        });
+        if (!context.hasContext()) {
+            throw new Error('No Protokoll context found');
+        }
     }
-
-    const config = context.getConfig();
-    const processedDirectory = directory || (config.processedDirectory as string) || './processed';
+    if (!processedDirectory) {
+        throw new Error('Processed directory is not configured');
+    }
     const audioFiles = await listAudioFiles(processedDirectory);
     
     const responseData = {

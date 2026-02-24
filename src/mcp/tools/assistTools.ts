@@ -4,7 +4,7 @@
  */
  
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
-import * as Context from '@/context';
+import { createToolContext } from './shared';
 
 // ============================================================================
 // Tool Definitions
@@ -75,9 +75,7 @@ export async function handleSuggestProjectMetadata(args: {
     source?: string;
     contextDirectory?: string;
 }) {
-    const context = await Context.create({
-        startingDir: args.contextDirectory || process.cwd(),
-    });
+    const context = await createToolContext(args.contextDirectory);
 
     const smartConfig = context.getSmartAssistanceConfig();
 
@@ -136,9 +134,7 @@ export async function handleSuggestTermMetadata(args: {
     expansion?: string;
     contextDirectory?: string;
 }) {
-    const context = await Context.create({
-        startingDir: args.contextDirectory || process.cwd(),
-    });
+    const context = await createToolContext(args.contextDirectory);
 
     const smartConfig = context.getSmartAssistanceConfig();
 

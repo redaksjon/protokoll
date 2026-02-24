@@ -13,6 +13,47 @@ import {
     buildTranscriptsListUri,
 } from '../uri';
 import * as Context from '@/context';
+import * as ServerConfig from '../serverConfig';
+import { isAbsolute, resolve } from 'node:path';
+
+function isServerConfigInitialized(): boolean {
+    try {
+        return typeof (ServerConfig as any).isInitialized === 'function' &&
+            (ServerConfig as any).isInitialized();
+    } catch {
+        return false;
+    }
+}
+
+function getServerContext() {
+    try {
+        return typeof (ServerConfig as any).getContext === 'function'
+            ? (ServerConfig as any).getContext()
+            : null;
+    } catch {
+        return null;
+    }
+}
+
+function getServerConfigFile(): { contextDirectories?: string[] } | null {
+    try {
+        return typeof (ServerConfig as any).getServerConfig === 'function'
+            ? ((ServerConfig as any).getServerConfig().configFile as { contextDirectories?: string[] } | null)
+            : null;
+    } catch {
+        return null;
+    }
+}
+
+function getWorkspaceRoot(): string | null {
+    try {
+        return typeof (ServerConfig as any).getWorkspaceRoot === 'function'
+            ? (ServerConfig as any).getWorkspaceRoot()
+            : null;
+    } catch {
+        return null;
+    }
+}
 
 /**
  * Get dynamic resources based on current context
@@ -21,9 +62,30 @@ export async function getDynamicResources(contextDirectory?: string): Promise<Mc
     const resources: McpResource[] = [];
     
     try {
-        const context = await Context.create({
-            startingDir: contextDirectory || process.cwd(),
-        });
+        let context;
+        const serverConfigReady = isServerConfigInitialized();
+        if (serverConfigReady) {
+            const serverContext = getServerContext();
+            if (serverContext?.hasContext()) {
+                context = serverContext;
+            } else {
+                const configFile = getServerConfigFile();
+                const rawDirs = configFile?.contextDirectories;
+                const workspaceRoot = getWorkspaceRoot();
+                const effectiveDir = contextDirectory || workspaceRoot || process.cwd();
+                const contextDirs = rawDirs && rawDirs.length > 0
+                    ? rawDirs.map(d => (isAbsolute(d) ? d : resolve(effectiveDir, d)))
+                    : undefined;
+                context = await Context.create({
+                    startingDir: effectiveDir,
+                    contextDirectories: contextDirs,
+                });
+            }
+        } else {
+            context = await Context.create({
+                startingDir: contextDirectory || process.cwd(),
+            });
+        }
 
         if (!context.hasContext()) {
             return resources;

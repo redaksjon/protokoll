@@ -7,12 +7,13 @@
 
 // eslint-disable-next-line no-restricted-imports
 import { readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, isAbsolute } from 'node:path';
 import { stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import type { McpPrompt, McpPromptMessage } from '../types';
 import * as Context from '@/context';
 import { buildConfigUri, buildEntitiesListUri } from '../uri';
+import * as ServerConfig from '../serverConfig';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -61,6 +62,63 @@ function loadTemplate(name: string): string {
 function fillTemplate(template: string, args: Record<string, string>): string {
     return template.replace(/\${(\w+)}/g, (_, key) => {
         return args[key] || '';
+    });
+}
+
+async function createPromptContext(startingDir: string) {
+    const serverConfigReady = (() => {
+        try {
+            return typeof (ServerConfig as any).isInitialized === 'function' &&
+                (ServerConfig as any).isInitialized();
+        } catch {
+            return false;
+        }
+    })();
+    if (serverConfigReady) {
+        const serverContext = (() => {
+            try {
+                return typeof (ServerConfig as any).getContext === 'function'
+                    ? (ServerConfig as any).getContext()
+                    : null;
+            } catch {
+                return null;
+            }
+        })();
+        if (serverContext?.hasContext()) {
+            return serverContext;
+        }
+
+        const configFile = (() => {
+            try {
+                return typeof (ServerConfig as any).getServerConfig === 'function'
+                    ? ((ServerConfig as any).getServerConfig().configFile as { contextDirectories?: string[] } | null)
+                    : null;
+            } catch {
+                return null;
+            }
+        })();
+        const rawDirs = configFile?.contextDirectories;
+        const workspaceRoot = (() => {
+            try {
+                return typeof (ServerConfig as any).getWorkspaceRoot === 'function'
+                    ? (ServerConfig as any).getWorkspaceRoot()
+                    : null;
+            } catch {
+                return null;
+            }
+        })();
+        const effectiveDir = workspaceRoot || startingDir;
+        const contextDirs = rawDirs && rawDirs.length > 0
+            ? rawDirs.map(d => (isAbsolute(d) ? d : resolve(effectiveDir, d)))
+            : undefined;
+        return Context.create({
+            startingDir: effectiveDir,
+            contextDirectories: contextDirs,
+        });
+    }
+
+    return Context.create({
+        startingDir,
     });
 }
 
@@ -307,13 +365,11 @@ async function generateTranscribePrompt(
         try {
             await stat(audioPath);
 
-            const context = await Context.create({
-                startingDir: dirname(audioPath),
-            });
+            const context = await createPromptContext(dirname(audioPath));
 
             if (context.hasContext()) {
                 const dirs = context.getDiscoveredDirs();
-                const projects = context.getAllProjects().filter(p => p.active !== false);
+                const projects = context.getAllProjects().filter((p: { active?: boolean }) => p.active !== false);
 
                 discoverySection = `## Context Discovery\n\n` +
                     `**Configuration:** ${dirs[0]?.path}\n` +

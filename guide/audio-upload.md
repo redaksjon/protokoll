@@ -40,6 +40,35 @@ export PROTOKOLL_MCP_PORT=8080
 export PORT=8080
 ```
 
+`protokoll-mcp-http --help` also exposes the core Protokoll configuration keys so they can be set on the CLI, in `protokoll-config.yaml`, or via `PROTOKOLL_*` environment variables:
+
+```bash
+protokoll-mcp-http \
+  --input-directory ./inbound \
+  --output-directory ./notes \
+  --processed-directory ./processed \
+  --context-directories ./context,./shared-context \
+  --model gpt-5-mini \
+  --classify-model gpt-5-mini \
+  --compose-model gpt-5-mini \
+  --transcription-model whisper-1 \
+  --debug \
+  --verbose
+```
+
+Environment variable equivalents:
+
+- `PROTOKOLL_INPUT_DIRECTORY`
+- `PROTOKOLL_OUTPUT_DIRECTORY`
+- `PROTOKOLL_PROCESSED_DIRECTORY`
+- `PROTOKOLL_CONTEXT_DIRECTORIES` (comma-separated)
+- `PROTOKOLL_MODEL`
+- `PROTOKOLL_CLASSIFY_MODEL`
+- `PROTOKOLL_COMPOSE_MODEL`
+- `PROTOKOLL_TRANSCRIPTION_MODEL`
+- `PROTOKOLL_DEBUG` (`true` or `false`)
+- `PROTOKOLL_VERBOSE` (`true` or `false`)
+
 ### Uploading a File
 
 ```bash
