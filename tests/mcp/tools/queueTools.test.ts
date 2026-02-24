@@ -24,6 +24,9 @@ import {
     handleGetTranscriptByUuid,
     handleRetryTranscription,
     handleCancelTranscription,
+    handleWorkerStatus,
+    handleRestartWorker,
+    setWorkerInstance,
 } from '../../../src/mcp/tools/queueTools';
 
 describe('Queue Tools', () => {
@@ -36,6 +39,7 @@ describe('Queue Tools', () => {
         // Mock getOutputDirectory to return test directory
         const { getOutputDirectory } = await import('../../../src/mcp/serverConfig');
         vi.mocked(getOutputDirectory).mockReturnValue(testDir);
+        setWorkerInstance(null);
     });
 
     describe('handleQueueStatus', () => {
@@ -86,6 +90,31 @@ describe('Queue Tools', () => {
             expect(result.processing.length).toBe(1);
             expect(result.processing[0].uuid).toBe('test-uuid-2');
             expect(result.processing[0].filename).toBe('processing-audio.m4a');
+        });
+
+        it('should include recent completed transcripts and transcribing start from history', async () => {
+            const now = Date.now();
+            const metadata: TranscriptMetadata = {
+                id: 'test-uuid-10',
+                status: 'enhanced',
+                title: 'Completed Transcript',
+                date: new Date(now - 10 * 60 * 1000),
+                history: [
+                    { from: 'uploaded', to: 'transcribing', at: new Date(now - 5 * 60 * 1000) },
+                    { from: 'transcribing', to: 'enhanced', at: new Date(now - 1 * 60 * 1000) },
+                ],
+            };
+
+            const filePath = path.join(testDir, 'test-uui-recent.pkl');
+            const transcript = PklTranscript.create(filePath, metadata);
+            await transcript.close();
+
+            const result = await handleQueueStatus();
+            const recent = result.recent.find(r => r.uuid === 'test-uuid-10');
+
+            expect(recent).toBeDefined();
+            expect(recent?.status).toBe('enhanced');
+            expect(recent?.completedAt).toBe(new Date(now - 1 * 60 * 1000).toISOString());
         });
     });
 
@@ -209,6 +238,17 @@ describe('Queue Tools', () => {
             expect(result.success).toBe(false);
             expect(result.error).toContain('No transcript found');
         });
+
+        it('should return caught error when lookup throws', async () => {
+            const { getOutputDirectory } = await import('../../../src/mcp/serverConfig');
+            vi.mocked(getOutputDirectory).mockImplementationOnce(() => {
+                throw new Error('boom');
+            });
+
+            const result = await handleRetryTranscription({ uuid: 'any' });
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('boom');
+        });
     });
 
     describe('handleCancelTranscription', () => {
@@ -276,6 +316,109 @@ describe('Queue Tools', () => {
             
             expect(result.success).toBe(false);
             expect(result.error).toContain('Cannot cancel');
+        });
+
+        it('should return not found for non-existent UUID', async () => {
+            const result = await handleCancelTranscription({ uuid: 'missing' });
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('No transcript found');
+        });
+
+        it('should return caught error when cancellation throws', async () => {
+            const { getOutputDirectory } = await import('../../../src/mcp/serverConfig');
+            vi.mocked(getOutputDirectory).mockImplementationOnce(() => {
+                throw new Error('cancel boom');
+            });
+
+            const result = await handleCancelTranscription({ uuid: 'any' });
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('cancel boom');
+        });
+    });
+
+    describe('worker management', () => {
+        it('returns default worker status when worker is not initialized', async () => {
+            setWorkerInstance(null);
+
+            const result = await handleWorkerStatus();
+
+            expect(result).toEqual({
+                isRunning: false,
+                totalProcessed: 0,
+                uptime: 0,
+            });
+        });
+
+        it('returns live worker status when worker exists', async () => {
+            const mockWorker = {
+                isActive: vi.fn().mockReturnValue(true),
+                getCurrentTask: vi.fn().mockReturnValue('Processing uuid-1'),
+                getProcessedCount: vi.fn().mockReturnValue(12),
+                getLastProcessedTime: vi.fn().mockReturnValue('2026-02-15T10:00:00.000Z'),
+                getUptime: vi.fn().mockReturnValue(120),
+                stop: vi.fn().mockResolvedValue(undefined),
+                start: vi.fn().mockResolvedValue(undefined),
+            } as any;
+            setWorkerInstance(mockWorker);
+
+            const result = await handleWorkerStatus();
+
+            expect(result).toEqual({
+                isRunning: true,
+                currentTask: 'Processing uuid-1',
+                totalProcessed: 12,
+                lastProcessed: '2026-02-15T10:00:00.000Z',
+                uptime: 120,
+            });
+        });
+
+        it('fails to restart when worker is not initialized', async () => {
+            setWorkerInstance(null);
+
+            const result = await handleRestartWorker();
+
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('Worker not initialized');
+        });
+
+        it('restarts worker successfully', async () => {
+            const mockWorker = {
+                stop: vi.fn().mockResolvedValue(undefined),
+                start: vi.fn().mockResolvedValue(undefined),
+                isActive: vi.fn().mockReturnValue(true),
+                getCurrentTask: vi.fn().mockReturnValue(undefined),
+                getProcessedCount: vi.fn().mockReturnValue(0),
+                getLastProcessedTime: vi.fn().mockReturnValue(undefined),
+                getUptime: vi.fn().mockReturnValue(0),
+            } as any;
+            setWorkerInstance(mockWorker);
+
+            const result = await handleRestartWorker();
+
+            expect(mockWorker.stop).toHaveBeenCalledTimes(1);
+            expect(mockWorker.start).toHaveBeenCalledTimes(1);
+            expect(result).toEqual({
+                success: true,
+                message: 'Worker restarted successfully',
+            });
+        });
+
+        it('returns restart error when stop/start throws', async () => {
+            const mockWorker = {
+                stop: vi.fn().mockRejectedValue(new Error('restart failed')),
+                start: vi.fn().mockResolvedValue(undefined),
+                isActive: vi.fn().mockReturnValue(false),
+                getCurrentTask: vi.fn().mockReturnValue(undefined),
+                getProcessedCount: vi.fn().mockReturnValue(0),
+                getLastProcessedTime: vi.fn().mockReturnValue(undefined),
+                getUptime: vi.fn().mockReturnValue(0),
+            } as any;
+            setWorkerInstance(mockWorker);
+
+            const result = await handleRestartWorker();
+
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('restart failed');
         });
     });
 });

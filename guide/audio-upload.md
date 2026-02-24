@@ -40,6 +40,35 @@ export PROTOKOLL_MCP_PORT=8080
 export PORT=8080
 ```
 
+`protokoll-mcp-http --help` also exposes the core Protokoll configuration keys so they can be set on the CLI, in `protokoll-config.yaml`, or via `PROTOKOLL_*` environment variables:
+
+```bash
+protokoll-mcp-http \
+  --input-directory ./inbound \
+  --output-directory ./notes \
+  --processed-directory ./processed \
+  --context-directories ./context,./shared-context \
+  --model gpt-5-mini \
+  --classify-model gpt-5-mini \
+  --compose-model gpt-5-mini \
+  --transcription-model whisper-1 \
+  --debug \
+  --verbose
+```
+
+Environment variable equivalents:
+
+- `PROTOKOLL_INPUT_DIRECTORY`
+- `PROTOKOLL_OUTPUT_DIRECTORY`
+- `PROTOKOLL_PROCESSED_DIRECTORY`
+- `PROTOKOLL_CONTEXT_DIRECTORIES` (comma-separated)
+- `PROTOKOLL_MODEL`
+- `PROTOKOLL_CLASSIFY_MODEL`
+- `PROTOKOLL_COMPOSE_MODEL`
+- `PROTOKOLL_TRANSCRIPTION_MODEL`
+- `PROTOKOLL_DEBUG` (`true` or `false`)
+- `PROTOKOLL_VERBOSE` (`true` or `false`)
+
 ### Uploading a File
 
 ```bash
@@ -65,7 +94,7 @@ Save the `uuid` -- you'll use it to check status and retrieve the transcript.
 
 `mp3`, `m4a`, `wav`, `webm`, `mp4`, `aac`, `ogg`, `flac`
 
-Maximum file size: **25 MB**
+Maximum file size: **1 GB**
 
 ### How Background Processing Works
 
@@ -259,7 +288,7 @@ The background worker uses these defaults (configured in server code):
 | Output structure | `month` |
 | Filename pattern | `date`, `time`, `subject` |
 | Max audio size (worker) | 100 MB |
-| Max audio size (upload endpoint) | 25 MB |
+| Max audio size (upload endpoint) | 1 GB |
 
 ### Output Location
 
@@ -308,7 +337,7 @@ The worker may have crashed mid-processing. Restart the server or use `protokoll
 
 ### File too large
 
-The HTTP upload endpoint has a 25 MB limit. For larger files, use the CLI which supports up to 100 MB, or split the audio first:
+The HTTP upload endpoint has a 1 GB limit. For larger files, split the audio first:
 
 ```bash
 # Split into 20-minute chunks

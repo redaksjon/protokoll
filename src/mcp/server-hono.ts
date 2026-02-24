@@ -5,8 +5,8 @@
  * Runs the Protokoll MCP server with Hono framework and Streamable HTTP transport.
  *
  * Configuration (in priority order):
- * - CLI flags:  --port, --host, --cwd, -c/--config, --config-directory
- * - Env vars:   MCP_PORT, PROTOKOLL_MCP_PORT, PORT, WORKSPACE_ROOT, PROTOKOLL_CONFIG
+ * - CLI flags:  --port, --host, --cwd, --config, --config-directory, and core Protokoll config flags
+ * - Env vars:   MCP_PORT, PROTOKOLL_MCP_PORT, PORT, PROTOKOLL_*, WORKSPACE_ROOT, PROTOKOLL_CONFIG
  * - Config file: protokoll-config.yaml (discovered hierarchically from working directory)
  *
  * Security:
@@ -46,6 +46,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { resolve } from 'node:path';
 import * as Cardigantime from '@utilarium/cardigantime';
+import { z } from 'zod';
 import * as Resources from './resources';
 import * as Prompts from './prompts';
 import { tools, handleToolCall } from './tools';
@@ -69,8 +70,40 @@ const { createUploadTranscript, findTranscriptByUuid } = TranscriptOps;
 let startupConfig: Record<string, unknown> = {};
 
 // Audio upload constants
-const DEFAULT_MAX_AUDIO_SIZE = 25 * 1024 * 1024; // 25MB
+const DEFAULT_MAX_AUDIO_SIZE = 1024 * 1024 * 1024; // 1GB
 const DEFAULT_AUDIO_EXTENSIONS = ['mp3', 'm4a', 'wav', 'webm', 'mp4', 'aac', 'ogg', 'flac'];
+
+function parseBooleanEnv(value: string | undefined): boolean | undefined {
+    if (!value) return undefined;
+    return value.toLowerCase() === 'true';
+}
+
+function parseCsvList(value: string): string[] {
+    return value
+        .split(',')
+        .map(part => part.trim())
+        .filter(Boolean);
+}
+
+function parseListOrAppend(value: string, previous: string[] = []): string[] {
+    return [...previous, ...parseCsvList(value)];
+}
+
+// CardiganTime integration for protokoll-mcp-http:
+// - Define config schema once (CLI/env/config-file share the same keys).
+// - Keep env mappings explicit via zod defaults where desired.
+const McpHttpConfigSchema = z.object({
+    inputDirectory: z.string().optional(),
+    outputDirectory: z.string().optional(),
+    processedDirectory: z.string().optional(),
+    contextDirectories: z.array(z.string()).optional(),
+    model: z.string().optional(),
+    classifyModel: z.string().optional(),
+    composeModel: z.string().optional(),
+    transcriptionModel: z.string().optional(),
+    debug: z.boolean().default(parseBooleanEnv(process.env.PROTOKOLL_DEBUG) ?? false),
+    verbose: z.boolean().default(parseBooleanEnv(process.env.PROTOKOLL_VERBOSE) ?? false),
+});
 
 // ============================================================================
 // Session Management
@@ -845,7 +878,7 @@ async function main() {
                 resolvePathArray: ['contextDirectories'],
             },
         },
-        configShape: {},
+        configShape: McpHttpConfigSchema.shape,
         features: ['config', 'hierarchical'],
         logger: createQuietLogger(),
     });
@@ -857,7 +890,17 @@ async function main() {
         .option('-p, --port <number>', 'HTTP port to listen on (env: MCP_PORT)', '3000')
         .option('--host <address>', 'Host address to bind to', '127.0.0.1')
         .option('--cwd <dir>', 'Set working directory before loading configuration')
-        .option('--config <path>', 'Path to configuration file (env: PROTOKOLL_CONFIG)');
+        .option('--config <path>', 'Path to configuration file (env: PROTOKOLL_CONFIG)')
+        .option('--input-directory <dir>', 'Input directory for audio files (env: PROTOKOLL_INPUT_DIRECTORY)')
+        .option('--output-directory <dir>', 'Output directory for transcripts (env: PROTOKOLL_OUTPUT_DIRECTORY)')
+        .option('--processed-directory <dir>', 'Processed directory for completed audio (env: PROTOKOLL_PROCESSED_DIRECTORY)')
+        .option('--context-directories <dirs>', 'Comma-separated context directories (env: PROTOKOLL_CONTEXT_DIRECTORIES)', parseListOrAppend, [])
+        .option('--model <model>', 'Enhancement model (env: PROTOKOLL_MODEL)')
+        .option('--classify-model <model>', 'Classification model (env: PROTOKOLL_CLASSIFY_MODEL)')
+        .option('--compose-model <model>', 'Composition model (env: PROTOKOLL_COMPOSE_MODEL)')
+        .option('--transcription-model <model>', 'Transcription model (env: PROTOKOLL_TRANSCRIPTION_MODEL)')
+        .option('--debug', 'Enable debug mode (env: PROTOKOLL_DEBUG)')
+        .option('--verbose', 'Enable verbose mode (env: PROTOKOLL_VERBOSE)');
 
     await cardigantime.configure(program); // adds -c/--config-directory
     program.parse();
@@ -900,7 +943,23 @@ async function main() {
     }
 
     // Load config — CLI args merge with file values via CardiganTime
-    const cardigantimeConfig = await cardigantime.read(args);
+    const cardigantimeConfig = await cardigantime.read({
+        ...args,
+        inputDirectory: (args.inputDirectory as string | undefined) ?? process.env.PROTOKOLL_INPUT_DIRECTORY,
+        outputDirectory: (args.outputDirectory as string | undefined) ?? process.env.PROTOKOLL_OUTPUT_DIRECTORY,
+        processedDirectory: (args.processedDirectory as string | undefined) ?? process.env.PROTOKOLL_PROCESSED_DIRECTORY,
+        contextDirectories: Array.isArray(args.contextDirectories) && args.contextDirectories.length > 0
+            ? args.contextDirectories
+            : process.env.PROTOKOLL_CONTEXT_DIRECTORIES
+                ? parseCsvList(process.env.PROTOKOLL_CONTEXT_DIRECTORIES)
+                : undefined,
+        model: (args.model as string | undefined) ?? process.env.PROTOKOLL_MODEL,
+        classifyModel: (args.classifyModel as string | undefined) ?? process.env.PROTOKOLL_CLASSIFY_MODEL,
+        composeModel: (args.composeModel as string | undefined) ?? process.env.PROTOKOLL_COMPOSE_MODEL,
+        transcriptionModel: (args.transcriptionModel as string | undefined) ?? process.env.PROTOKOLL_TRANSCRIPTION_MODEL,
+        debug: (args.debug as boolean | undefined) ?? parseBooleanEnv(process.env.PROTOKOLL_DEBUG),
+        verbose: (args.verbose as boolean | undefined) ?? parseBooleanEnv(process.env.PROTOKOLL_VERBOSE),
+    });
 
     // Set WORKSPACE_ROOT from resolved config dirs (when no explicit --config)
     if (!args.config) {
