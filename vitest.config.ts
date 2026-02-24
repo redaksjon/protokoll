@@ -17,7 +17,6 @@ export default defineConfig({
             'tests/protokoll.test.ts',
             'tests/feedback/cli.test.ts',
             // Processor tests that expect interactive behavior
-            'tests/processor.test.ts',
             'tests/pipeline/orchestrator.test.ts',
             // Resource tests that import from deleted CLI modules
             'tests/mcp/resources.test.ts',
@@ -35,12 +34,13 @@ export default defineConfig({
                 'src/**/.DS_Store',
                 // Most logic moved to @redaksjon/protokoll-engine
                 // Only MCP server shell remains
+                'src/mcp/server-hono.ts',
             ],
             thresholds: {
-                lines: 35,
-                statements: 35,
-                branches: 30,
-                functions: 40,
+                lines: 80,
+                statements: 80,
+                branches: 75,
+                functions: 80,
             },
         },
     },
