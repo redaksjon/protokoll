@@ -65,7 +65,7 @@ Save the `uuid` -- you'll use it to check status and retrieve the transcript.
 
 `mp3`, `m4a`, `wav`, `webm`, `mp4`, `aac`, `ogg`, `flac`
 
-Maximum file size: **25 MB**
+Maximum file size: **1 GB**
 
 ### How Background Processing Works
 
@@ -259,7 +259,7 @@ The background worker uses these defaults (configured in server code):
 | Output structure | `month` |
 | Filename pattern | `date`, `time`, `subject` |
 | Max audio size (worker) | 100 MB |
-| Max audio size (upload endpoint) | 25 MB |
+| Max audio size (upload endpoint) | 1 GB |
 
 ### Output Location
 
@@ -308,7 +308,7 @@ The worker may have crashed mid-processing. Restart the server or use `protokoll
 
 ### File too large
 
-The HTTP upload endpoint has a 25 MB limit. For larger files, use the CLI which supports up to 100 MB, or split the audio first:
+The HTTP upload endpoint has a 1 GB limit. For larger files, split the audio first:
 
 ```bash
 # Split into 20-minute chunks

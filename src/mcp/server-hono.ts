@@ -69,7 +69,7 @@ const { createUploadTranscript, findTranscriptByUuid } = TranscriptOps;
 let startupConfig: Record<string, unknown> = {};
 
 // Audio upload constants
-const DEFAULT_MAX_AUDIO_SIZE = 25 * 1024 * 1024; // 25MB
+const DEFAULT_MAX_AUDIO_SIZE = 1024 * 1024 * 1024; // 1GB
 const DEFAULT_AUDIO_EXTENSIONS = ['mp3', 'm4a', 'wav', 'webm', 'mp4', 'aac', 'ogg', 'flac'];
 
 // ============================================================================
