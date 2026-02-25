@@ -5,10 +5,12 @@
  
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { resolve, dirname } from 'node:path';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 import * as Context from '@/context';
-import { Reasoning, Transcript } from '@redaksjon/protokoll-engine';
-import { DEFAULT_MODEL } from '@/constants';
+import { Agentic, Phases, Reasoning, Routing, Transcript } from '@redaksjon/protokoll-engine';
+import { DEFAULT_MODEL, MAX_CONTENT_LENGTH } from '@/constants';
 
 import { fileExists, getConfiguredDirectory, getContextDirectories, sanitizePath, validatePathWithinDirectory, validatePathWithinOutputDirectory, validateNotRemoteMode, resolveTranscriptPath } from './shared.js';
 import * as Metadata from '@redaksjon/protokoll-engine';
@@ -18,11 +20,189 @@ import {
     PklTranscript, 
     readTranscript as readTranscriptFromStorage,
     listTranscripts as listTranscriptsFromStorage,
+    type TranscriptMetadata,
 } from '@redaksjon/protokoll-format';
 
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+type CandidateConfidence = 'high' | 'medium' | 'low';
+
+interface TaskCandidate {
+    id: string;
+    taskText: string;
+    confidence: number;
+    confidenceBucket: CandidateConfidence;
+    rationale: string;
+    sourceExcerpt: string;
+    suggestedDueDate: string | null;
+    suggestedProject: { id: string | null; name: string | null };
+    suggestedEntities: Array<{ id: string; name: string; type: 'person' | 'project' | 'term' | 'company' }>;
+    suggestedTags: string[];
+}
+
+interface SummaryStylePreset {
+    label: string;
+    instructions: string;
+}
+
+interface StoredSummary {
+    id: string;
+    title: string;
+    audience: string;
+    guidance: string;
+    stylePreset: string;
+    styleLabel: string;
+    content: string;
+    generatedAt: string;
+}
+
+function parseStoredSummaries(raw: string): StoredSummary[] {
+    try {
+        const parsed = JSON.parse(raw) as unknown;
+        if (!Array.isArray(parsed)) {
+            return [];
+        }
+        return parsed
+            .map((item) => {
+                if (!item || typeof item !== 'object') {
+                    return null;
+                }
+                const record = item as Record<string, unknown>;
+                const id = String(record.id || '').trim();
+                const content = String(record.content || '').trim();
+                if (!id || !content) {
+                    return null;
+                }
+                return {
+                    id,
+                    title: String(record.title || '').trim(),
+                    audience: String(record.audience || '').trim(),
+                    guidance: String(record.guidance || '').trim(),
+                    stylePreset: String(record.stylePreset || 'detailed').trim() || 'detailed',
+                    styleLabel: String(record.styleLabel || 'Detailed summary').trim() || 'Detailed summary',
+                    content,
+                    generatedAt: String(record.generatedAt || '').trim() || new Date().toISOString(),
+                } satisfies StoredSummary;
+            })
+            .filter((summary): summary is StoredSummary => summary !== null)
+            .sort((a, b) => b.generatedAt.localeCompare(a.generatedAt));
+    } catch {
+        return [];
+    }
+}
+
+const SUMMARY_STYLE_PRESETS: Record<string, SummaryStylePreset> = {
+    quick_bullets: {
+        label: 'Quick paragraph + bullet points',
+        instructions: 'Write one concise paragraph followed by 4-8 bullets covering decisions, actions, and risks.',
+    },
+    detailed: {
+        label: 'Detailed summary',
+        instructions: 'Write a structured summary with context, key discussion points, decisions, open questions, and next steps.',
+    },
+    attendee_facing: {
+        label: 'Attendee-facing summary',
+        instructions: 'Write a professional external-facing summary suitable for attendees; avoid private/internal reflections unless explicitly approved.',
+    },
+};
+
+function splitIntoCandidateSentences(content: string): string[] {
+    return content
+        .split(/\n+|(?<=[.!?])\s+/g)
+        .map((sentence) => sentence.trim())
+        .filter((sentence) => sentence.length >= 8);
+}
+
+function normalizeTaskText(sentence: string): string {
+    const normalized = sentence
+        .replace(/^(?:i need to|we need to|i should|we should|let'?s|remember to|todo:|action item:)\s+/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+function inferDueDate(sentence: string): string | null {
+    const lower = sentence.toLowerCase();
+    if (lower.includes('today')) {
+        return 'today';
+    }
+    if (lower.includes('tomorrow')) {
+        return 'tomorrow';
+    }
+    if (lower.includes('next week')) {
+        return 'next week';
+    }
+    if (lower.includes('this week')) {
+        return 'this week';
+    }
+    if (lower.includes('by friday')) {
+        return 'by friday';
+    }
+    return null;
+}
+
+function extractHashtagTags(sentence: string): string[] {
+    const matches = sentence.match(/#[a-z0-9_-]+/gi) || [];
+    return Array.from(new Set(matches.map((tag) => tag.slice(1).toLowerCase())));
+}
+
+function toConfidenceBucket(score: number): CandidateConfidence {
+    if (score >= 0.75) {
+        return 'high';
+    }
+    if (score >= 0.5) {
+        return 'medium';
+    }
+    return 'low';
+}
+
+function scoreTaskCandidate(sentence: string): { score: number; rationale: string } | null {
+    const explicitActionPattern = /\b(i need to|we need to|i should|we should|let'?s|remember to|todo|action item|i will|i'll|must)\b/i;
+    const inferredIntentPattern = /\b(follow up|check|review|investigate|confirm|decide|plan|schedule|reach out|send|draft|prepare|update|fix|create|write|call|email|look into|figure out)\b/i;
+
+    let score = 0;
+    const rationaleParts: string[] = [];
+
+    if (explicitActionPattern.test(sentence)) {
+        score += 0.55;
+        rationaleParts.push('explicit action language');
+    }
+
+    if (inferredIntentPattern.test(sentence)) {
+        score += 0.35;
+        rationaleParts.push('inferred follow-up intent');
+    }
+
+    if (inferDueDate(sentence)) {
+        score += 0.1;
+        rationaleParts.push('time cue detected');
+    }
+
+    if (score < 0.3) {
+        return null;
+    }
+
+    return {
+        score: Math.min(1, Number(score.toFixed(2))),
+        rationale: rationaleParts.join('; '),
+    };
+}
+
+function getSuggestedEntities(
+    entities: NonNullable<TranscriptMetadata['entities']> | undefined
+): Array<{ id: string; name: string; type: 'person' | 'project' | 'term' | 'company' }> {
+    if (!entities) {
+        return [];
+    }
+
+    const people = (entities.people || []).map((entity) => ({ ...entity, type: 'person' as const }));
+    const projects = (entities.projects || []).map((entity) => ({ ...entity, type: 'project' as const }));
+    const terms = (entities.terms || []).map((entity) => ({ ...entity, type: 'term' as const }));
+    const companies = (entities.companies || []).map((entity) => ({ ...entity, type: 'company' as const }));
+    return [...people, ...projects, ...terms, ...companies];
+}
 
 // ============================================================================
 // Tool Definitions
@@ -116,6 +296,41 @@ export const listTranscriptsTool: Tool = {
     },
 };
 
+export const identifyTasksFromTranscriptTool: Tool = {
+    name: 'protokoll_identify_tasks_from_transcript',
+    description:
+        'Identify task candidates from transcript or note content without creating tasks. ' +
+        'Returns structured candidates with confidence buckets, rationale, and metadata suggestions ' +
+        'so users can review and choose which tasks to create.',
+    inputSchema: {
+        type: 'object',
+        properties: {
+            transcriptPath: {
+                type: 'string',
+                description:
+                    'Transcript URI (preferred) or relative path from output directory. ' +
+                    'URI format: "protokoll://transcript/2026/2/12-1606-meeting" (no file extension). ' +
+                    'Path format: "2026/2/12-1606-meeting" or "2026/2/12-1606-meeting.pkl"',
+            },
+            maxCandidates: {
+                type: 'number',
+                description: 'Maximum number of candidates to return (default: 25, max: 50)',
+                default: 25,
+            },
+            includeTagSuggestions: {
+                type: 'boolean',
+                description: 'Whether to include suggested tags based on transcript metadata and hashtags (default: true)',
+                default: true,
+            },
+            contextDirectory: {
+                type: 'string',
+                description: 'Optional: Path to the .protokoll context directory',
+            },
+        },
+        required: ['transcriptPath'],
+    },
+};
+
 export const editTranscriptTool: Tool = {
     name: 'protokoll_edit_transcript',
     description:
@@ -164,6 +379,80 @@ export const editTranscriptTool: Tool = {
             },
         },
         required: ['transcriptPath'],
+    },
+};
+
+export const summarizeTranscriptTool: Tool = {
+    name: 'protokoll_summarize_transcript',
+    description:
+        'Generate an audience-aware summary for a transcript using privacy/sensitivity guardrails. ' +
+        'Returns markdown summary text and does not modify transcript content.',
+    inputSchema: {
+        type: 'object',
+        properties: {
+            transcriptPath: {
+                type: 'string',
+                description:
+                    'Transcript URI (preferred) or relative path from output directory. ' +
+                    'URI format: "protokoll://transcript/2026/2/12-1606-meeting" (no file extension). ' +
+                    'Path format: "2026/2/12-1606-meeting" or "2026/2/12-1606-meeting.pkl"',
+            },
+            audience: {
+                type: 'string',
+                description: 'Optional audience label (e.g. internal team, project attendees, external partner)',
+            },
+            stylePreset: {
+                type: 'string',
+                enum: ['quick_bullets', 'detailed', 'attendee_facing'],
+                description: 'Summary style preset (default: detailed)',
+                default: 'detailed',
+            },
+            guidance: {
+                type: 'string',
+                description: 'Optional extra instructions, especially for privacy/sensitivity constraints',
+            },
+            summaryTitle: {
+                type: 'string',
+                description: 'Optional title to use in the generated summary',
+            },
+            model: {
+                type: 'string',
+                description: `LLM model for summary generation (default: ${DEFAULT_MODEL})`,
+            },
+            contextDirectory: {
+                type: 'string',
+                description: 'Optional: Path to the .protokoll context directory',
+            },
+        },
+        required: ['transcriptPath'],
+    },
+};
+
+export const deleteTranscriptSummaryTool: Tool = {
+    name: 'protokoll_delete_transcript_summary',
+    description:
+        'Delete a previously generated summary from transcript artifact storage by summary ID. ' +
+        'Path is relative to the configured output directory.',
+    inputSchema: {
+        type: 'object',
+        properties: {
+            transcriptPath: {
+                type: 'string',
+                description:
+                    'Transcript URI (preferred) or relative path from output directory. ' +
+                    'URI format: "protokoll://transcript/2026/2/12-1606-meeting" (no file extension). ' +
+                    'Path format: "2026/2/12-1606-meeting" or "2026/2/12-1606-meeting.pkl"',
+            },
+            summaryId: {
+                type: 'string',
+                description: 'Summary ID to remove (for example: "summary-174..." )',
+            },
+            contextDirectory: {
+                type: 'string',
+                description: 'Optional: Path to the .protokoll context directory',
+            },
+        },
+        required: ['transcriptPath', 'summaryId'],
     },
 };
 
@@ -269,6 +558,42 @@ export const provideFeedbackTool: Tool = {
             },
         },
         required: ['transcriptPath', 'feedback'],
+    },
+};
+
+export const enhanceTranscriptTool: Tool = {
+    name: 'protokoll_enhance_transcript',
+    description:
+        'Enhance an existing transcript using the same post-transcription pipeline flow ' +
+        '(simple-replace + agentic tool-based enhancement) used after Whisper completes. ' +
+        'Reads from originalText when provided, otherwise uses raw transcript text if available, ' +
+        'falling back to current transcript content. Writes enhanced content and updates metadata/status.',
+    inputSchema: {
+        type: 'object',
+        properties: {
+            transcriptPath: {
+                type: 'string',
+                description:
+                    'Transcript URI (preferred) or relative path from output directory. ' +
+                    'URI format: "protokoll://transcript/2026/2/12-1606-meeting" (no file extension). ' +
+                    'Path format: "2026/2/12-1606-meeting" or "2026/2/12-1606-meeting.pkl"',
+            },
+            originalText: {
+                type: 'string',
+                description:
+                    'Optional explicit source text to enhance (usually the Original tab text). ' +
+                    'If omitted, tool uses raw transcript text when present, else current content.',
+            },
+            model: {
+                type: 'string',
+                description: `LLM model for enhancement (default: ${DEFAULT_MODEL})`,
+            },
+            contextDirectory: {
+                type: 'string',
+                description: 'Optional: Path to the .protokoll context directory',
+            },
+        },
+        required: ['transcriptPath'],
     },
 };
 
@@ -514,6 +839,34 @@ export const correctToEntityTool: Tool = {
     },
 };
 
+export const rejectCorrectionTool: Tool = {
+    name: 'protokoll_reject_correction',
+    description:
+        'Reject a previously applied enhancement correction and undo its text replacement in the transcript. ' +
+        'Also logs the rejection in enhancement_log for auditability.',
+    inputSchema: {
+        type: 'object',
+        properties: {
+            transcriptPath: {
+                type: 'string',
+                description:
+                    'Transcript URI (preferred) or relative path from output directory. ' +
+                    'URI format: "protokoll://transcript/2026/2/12-1606-meeting" (no file extension). ' +
+                    'Path format: "2026/2/12-1606-meeting" or "2026/2/12-1606-meeting.pkl"',
+            },
+            correctionEntryId: {
+                type: 'number',
+                description: 'Enhancement log entry id for the correction_applied event to reject',
+            },
+            contextDirectory: {
+                type: 'string',
+                description: 'Optional: Path to the .protokoll context directory',
+            },
+        },
+        required: ['transcriptPath', 'correctionEntryId'],
+    },
+};
+
 // ============================================================================
 // Tool Handlers
 // ============================================================================
@@ -531,6 +884,16 @@ export async function handleReadTranscript(args: {
     // Convert to relative path for response
     const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
     const relativePath = await sanitizePath(absolutePath, outputDirectory);
+
+    const transcriptHandle = PklTranscript.open(absolutePath, { readOnly: true });
+    let summaries: StoredSummary[] = [];
+    try {
+        const historyArtifact = transcriptHandle.getArtifact('summary_history');
+        const rawHistory = historyArtifact?.data?.toString('utf8') || '[]';
+        summaries = parseStoredSummaries(rawHistory);
+    } finally {
+        transcriptHandle.close();
+    }
 
     // Return complete structured JSON for client display
     // Clients should NOT need to parse this - all data is ready to display
@@ -554,6 +917,7 @@ export async function handleReadTranscript(args: {
         content: transcriptData.content,
         hasRawTranscript: transcriptData.hasRawTranscript,
         contentLength: transcriptData.content.length,
+        summaries,
     };
 }
 
@@ -626,6 +990,292 @@ export async function handleListTranscripts(args: {
             entityType: args.entityType,
         },
     };
+}
+
+export async function handleIdentifyTasksFromTranscript(args: {
+    transcriptPath: string;
+    maxCandidates?: number;
+    includeTagSuggestions?: boolean;
+    contextDirectory?: string;
+}) {
+    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
+    const transcriptData = await readTranscriptFromStorage(absolutePath);
+
+    const content = transcriptData.content?.trim() || '';
+    if (!content) {
+        return {
+            transcriptPath: args.transcriptPath,
+            candidates: [] as TaskCandidate[],
+            totalCandidates: 0,
+            message: 'Transcript content is empty; no task candidates identified.',
+        };
+    }
+
+    const limit = Math.max(1, Math.min(50, args.maxCandidates ?? 25));
+    const includeTagSuggestions = args.includeTagSuggestions !== false;
+    const existingTags = transcriptData.metadata.tags || [];
+    const suggestedEntities = getSuggestedEntities(transcriptData.metadata.entities);
+    const suggestedProject = {
+        id: transcriptData.metadata.projectId || null,
+        name: transcriptData.metadata.project || null,
+    };
+
+    const candidates = splitIntoCandidateSentences(content)
+        .map((sentence, index) => {
+            const scored = scoreTaskCandidate(sentence);
+            if (!scored) {
+                return null;
+            }
+
+            const sentenceTags = includeTagSuggestions ? extractHashtagTags(sentence) : [];
+            const mergedTags = includeTagSuggestions
+                ? Array.from(new Set([...existingTags.map((tag) => tag.toLowerCase()), ...sentenceTags]))
+                : [];
+
+            const candidate: TaskCandidate = {
+                id: `candidate-${index + 1}`,
+                taskText: normalizeTaskText(sentence),
+                confidence: scored.score,
+                confidenceBucket: toConfidenceBucket(scored.score),
+                rationale: scored.rationale,
+                sourceExcerpt: sentence,
+                suggestedDueDate: inferDueDate(sentence),
+                suggestedProject,
+                suggestedEntities,
+                suggestedTags: mergedTags,
+            };
+
+            return candidate;
+        })
+        .filter((candidate): candidate is TaskCandidate => candidate !== null)
+        .sort((a, b) => b.confidence - a.confidence)
+        .slice(0, limit);
+
+    return {
+        transcriptPath: args.transcriptPath,
+        candidates,
+        totalCandidates: candidates.length,
+        message: candidates.length > 0
+            ? `Identified ${candidates.length} task candidate(s).`
+            : 'No likely task candidates found in transcript content.',
+    };
+}
+
+export async function handleSummarizeTranscript(args: {
+    transcriptPath: string;
+    audience?: string;
+    stylePreset?: 'quick_bullets' | 'detailed' | 'attendee_facing' | string;
+    guidance?: string;
+    summaryTitle?: string;
+    model?: string;
+    contextDirectory?: string;
+}) {
+    const startedAt = Date.now();
+    const logSummary = (message: string, data: Record<string, unknown>) => {
+        process.stdout.write(`Protokoll: [SUMMARY] ${message} ${JSON.stringify(data)}\n`);
+    };
+
+    logSummary('Tool call received', {
+        transcriptPath: args.transcriptPath,
+        audience: args.audience,
+        stylePreset: args.stylePreset || 'detailed',
+        hasGuidance: !!args.guidance?.trim(),
+        hasSummaryTitle: !!args.summaryTitle?.trim(),
+        model: args.model || DEFAULT_MODEL,
+    });
+
+    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
+    logSummary('Resolved transcript path', {
+        transcriptPath: args.transcriptPath,
+        absolutePath,
+    });
+
+    const transcriptData = await readTranscriptFromStorage(absolutePath);
+
+    const transcriptContent = (transcriptData.content || '').trim();
+    if (!transcriptContent) {
+        logSummary('Transcript content empty, cannot summarize', {
+            transcriptPath: args.transcriptPath,
+            absolutePath,
+        });
+        throw new Error('Transcript content is empty; cannot generate summary.');
+    }
+
+    const audience = (args.audience || '').trim() || 'General audience';
+
+    const stylePreset = (args.stylePreset || 'detailed').trim();
+    const selectedStyle = SUMMARY_STYLE_PRESETS[stylePreset] || SUMMARY_STYLE_PRESETS.detailed;
+    const guidance = (args.guidance || '').trim();
+    const model = args.model || DEFAULT_MODEL;
+
+    const transcriptTitle = transcriptData.metadata.title || 'Untitled transcript';
+    const transcriptDate = transcriptData.metadata.date instanceof Date
+        ? transcriptData.metadata.date.toISOString().slice(0, 10)
+        : 'unknown date';
+    const preferredTitle = (args.summaryTitle || '').trim();
+
+    const boundedContent = transcriptContent.length > MAX_CONTENT_LENGTH
+        ? `${transcriptContent.slice(0, MAX_CONTENT_LENGTH)}\n\n[...transcript truncated for summarization input length...]`
+        : transcriptContent;
+    const truncated = transcriptContent.length > MAX_CONTENT_LENGTH;
+    logSummary('Prepared summary input', {
+        transcriptTitle,
+        transcriptDate,
+        transcriptLength: transcriptContent.length,
+        boundedLength: boundedContent.length,
+        truncated,
+        stylePreset,
+    });
+
+    const reasoning = Reasoning.create({
+        model,
+        reasoningLevel: 'medium',
+    });
+
+    const prompt = [
+        'Create an audience-aware summary for the transcript below.',
+        '',
+        `Transcript title: ${transcriptTitle}`,
+        `Transcript date: ${transcriptDate}`,
+        `Audience: ${audience}`,
+        `Style preset: ${selectedStyle.label}`,
+        preferredTitle ? `Preferred summary title: ${preferredTitle}` : 'Preferred summary title: (generate one)',
+        '',
+        'Style instructions:',
+        selectedStyle.instructions,
+        '',
+        'Privacy and sensitivity guardrails:',
+        '- Treat transcript content as potentially sensitive by default.',
+        '- Exclude private internal reflections, personal judgments, or sensitive notes not appropriate for the audience.',
+        '- If unsure whether a detail is audience-appropriate, exclude it or generalize safely.',
+        '- Prefer factual and neutral language over speculative interpretation.',
+        '',
+        'Additional guidance:',
+        guidance || 'No extra guidance provided.',
+        '',
+        'Required output shape:',
+        '1) Title',
+        '2) Summary body matching the selected style preset',
+        '3) Optional "Redactions / Exclusions" section listing what was intentionally omitted for audience safety',
+        '',
+        'Transcript:',
+        boundedContent,
+    ].join('\n');
+
+    const result = await reasoning.complete({
+        prompt,
+        systemPrompt: 'You are an expert meeting summarizer. Return markdown only.',
+    });
+    logSummary('Reasoning call completed', {
+        transcriptPath: args.transcriptPath,
+        model: result.model || model,
+        durationMs: result.duration ?? null,
+        finishReason: result.finishReason ?? null,
+    });
+
+    const summary = (result.content || '').trim();
+    if (!summary) {
+        logSummary('Empty summary response', {
+            transcriptPath: args.transcriptPath,
+            model: result.model || model,
+        });
+        throw new Error('No summary text generated.');
+    }
+
+    logSummary('Summary generated successfully', {
+        transcriptPath: args.transcriptPath,
+        summaryLength: summary.length,
+        elapsedMs: Date.now() - startedAt,
+    });
+
+    const generatedAt = new Date().toISOString();
+    const summaryId = `summary-${Date.now()}-${randomUUID().slice(0, 8)}`;
+    const stylePresetKey = SUMMARY_STYLE_PRESETS[stylePreset] ? stylePreset : 'detailed';
+    const storedSummary: StoredSummary = {
+        id: summaryId,
+        title: preferredTitle || `${transcriptTitle} Summary`,
+        audience,
+        guidance,
+        stylePreset: stylePresetKey,
+        styleLabel: selectedStyle.label,
+        content: summary,
+        generatedAt,
+    };
+    const transcriptHandle = PklTranscript.open(absolutePath, { readOnly: false });
+    try {
+        const existingHistory = transcriptHandle.getArtifact('summary_history');
+        const existingSummaries = parseStoredSummaries(existingHistory?.data?.toString('utf8') || '[]');
+        const nextSummaries = [storedSummary, ...existingSummaries.filter((entry) => entry.id !== summaryId)];
+
+        transcriptHandle.addArtifact(
+            'summary_history',
+            Buffer.from(JSON.stringify(nextSummaries), 'utf8'),
+            {
+                version: 1,
+                count: nextSummaries.length,
+                updatedAt: generatedAt,
+                model: result.model || model,
+            }
+        );
+    } finally {
+        transcriptHandle.close();
+    }
+    logSummary('Summary persisted to transcript artifact storage', {
+        transcriptPath: args.transcriptPath,
+        summaryId,
+        generatedAt,
+    });
+
+    return {
+        summary,
+        audience,
+        stylePreset: stylePresetKey,
+        model: result.model || model,
+        summaryId,
+        generatedAt,
+    };
+}
+
+export async function handleDeleteTranscriptSummary(args: {
+    transcriptPath: string;
+    summaryId: string;
+    contextDirectory?: string;
+}) {
+    const summaryId = (args.summaryId || '').trim();
+    if (!summaryId) {
+        throw new Error('summaryId is required');
+    }
+
+    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
+    const transcriptHandle = PklTranscript.open(absolutePath, { readOnly: false });
+    try {
+        const historyArtifact = transcriptHandle.getArtifact('summary_history');
+        const existingSummaries = parseStoredSummaries(historyArtifact?.data?.toString('utf8') || '[]');
+        const remainingSummaries = existingSummaries.filter((entry) => entry.id !== summaryId);
+
+        if (remainingSummaries.length === existingSummaries.length) {
+            throw new Error(`Summary not found: ${summaryId}`);
+        }
+
+        transcriptHandle.addArtifact(
+            'summary_history',
+            Buffer.from(JSON.stringify(remainingSummaries), 'utf8'),
+            {
+                version: 1,
+                count: remainingSummaries.length,
+                updatedAt: new Date().toISOString(),
+                deletedSummaryId: summaryId,
+            }
+        );
+
+        return {
+            success: true,
+            summaryId,
+            remaining: remainingSummaries.length,
+        };
+    } finally {
+        transcriptHandle.close();
+    }
 }
 
 export async function handleEditTranscript(args: {
@@ -1129,6 +1779,253 @@ export async function handleProvideFeedback(args: {
     }
 }
 
+export async function handleEnhanceTranscript(args: {
+    transcriptPath: string;
+    originalText?: string;
+    model?: string;
+    contextDirectory?: string;
+}) {
+    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
+    const pklPath = ensurePklExtension(absolutePath);
+    const transcript = PklTranscript.open(pklPath, { readOnly: false });
+
+    let tempDir: string | null = null;
+
+    try {
+        const explicitOriginal = (args.originalText || '').trim();
+        const rawOriginal = (transcript.rawTranscript?.text || '').trim();
+        const currentContent = (transcript.content || '').trim();
+        const sourceText = explicitOriginal || rawOriginal || currentContent;
+
+        if (!sourceText) {
+            throw new Error('No source text available to enhance. Save or provide Original content first.');
+        }
+
+        const model = args.model || DEFAULT_MODEL;
+        const startedAt = Date.now();
+        let toolCallCount = 0;
+
+        // Build context and routing similar to the standard pipeline.
+        const contextDirectories = await getContextDirectories();
+        const context = await Context.create({
+            startingDir: args.contextDirectory || dirname(pklPath),
+            contextDirectories,
+        });
+        const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
+        const defaultStructure = 'month' as const;
+        const defaultFilenameOptions = ['date', 'time', 'subject'] as const;
+        const routingProjects: Routing.ProjectRoute[] = context.getAllProjects()
+            .filter(project => project.active !== false)
+            .map(project => ({
+                projectId: project.id,
+                destination: {
+                    path: project.routing?.destination || outputDirectory,
+                    structure: project.routing?.structure || defaultStructure,
+                    filename_options: project.routing?.filename_options || [...defaultFilenameOptions],
+                    createDirectories: true,
+                },
+                classification: project.classification,
+                active: project.active,
+                auto_tags: project.routing?.auto_tags,
+            }));
+        const routing = Routing.create({
+            default: {
+                path: outputDirectory,
+                structure: defaultStructure,
+                filename_options: [...defaultFilenameOptions],
+                createDirectories: true,
+            },
+            projects: routingProjects,
+            conflict_resolution: 'primary',
+        }, context);
+
+        const fallbackDate = transcript.metadata.date instanceof Date
+            ? transcript.metadata.date
+            : new Date();
+        const fallbackHash = transcript.metadata.audioHash || transcript.metadata.id || '';
+        const routingContext: Routing.RoutingContext = {
+            transcriptText: sourceText,
+            audioDate: fallbackDate,
+            sourceFile: pklPath,
+            hash: fallbackHash,
+        };
+        const routeResult = routing.route(routingContext);
+        const projectForReplace = routeResult.projectId || transcript.metadata.projectId || transcript.metadata.project;
+
+        transcript.enhancementLog.logStep(new Date(), 'enhance', 'enhancement_start', {
+            model,
+            transcriptPath: args.transcriptPath,
+            hasExplicitOriginal: explicitOriginal.length > 0,
+            source: explicitOriginal ? 'explicit_original_text' : (rawOriginal ? 'raw_transcript' : 'enhanced_content_fallback'),
+            routedProject: routeResult.projectId || null,
+            routedConfidence: routeResult.confidence,
+        });
+
+        // Run simple-replace with the same engine phase used by audio processing.
+        tempDir = await mkdtemp(resolve(tmpdir(), 'protokoll-enhance-'));
+        const simpleReplace = Phases.createSimpleReplacePhase({ debug: false }, context);
+        const simpleReplaceResult = await simpleReplace.replace(
+            sourceText,
+            {
+                project: projectForReplace || undefined,
+                confidence: routeResult.confidence,
+            },
+            tempDir,
+            transcript.metadata.id || 'manual-enhancement'
+        );
+
+        if (simpleReplaceResult.stats.totalReplacements > 0) {
+            transcript.enhancementLog.logStep(new Date(), 'simple-replace', 'phase_complete', {
+                totalReplacements: simpleReplaceResult.stats.totalReplacements,
+                tier1Replacements: simpleReplaceResult.stats.tier1Replacements,
+                tier2Replacements: simpleReplaceResult.stats.tier2Replacements,
+                projectContext: simpleReplaceResult.stats.projectContext,
+                processingTimeMs: simpleReplaceResult.stats.processingTimeMs,
+            });
+            for (const mapping of simpleReplaceResult.stats.appliedMappings) {
+                transcript.enhancementLog.logStep(new Date(), 'simple-replace', 'correction_applied', {
+                    original: mapping.soundsLike,
+                    replacement: mapping.correctText,
+                    tier: mapping.tier,
+                    occurrences: mapping.occurrences,
+                    entityId: mapping.entityId,
+                    entityType: mapping.entityType,
+                });
+            }
+        }
+
+        const preIdentifiedEntities: Agentic.ToolContext['preIdentifiedEntities'] = {
+            people: new Set<string>(),
+            projects: new Set<string>(),
+            terms: new Set<string>(),
+            companies: new Set<string>(),
+        };
+        for (const mapping of simpleReplaceResult.stats.appliedMappings) {
+            if (!mapping.entityId || !mapping.entityType) {
+                continue;
+            }
+            if (mapping.entityType === 'person') {
+                preIdentifiedEntities.people.add(mapping.entityId);
+            } else if (mapping.entityType === 'project') {
+                preIdentifiedEntities.projects.add(mapping.entityId);
+            } else if (mapping.entityType === 'term') {
+                preIdentifiedEntities.terms.add(mapping.entityId);
+            }
+        }
+
+        // Run agentic enhancement exactly like pipeline enhancement stage.
+        const reasoning = Reasoning.create({ model, reasoningLevel: 'medium' });
+        const executor = Agentic.create(reasoning, {
+            transcriptText: simpleReplaceResult.text,
+            audioDate: fallbackDate,
+            sourceFile: pklPath,
+            contextInstance: context,
+            routingInstance: routing,
+            interactiveMode: false,
+            preIdentifiedEntities,
+            onToolCallStart: (tool, input) => {
+                toolCallCount++;
+                transcript.enhancementLog.logStep(new Date(), 'enhance', 'tool_start', {
+                    callIndex: toolCallCount,
+                    tool,
+                    input,
+                });
+            },
+            onToolCallComplete: (entry) => {
+                transcript.enhancementLog.logStep(entry.timestamp, 'enhance', 'tool_complete', {
+                    tool: entry.tool,
+                    input: entry.input,
+                    output: entry.output,
+                    durationMs: entry.durationMs,
+                    success: entry.success,
+                });
+            },
+        });
+
+        const agenticResult = await executor.process(simpleReplaceResult.text);
+        const enhancedText = (agenticResult.enhancedText || '').trim() || sourceText;
+        const enhancementSucceeded = enhancedText.length > 50 && enhancedText !== sourceText;
+        const finalStatus = enhancementSucceeded ? 'enhanced' : (transcript.metadata.status || 'initial');
+
+        const referenced = agenticResult.state.referencedEntities;
+        const entities = {
+            people: [] as Metadata.EntityReference[],
+            projects: [] as Metadata.EntityReference[],
+            terms: [] as Metadata.EntityReference[],
+            companies: [] as Metadata.EntityReference[],
+        };
+        for (const personId of referenced.people) {
+            const person = context.getPerson(personId);
+            if (person) {
+                entities.people.push({ id: person.id, name: person.name, type: 'person' });
+            }
+        }
+        for (const projectId of referenced.projects) {
+            const project = context.getProject(projectId);
+            if (project) {
+                entities.projects.push({ id: project.id, name: project.name, type: 'project' });
+            }
+        }
+        for (const termId of referenced.terms) {
+            const term = context.getTerm(termId);
+            if (term) {
+                entities.terms.push({ id: term.id, name: term.name, type: 'term' });
+            }
+        }
+        for (const companyId of referenced.companies) {
+            const company = context.getCompany(companyId);
+            if (company) {
+                entities.companies.push({ id: company.id, name: company.name, type: 'company' });
+            }
+        }
+        const hasEntities = entities.people.length > 0
+            || entities.projects.length > 0
+            || entities.terms.length > 0
+            || entities.companies.length > 0;
+
+        const decidedProjectId = agenticResult.state.routeDecision?.projectId || routeResult.projectId || undefined;
+        const decidedProject = decidedProjectId ? context.getProject(decidedProjectId) : undefined;
+        const decidedConfidence = agenticResult.state.routeDecision?.confidence ?? routeResult.confidence;
+
+        transcript.updateContent(enhancedText);
+        transcript.updateMetadata({
+            status: finalStatus as TranscriptMetadata['status'],
+            projectId: decidedProjectId || transcript.metadata.projectId,
+            project: decidedProject?.name || transcript.metadata.project,
+            confidence: typeof decidedConfidence === 'number' ? decidedConfidence : transcript.metadata.confidence,
+            entities: hasEntities ? entities : transcript.metadata.entities,
+        });
+
+        transcript.enhancementLog.logStep(new Date(), 'enhance', 'enhancement_complete', {
+            status: finalStatus,
+            toolsUsed: agenticResult.toolsUsed,
+            totalToolCalls: toolCallCount,
+            iterations: agenticResult.iterations,
+            processingTimeMs: Date.now() - startedAt,
+        });
+
+        return {
+            success: true,
+            transcriptPath: args.transcriptPath,
+            status: finalStatus,
+            projectId: decidedProjectId || null,
+            projectName: decidedProject?.name || null,
+            toolsUsed: agenticResult.toolsUsed,
+            totalToolCalls: toolCallCount,
+            iterations: agenticResult.iterations,
+            processingTimeMs: Date.now() - startedAt,
+            sourceLength: sourceText.length,
+            enhancedLength: enhancedText.length,
+            changed: enhancedText !== sourceText,
+        };
+    } finally {
+        if (tempDir) {
+            await rm(tempDir, { recursive: true, force: true });
+        }
+        transcript.close();
+    }
+}
+
 export async function handleCreateNote(args: {
     title: string;
     content?: string;
@@ -1295,6 +2192,105 @@ function applyCorrections(
     }
     
     return correctedText;
+}
+
+function countOccurrencesCaseInsensitive(text: string, target: string): number {
+    if (!target.trim()) {
+        return 0;
+    }
+    const regex = new RegExp(target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    const matches = text.match(regex);
+    return matches ? matches.length : 0;
+}
+
+export async function handleRejectCorrection(args: {
+    transcriptPath: string;
+    correctionEntryId: number;
+    contextDirectory?: string;
+}) {
+    if (!Number.isInteger(args.correctionEntryId) || args.correctionEntryId < 1) {
+        throw new Error('correctionEntryId must be a positive integer');
+    }
+
+    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
+    const transcript = PklTranscript.open(absolutePath, { readOnly: false });
+
+    try {
+        const allEntries = transcript.getEnhancementLog();
+        const correctionEntry = allEntries.find((entry) => entry.id === args.correctionEntryId);
+
+        if (!correctionEntry) {
+            throw new Error(`Correction entry not found: ${args.correctionEntryId}`);
+        }
+        if (correctionEntry.action !== 'correction_applied') {
+            throw new Error(`Entry ${args.correctionEntryId} is not a correction_applied action`);
+        }
+
+        const details = (correctionEntry.details || {}) as Record<string, unknown>;
+        const original = String(details.original || '').trim();
+        const replacement = String(details.replacement || '').trim();
+        if (!original || !replacement) {
+            throw new Error(`Correction entry ${args.correctionEntryId} is missing original/replacement details`);
+        }
+
+        const alreadyRejected = allEntries.some((entry) => {
+            if (entry.action !== 'correction_rejected') {
+                return false;
+            }
+            const rejectDetails = (entry.details || {}) as Record<string, unknown>;
+            return Number(rejectDetails.correctionEntryId) === args.correctionEntryId;
+        });
+        if (alreadyRejected) {
+            return {
+                success: true,
+                alreadyRejected: true,
+                correctionEntryId: args.correctionEntryId,
+                original,
+                replacement,
+                revertedOccurrences: 0,
+                message: `Correction #${args.correctionEntryId} is already rejected`,
+            };
+        }
+
+        const originalContent = transcript.content || '';
+        const beforeCount = countOccurrencesCaseInsensitive(originalContent, replacement);
+        const revertedContent = applyCorrections(
+            originalContent,
+            new Map([[replacement, original]])
+        );
+        const afterCount = countOccurrencesCaseInsensitive(revertedContent, replacement);
+        const revertedOccurrences = Math.max(0, beforeCount - afterCount);
+        const rejectionPhase = correctionEntry.phase === 'transcribe'
+            || correctionEntry.phase === 'enhance'
+            || correctionEntry.phase === 'simple-replace'
+            ? correctionEntry.phase
+            : 'simple-replace';
+
+        transcript.updateContent(revertedContent);
+        transcript.enhancementLog.logStep(
+            new Date(),
+            rejectionPhase,
+            'correction_rejected',
+            {
+                correctionEntryId: args.correctionEntryId,
+                original,
+                replacement,
+                revertedOccurrences,
+                sourceTimestamp: correctionEntry.timestamp.toISOString(),
+            }
+        );
+
+        return {
+            success: true,
+            correctionEntryId: args.correctionEntryId,
+            original,
+            replacement,
+            revertedOccurrences,
+            message: `Rejected correction #${args.correctionEntryId} and restored "${replacement}" to "${original}"`,
+        };
+    } finally {
+        transcript.close();
+    }
 }
 
 export async function handleCorrectToEntity(args: {

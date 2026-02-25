@@ -15,6 +15,8 @@ describe('Prompt Template Loading', () => {
     describe('Template File Existence', () => {
         const expectedTemplates = [
             'review_transcript',
+            'identify_tasks_from_transcript',
+            'summarize_transcript',
             'transcribe_with_context',
             'setup_project',
             'enrich_entity',
@@ -91,6 +93,8 @@ describe('Prompt Template Loading', () => {
             // Test that each prompt can successfully load its template
             const testCases = [
                 { name: 'review_transcript', args: { transcriptPath: '/test.md' } },
+                { name: 'identify_tasks_from_transcript', args: { transcriptPath: '/test.md' } },
+                { name: 'summarize_transcript', args: { transcriptPath: '/test.md', audience: 'Internal team' } },
                 { name: 'transcribe_with_context', args: { audioFile: '/test.m4a', skipDiscovery: 'true' } },
                 { name: 'setup_project', args: { projectName: 'Test' } },
                 { name: 'enrich_entity', args: { entityType: 'person', entityName: 'Test' } },
@@ -166,6 +170,8 @@ describe('Prompt Template Loading', () => {
 
             const templates = [
                 'review_transcript',
+                'identify_tasks_from_transcript',
+                'summarize_transcript',
                 'transcribe_with_context',
                 'setup_project',
                 'enrich_entity',
@@ -248,6 +254,8 @@ describe('Prompt Template Loading', () => {
             // Get all .md files in src
             const srcTemplates = [
                 'review_transcript.md',
+                'identify_tasks_from_transcript.md',
+                'summarize_transcript.md',
                 'transcribe_with_context.md',
                 'setup_project.md',
                 'enrich_entity.md',

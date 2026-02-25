@@ -13,6 +13,59 @@ import { sanitizePath } from '../tools/shared';
 
 const { listTranscripts, resolveTranscriptPath, readTranscriptContent, stripTranscriptExtension } = Transcript;
 
+function parseStoredSummaries(raw: string): Array<{
+    id: string;
+    title: string;
+    audience: string;
+    guidance: string;
+    stylePreset: string;
+    styleLabel: string;
+    content: string;
+    generatedAt: string;
+}> {
+    try {
+        const parsed = JSON.parse(raw) as unknown;
+        if (!Array.isArray(parsed)) {
+            return [];
+        }
+        return parsed
+            .map((item) => {
+                if (!item || typeof item !== 'object') {
+                    return null;
+                }
+                const record = item as Record<string, unknown>;
+                const id = String(record.id || '').trim();
+                const content = String(record.content || '').trim();
+                if (!id || !content) {
+                    return null;
+                }
+                return {
+                    id,
+                    title: String(record.title || '').trim(),
+                    audience: String(record.audience || '').trim(),
+                    guidance: String(record.guidance || '').trim(),
+                    stylePreset: String(record.stylePreset || 'detailed').trim() || 'detailed',
+                    styleLabel: String(record.styleLabel || 'Detailed summary').trim() || 'Detailed summary',
+                    content,
+                    generatedAt: String(record.generatedAt || '').trim() || new Date().toISOString(),
+                };
+            })
+            .filter((summary): summary is {
+                id: string;
+                title: string;
+                audience: string;
+                guidance: string;
+                stylePreset: string;
+                styleLabel: string;
+                content: string;
+                generatedAt: string;
+            } => summary !== null)
+            .sort((a, b) => b.generatedAt.localeCompare(a.generatedAt));
+    } catch {
+        return [];
+    }
+}
+
 /**
  * Read a single transcript resource
  * 
@@ -50,6 +103,16 @@ export async function readTranscriptResource(transcriptPath: string): Promise<Mc
         const { PklTranscript } = await import('@redaksjon/protokoll-format');
         const pklTranscript = PklTranscript.open(resolved.path, { readOnly: true });
         let rawTranscript = undefined;
+        let summaries: Array<{
+            id: string;
+            title: string;
+            audience: string;
+            guidance: string;
+            stylePreset: string;
+            styleLabel: string;
+            content: string;
+            generatedAt: string;
+        }> = [];
         try {
             if (pklTranscript.hasRawTranscript) {
                 const rawData = pklTranscript.rawTranscript;
@@ -62,6 +125,9 @@ export async function readTranscriptResource(transcriptPath: string): Promise<Mc
                     };
                 }
             }
+
+            const historyArtifact = pklTranscript.getArtifact('summary_history');
+            summaries = parseStoredSummaries(historyArtifact?.data?.toString('utf8') || '[]');
         } finally {
             pklTranscript.close();
         }
@@ -98,6 +164,7 @@ export async function readTranscriptResource(transcriptPath: string): Promise<Mc
             },
             content: content,
             rawTranscript: rawTranscript,
+            summaries,
         };
         
         return {

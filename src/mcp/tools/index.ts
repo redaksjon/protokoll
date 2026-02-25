@@ -91,15 +91,20 @@ export const tools: Tool[] = [
     // Transcript Operations
     TranscriptTools.readTranscriptTool,
     TranscriptTools.listTranscriptsTool,
+    TranscriptTools.identifyTasksFromTranscriptTool,
+    TranscriptTools.summarizeTranscriptTool,
+    TranscriptTools.deleteTranscriptSummaryTool,
     TranscriptTools.editTranscriptTool,
     TranscriptTools.changeTranscriptDateTool,
     TranscriptTools.combineTranscriptsTool,
     TranscriptTools.provideFeedbackTool,
+    TranscriptTools.enhanceTranscriptTool,
     TranscriptTools.updateTranscriptContentTool,
     TranscriptTools.updateTranscriptEntityReferencesTool,
     TranscriptTools.createNoteTool,
     TranscriptTools.getEnhancementLogTool,
     TranscriptTools.correctToEntityTool,
+    TranscriptTools.rejectCorrectionTool,
 
     // Lifecycle Status & Tasks
     StatusTools.setStatusTool,
@@ -215,6 +220,12 @@ export async function handleToolCall(name: string, args: unknown): Promise<unkno
             return TranscriptTools.handleReadTranscript(args as Parameters<typeof TranscriptTools.handleReadTranscript>[0]);
         case 'protokoll_list_transcripts':
             return TranscriptTools.handleListTranscripts(args as Parameters<typeof TranscriptTools.handleListTranscripts>[0]);
+        case 'protokoll_identify_tasks_from_transcript':
+            return TranscriptTools.handleIdentifyTasksFromTranscript(args as Parameters<typeof TranscriptTools.handleIdentifyTasksFromTranscript>[0]);
+        case 'protokoll_summarize_transcript':
+            return TranscriptTools.handleSummarizeTranscript(args as Parameters<typeof TranscriptTools.handleSummarizeTranscript>[0]);
+        case 'protokoll_delete_transcript_summary':
+            return TranscriptTools.handleDeleteTranscriptSummary(args as Parameters<typeof TranscriptTools.handleDeleteTranscriptSummary>[0]);
         case 'protokoll_edit_transcript':
             return TranscriptTools.handleEditTranscript(args as Parameters<typeof TranscriptTools.handleEditTranscript>[0]);
         case 'protokoll_change_transcript_date':
@@ -223,6 +234,8 @@ export async function handleToolCall(name: string, args: unknown): Promise<unkno
             return TranscriptTools.handleCombineTranscripts(args as Parameters<typeof TranscriptTools.handleCombineTranscripts>[0]);
         case 'protokoll_provide_feedback':
             return TranscriptTools.handleProvideFeedback(args as Parameters<typeof TranscriptTools.handleProvideFeedback>[0]);
+        case 'protokoll_enhance_transcript':
+            return TranscriptTools.handleEnhanceTranscript(args as Parameters<typeof TranscriptTools.handleEnhanceTranscript>[0]);
         case 'protokoll_update_transcript_content':
             return TranscriptTools.handleUpdateTranscriptContent(args as Parameters<typeof TranscriptTools.handleUpdateTranscriptContent>[0]);
         case 'protokoll_update_transcript_entity_references':
@@ -233,6 +246,8 @@ export async function handleToolCall(name: string, args: unknown): Promise<unkno
             return TranscriptTools.handleGetEnhancementLog(args as Parameters<typeof TranscriptTools.handleGetEnhancementLog>[0]);
         case 'protokoll_correct_to_entity':
             return TranscriptTools.handleCorrectToEntity(args as Parameters<typeof TranscriptTools.handleCorrectToEntity>[0]);
+        case 'protokoll_reject_correction':
+            return TranscriptTools.handleRejectCorrection(args as Parameters<typeof TranscriptTools.handleRejectCorrection>[0]);
 
         // Lifecycle Status & Tasks
         case 'protokoll_set_status':

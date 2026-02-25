@@ -191,6 +191,60 @@ export function getPrompts(): McpPrompt[] {
             ],
         },
         {
+            name: 'identify_tasks_from_transcript',
+            description: 'Identify task candidates from a transcript with a review-first flow. ' +
+                'Instructs the assistant to identify first, present candidates with none preselected, ' +
+                'and only create tasks after explicit user approval.',
+            arguments: [
+                {
+                    name: 'transcriptPath',
+                    description: 'Path or URI to the transcript to analyze',
+                    required: true,
+                },
+                {
+                    name: 'maxCandidates',
+                    description: 'Optional maximum number of task candidates to identify (default: 25)',
+                    required: false,
+                },
+                {
+                    name: 'includeTagSuggestions',
+                    description: 'Optional flag to include suggested tags (default: true)',
+                    required: false,
+                },
+            ],
+        },
+        {
+            name: 'summarize_transcript',
+            description: 'Create an audience-aware transcript summary with privacy guardrails and style presets.',
+            arguments: [
+                {
+                    name: 'transcriptPath',
+                    description: 'Path to the transcript to summarize',
+                    required: true,
+                },
+                {
+                    name: 'audience',
+                    description: 'Target audience for the summary (e.g. internal team, external attendee)',
+                    required: true,
+                },
+                {
+                    name: 'stylePreset',
+                    description: 'Summary style: quick_bullets, detailed, attendee_facing (default: detailed)',
+                    required: false,
+                },
+                {
+                    name: 'guidance',
+                    description: 'Additional instructions (especially privacy/sensitivity constraints)',
+                    required: false,
+                },
+                {
+                    name: 'summaryTitle',
+                    description: 'Optional title to use for the summary output',
+                    required: false,
+                },
+            ],
+        },
+        {
             name: 'enrich_entity',
             description: 'Add or update an entity with smart assistance for generating metadata.',
             arguments: [
@@ -311,6 +365,10 @@ export async function getPrompt(
             return generateSetupProjectPrompt(args);
         case 'review_transcript':
             return generateReviewTranscriptPrompt(args);
+        case 'identify_tasks_from_transcript':
+            return generateIdentifyTasksFromTranscriptPrompt(args);
+        case 'summarize_transcript':
+            return generateSummarizeTranscriptPrompt(args);
         case 'enrich_entity':
             return generateEnrichEntityPrompt(args);
         case 'batch_transcription':
@@ -449,6 +507,93 @@ async function generateReviewTranscriptPrompt(
     const content = fillTemplate(template, {
         transcriptPath,
         focusArea: focusText
+    });
+
+    return [
+        {
+            role: 'user',
+            content: {
+                type: 'text',
+                text: content,
+            },
+        },
+    ];
+}
+
+async function generateIdentifyTasksFromTranscriptPrompt(
+    args: Record<string, string>
+): Promise<McpPromptMessage[]> {
+    const transcriptPath = args.transcriptPath;
+    if (!transcriptPath) {
+        throw new Error('transcriptPath is required');
+    }
+
+    const maxCandidates = args.maxCandidates?.trim() || '25';
+    const includeTagSuggestions = args.includeTagSuggestions?.trim() || 'true';
+
+    const template = loadTemplate('identify_tasks_from_transcript');
+    const content = fillTemplate(template, {
+        transcriptPath,
+        maxCandidates,
+        includeTagSuggestions,
+    });
+
+    return [
+        {
+            role: 'user',
+            content: {
+                type: 'text',
+                text: content,
+            },
+        },
+    ];
+}
+
+async function generateSummarizeTranscriptPrompt(
+    args: Record<string, string>
+): Promise<McpPromptMessage[]> {
+    const transcriptPath = args.transcriptPath;
+    const audience = args.audience;
+
+    if (!transcriptPath) {
+        throw new Error('transcriptPath is required');
+    }
+    if (!audience) {
+        throw new Error('audience is required');
+    }
+
+    const presetMap: Record<string, { label: string; instructions: string }> = {
+        quick_bullets: {
+            label: 'Quick paragraph + bullet points',
+            instructions: 'Write one concise paragraph followed by 4-8 bullets covering decisions, actions, and risks.',
+        },
+        detailed: {
+            label: 'Detailed summary',
+            instructions: 'Write a structured summary with context, key discussion points, decisions, open questions, and next steps.',
+        },
+        attendee_facing: {
+            label: 'Attendee-facing summary',
+            instructions: 'Write a professional external-facing summary suitable for attendees; avoid private/internal reflections unless explicitly approved.',
+        },
+    };
+    const presetKey = (args.stylePreset || 'detailed').trim();
+    const selectedPreset = presetMap[presetKey] ?? presetMap.detailed;
+
+    const summaryTitleLine = args.summaryTitle?.trim()
+        ? `- Target title: "${args.summaryTitle.trim()}"`
+        : '- Target title: (auto-generate from transcript title and date)';
+    const guidanceBlock = args.guidance?.trim()
+        ? args.guidance.trim()
+        : 'No extra guidance provided.';
+
+    const template = loadTemplate('summarize_transcript');
+    const content = fillTemplate(template, {
+        transcriptPath,
+        audience: audience.trim(),
+        styleLabel: selectedPreset.label,
+        styleInstructions: selectedPreset.instructions,
+        summaryTitleLine,
+        guidanceBlock,
     });
 
     return [

@@ -13,12 +13,17 @@ import {
     handleUpdateTranscriptContent,
     handleUpdateTranscriptEntityReferences,
     handleProvideFeedback,
+    handleEnhanceTranscript,
+    handleSummarizeTranscript,
+    handleDeleteTranscriptSummary,
+    handleRejectCorrection,
     handleCreateNote,
 } from '../../src/mcp/tools/transcriptTools';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { PklTranscript } from '@redaksjon/protokoll-format';
+import * as ContextModule from '../../src/context';
 
 // Mock serverConfig for validateNotRemoteMode and getContextDirectories
 vi.mock('../../src/mcp/serverConfig', () => ({
@@ -108,10 +113,34 @@ import { getConfiguredDirectory } from '../../src/mcp/tools/shared';
 
 // Mock Transcript.processFeedback for handleProvideFeedback (avoids LLM calls)
 const mockProcessFeedback = vi.hoisted(() => vi.fn());
+const mockReasoningCreate = vi.hoisted(() => vi.fn());
+const mockRoutingCreate = vi.hoisted(() => vi.fn());
+const mockSimpleReplacePhaseCreate = vi.hoisted(() => vi.fn());
+const mockAgenticCreate = vi.hoisted(() => vi.fn());
 vi.mock('@redaksjon/protokoll-engine', async (importOriginal) => {
     const actual = await importOriginal<typeof import('@redaksjon/protokoll-engine')>();
+    mockReasoningCreate.mockImplementation((...args) => (actual.Reasoning.create as any)(...args));
+    mockRoutingCreate.mockImplementation((...args) => (actual.Routing.create as any)(...args));
+    mockSimpleReplacePhaseCreate.mockImplementation((...args) => (actual.Phases.createSimpleReplacePhase as any)(...args));
+    mockAgenticCreate.mockImplementation((...args) => (actual.Agentic.create as any)(...args));
     return {
         ...actual,
+        Reasoning: {
+            ...actual.Reasoning,
+            create: mockReasoningCreate,
+        },
+        Routing: {
+            ...actual.Routing,
+            create: mockRoutingCreate,
+        },
+        Phases: {
+            ...actual.Phases,
+            createSimpleReplacePhase: mockSimpleReplacePhaseCreate,
+        },
+        Agentic: {
+            ...actual.Agentic,
+            create: mockAgenticCreate,
+        },
         Transcript: {
             ...actual.Transcript,
             processFeedback: mockProcessFeedback,
@@ -145,7 +174,7 @@ async function createTestTranscript(
 
     const transcript = PklTranscript.create(pklPath, metadata);
     try {
-        transcript.updateContent(options.content || 'Original content here.');
+        transcript.updateContent(options.content ?? 'Original content here.');
     } finally {
         transcript.close();
     }
@@ -577,7 +606,541 @@ describe('transcriptTools - extended handlers', () => {
         });
     });
 
+    describe('handleEnhanceTranscript', () => {
+        it('should enhance transcript using explicit original text and update metadata', async () => {
+            const pklPath = await createTestTranscript(transcriptsDir, '2025/2/enhance-test.pkl', {
+                title: 'Enhance Test',
+                status: 'initial',
+                content: 'Old enhanced content',
+            });
+
+            const contextCreateSpy = vi.spyOn(ContextModule, 'create').mockResolvedValue({
+                getAllProjects: () => [],
+                getProject: (id: string) => ({ id, name: `Project ${id}` }),
+                getPerson: () => undefined,
+                getTerm: () => undefined,
+                getCompany: () => undefined,
+            } as any);
+            mockRoutingCreate.mockReturnValue({
+                route: () => ({
+                    projectId: 'project-123',
+                    destination: { path: transcriptsDir, structure: 'month', filename_options: ['date'] },
+                    confidence: 0.9,
+                    signals: [],
+                    reasoning: 'test routing',
+                    alternateMatches: [],
+                }),
+                buildOutputPath: () => '',
+                addProject: () => {},
+                updateDefaultRoute: () => {},
+                getConfig: () => ({
+                    default: { path: transcriptsDir, structure: 'month', filename_options: ['date'] },
+                    projects: [],
+                    conflict_resolution: 'primary',
+                }),
+            } as any);
+            mockSimpleReplacePhaseCreate.mockReturnValue({
+                replace: vi.fn(async (text: string) => ({
+                    text: text.replace('orig', 'original'),
+                    stats: {
+                        tier1Replacements: 1,
+                        tier2Replacements: 0,
+                        totalReplacements: 1,
+                        tier1MappingsConsidered: 1,
+                        tier2MappingsConsidered: 0,
+                        projectContext: 'project-123',
+                        classificationConfidence: 0.9,
+                        processingTimeMs: 5,
+                        appliedMappings: [
+                            {
+                                soundsLike: 'orig',
+                                correctText: 'original',
+                                tier: 1,
+                                occurrences: 1,
+                                entityId: 'term-1',
+                                entityType: 'term',
+                            },
+                        ],
+                    },
+                    replacementsMade: true,
+                })),
+            } as any);
+            mockReasoningCreate.mockReturnValue({} as any);
+            mockAgenticCreate.mockReturnValue({
+                process: vi.fn(async (text: string) => ({
+                    enhancedText: `${text}\n\nEnhanced transcript output with enough length to satisfy the enhancement-success threshold.`,
+                    toolsUsed: ['lookup_person', 'route_note'],
+                    iterations: 2,
+                    totalTokens: 123,
+                    state: {
+                        referencedEntities: {
+                            people: new Set<string>(),
+                            projects: new Set<string>(['project-123']),
+                            terms: new Set<string>(),
+                            companies: new Set<string>(),
+                        },
+                        routeDecision: {
+                            projectId: 'project-123',
+                            destination: { path: transcriptsDir, structure: 'month' },
+                            confidence: 0.95,
+                            signals: [],
+                            reasoning: 'agentic route',
+                        },
+                    },
+                })),
+            } as any);
+
+            const result = await handleEnhanceTranscript({
+                transcriptPath: '2025/2/enhance-test.pkl',
+                originalText: 'orig text from original tab',
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.changed).toBe(true);
+            expect(result.projectId).toBe('project-123');
+            expect(result.toolsUsed).toContain('route_note');
+
+            const transcript = PklTranscript.open(pklPath, { readOnly: true });
+            try {
+                expect(transcript.content).toContain('Enhanced transcript output');
+                expect(transcript.metadata.status).toBe('enhanced');
+                expect(transcript.getEnhancementLogCount()).toBeGreaterThan(0);
+            } finally {
+                transcript.close();
+            }
+
+            contextCreateSpy.mockRestore();
+            mockRoutingCreate.mockReset();
+            mockSimpleReplacePhaseCreate.mockReset();
+            mockReasoningCreate.mockReset();
+            mockAgenticCreate.mockReset();
+        });
+
+        it('should throw when no source text is available', async () => {
+            const pklPath = await createTestTranscript(transcriptsDir, '2025/2/enhance-empty.pkl', {
+                title: 'Enhance Empty',
+                content: '',
+            });
+
+            // Ensure there's no raw transcript fallback
+            const writable = PklTranscript.open(pklPath, { readOnly: false });
+            try {
+                writable.updateContent('');
+            } finally {
+                writable.close();
+            }
+
+            const contextCreateSpy = vi.spyOn(ContextModule, 'create').mockResolvedValue({
+                getAllProjects: () => [],
+                getProject: () => undefined,
+                getPerson: () => undefined,
+                getTerm: () => undefined,
+                getCompany: () => undefined,
+            } as any);
+
+            await expect(
+                handleEnhanceTranscript({
+                    transcriptPath: '2025/2/enhance-empty.pkl',
+                })
+            ).rejects.toThrow('No source text available to enhance');
+
+            contextCreateSpy.mockRestore();
+        });
+    });
+
     describe('handleCreateNote', () => {
+        it('should summarize transcript and persist summary history artifact', async () => {
+            const pklPath = await createTestTranscript(transcriptsDir, '2025/2/summary-test.pkl', {
+                title: 'Summary Target',
+                content: 'This transcript has enough content to summarize for tests.',
+            });
+
+            const complete = vi.fn(async () => ({
+                content: '# Summary Target\n\n- Point one\n- Point two',
+                model: 'mock-model',
+                duration: 12,
+                finishReason: 'stop',
+            }));
+            mockReasoningCreate.mockReturnValue({ complete } as any);
+
+            const result = await handleSummarizeTranscript({
+                transcriptPath: '2025/2/summary-test.pkl',
+                audience: 'Internal',
+                stylePreset: 'not_a_real_style',
+                guidance: 'Keep it concise.',
+                summaryTitle: 'Custom Title',
+                model: 'mock-model',
+            });
+
+            expect(result.summary).toContain('Point one');
+            expect(result.stylePreset).toBe('detailed');
+            expect(result.model).toBe('mock-model');
+            expect(result.summaryId).toMatch(/^summary-/);
+            expect(complete).toHaveBeenCalledOnce();
+
+            const transcript = PklTranscript.open(pklPath, { readOnly: true });
+            try {
+                const artifact = transcript.getArtifact('summary_history');
+                expect(artifact).toBeTruthy();
+                const stored = JSON.parse(artifact!.data.toString('utf8')) as Array<Record<string, unknown>>;
+                expect(stored.length).toBe(1);
+                expect(stored[0].id).toBe(result.summaryId);
+                expect(stored[0].title).toBe('Custom Title');
+            } finally {
+                transcript.close();
+            }
+
+            mockReasoningCreate.mockReset();
+        });
+
+        it('should summarize with explicit style preset and generated title fallback', async () => {
+            await createTestTranscript(transcriptsDir, '2025/2/summary-style.pkl', {
+                title: 'Style Summary Target',
+                content: 'Content for style preset coverage.',
+            });
+
+            mockReasoningCreate.mockReturnValue({
+                complete: vi.fn(async () => ({
+                    content: '# Auto Title\n\nSummary body.',
+                    model: 'mock-model',
+                })),
+            } as any);
+
+            const result = await handleSummarizeTranscript({
+                transcriptPath: '2025/2/summary-style.pkl',
+                stylePreset: 'quick_bullets',
+            });
+
+            expect(result.stylePreset).toBe('quick_bullets');
+            expect(result.summary).toContain('Summary body');
+
+            mockReasoningCreate.mockReset();
+        });
+
+        it('should fail summarize when transcript content is empty', async () => {
+            await createTestTranscript(transcriptsDir, '2025/2/summary-empty.pkl', {
+                title: 'Summary Empty',
+                content: '',
+            });
+
+            await expect(
+                handleSummarizeTranscript({
+                    transcriptPath: '2025/2/summary-empty.pkl',
+                })
+            ).rejects.toThrow('Transcript content is empty');
+        });
+
+        it('should fail summarize when model returns empty content', async () => {
+            await createTestTranscript(transcriptsDir, '2025/2/summary-empty-result.pkl', {
+                title: 'Summary Empty Result',
+                content: 'Some content to summarize.',
+            });
+
+            mockReasoningCreate.mockReturnValue({
+                complete: vi.fn(async () => ({
+                    content: '   ',
+                    model: 'mock-model',
+                })),
+            } as any);
+
+            await expect(
+                handleSummarizeTranscript({
+                    transcriptPath: '2025/2/summary-empty-result.pkl',
+                })
+            ).rejects.toThrow('No summary text generated.');
+
+            mockReasoningCreate.mockReset();
+        });
+
+        it('should delete a persisted summary from artifact history', async () => {
+            const pklPath = await createTestTranscript(transcriptsDir, '2025/2/summary-delete.pkl', {
+                title: 'Delete Summary Target',
+                content: 'Summary history delete test.',
+            });
+
+            const writable = PklTranscript.open(pklPath, { readOnly: false });
+            try {
+                writable.addArtifact(
+                    'summary_history',
+                    Buffer.from(JSON.stringify([
+                        {
+                            id: 'summary-1',
+                            title: 'A',
+                            audience: 'General audience',
+                            guidance: '',
+                            stylePreset: 'detailed',
+                            styleLabel: 'Detailed summary',
+                            content: 'One',
+                            generatedAt: '2026-01-01T00:00:00.000Z',
+                        },
+                        {
+                            id: 'summary-2',
+                            title: 'B',
+                            audience: 'General audience',
+                            guidance: '',
+                            stylePreset: 'detailed',
+                            styleLabel: 'Detailed summary',
+                            content: 'Two',
+                            generatedAt: '2026-01-02T00:00:00.000Z',
+                        },
+                    ]), 'utf8'),
+                    { version: 1, count: 2, updatedAt: new Date().toISOString() }
+                );
+            } finally {
+                writable.close();
+            }
+
+            const result = await handleDeleteTranscriptSummary({
+                transcriptPath: '2025/2/summary-delete.pkl',
+                summaryId: 'summary-1',
+            });
+            expect(result.success).toBe(true);
+            expect(result.remaining).toBe(1);
+        });
+
+        it('should fail delete summary when summary id is missing', async () => {
+            await expect(
+                handleDeleteTranscriptSummary({
+                    transcriptPath: '2025/2/summary-delete.pkl',
+                    summaryId: '',
+                })
+            ).rejects.toThrow('summaryId is required');
+        });
+
+        it('should fail delete summary when summary does not exist', async () => {
+            const pklPath = await createTestTranscript(transcriptsDir, '2025/2/summary-delete-missing.pkl', {
+                title: 'Delete Missing Summary',
+                content: 'Summary delete missing test.',
+            });
+
+            const writable = PklTranscript.open(pklPath, { readOnly: false });
+            try {
+                writable.addArtifact(
+                    'summary_history',
+                    Buffer.from(JSON.stringify([
+                        {
+                            id: 'summary-existing',
+                            title: 'A',
+                            audience: 'General audience',
+                            guidance: '',
+                            stylePreset: 'detailed',
+                            styleLabel: 'Detailed summary',
+                            content: 'One',
+                            generatedAt: '2026-01-01T00:00:00.000Z',
+                        },
+                    ]), 'utf8'),
+                    { version: 1, count: 1, updatedAt: new Date().toISOString() }
+                );
+            } finally {
+                writable.close();
+            }
+
+            await expect(
+                handleDeleteTranscriptSummary({
+                    transcriptPath: '2025/2/summary-delete-missing.pkl',
+                    summaryId: 'summary-missing',
+                })
+            ).rejects.toThrow('Summary not found');
+        });
+
+        it('should reject a correction and restore original content', async () => {
+            const pklPath = await createTestTranscript(transcriptsDir, '2025/2/reject-correction.pkl', {
+                title: 'Reject Correction',
+                content: 'doccident appears twice: doccident.',
+            });
+
+            const writable = PklTranscript.open(pklPath, { readOnly: false });
+            let correctionEntryId = 0;
+            try {
+                writable.enhancementLog.logStep(
+                    new Date('2026-01-01T00:00:00.000Z'),
+                    'enhance',
+                    'correction_applied',
+                    {
+                        original: 'document',
+                        replacement: 'doccident',
+                    }
+                );
+                const entries = writable.getEnhancementLog();
+                correctionEntryId = entries[entries.length - 1]?.id ?? 0;
+            } finally {
+                writable.close();
+            }
+
+            const result = await handleRejectCorrection({
+                transcriptPath: '2025/2/reject-correction.pkl',
+                correctionEntryId,
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.revertedOccurrences).toBeGreaterThanOrEqual(1);
+
+            const transcript = PklTranscript.open(pklPath, { readOnly: true });
+            try {
+                expect(transcript.content).toContain('document appears twice');
+                const entries = transcript.getEnhancementLog();
+                expect(entries.some((entry) => entry.action === 'correction_rejected')).toBe(true);
+            } finally {
+                transcript.close();
+            }
+        });
+
+        it('should return alreadyRejected when correction was already rejected', async () => {
+            const pklPath = await createTestTranscript(transcriptsDir, '2025/2/reject-already.pkl', {
+                title: 'Reject Already',
+                content: 'doccident in content.',
+            });
+
+            const writable = PklTranscript.open(pklPath, { readOnly: false });
+            let correctionEntryId = 0;
+            try {
+                writable.enhancementLog.logStep(
+                    new Date('2026-01-01T00:00:00.000Z'),
+                    'enhance',
+                    'correction_applied',
+                    {
+                        original: 'document',
+                        replacement: 'doccident',
+                    }
+                );
+                const entriesAfterApplied = writable.getEnhancementLog();
+                correctionEntryId = entriesAfterApplied[entriesAfterApplied.length - 1]?.id ?? 0;
+                writable.enhancementLog.logStep(
+                    new Date('2026-01-01T00:01:00.000Z'),
+                    'enhance',
+                    'correction_rejected',
+                    {
+                        correctionEntryId,
+                        original: 'document',
+                        replacement: 'doccident',
+                        revertedOccurrences: 1,
+                    }
+                );
+            } finally {
+                writable.close();
+            }
+
+            const result = await handleRejectCorrection({
+                transcriptPath: '2025/2/reject-already.pkl',
+                correctionEntryId,
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.alreadyRejected).toBe(true);
+        });
+
+        it('should fail reject correction with invalid correctionEntryId', async () => {
+            await expect(
+                handleRejectCorrection({
+                    transcriptPath: '2025/2/reject-correction.pkl',
+                    correctionEntryId: 0,
+                })
+            ).rejects.toThrow('correctionEntryId must be a positive integer');
+        });
+
+        it('should fail reject correction when entry is missing', async () => {
+            await createTestTranscript(transcriptsDir, '2025/2/reject-missing-entry.pkl', {
+                title: 'Reject Missing Entry',
+                content: 'No correction entries.',
+            });
+
+            await expect(
+                handleRejectCorrection({
+                    transcriptPath: '2025/2/reject-missing-entry.pkl',
+                    correctionEntryId: 999,
+                })
+            ).rejects.toThrow('Correction entry not found');
+        });
+
+        it('should fail reject correction when entry is not correction_applied', async () => {
+            const pklPath = await createTestTranscript(transcriptsDir, '2025/2/reject-wrong-action.pkl', {
+                title: 'Reject Wrong Action',
+                content: 'Content',
+            });
+
+            const writable = PklTranscript.open(pklPath, { readOnly: false });
+            let entryId = 0;
+            try {
+                writable.enhancementLog.logStep(new Date(), 'enhance', 'tool_start', { note: 'not a correction' });
+                const entries = writable.getEnhancementLog();
+                entryId = entries[entries.length - 1]?.id ?? 0;
+            } finally {
+                writable.close();
+            }
+
+            await expect(
+                handleRejectCorrection({
+                    transcriptPath: '2025/2/reject-wrong-action.pkl',
+                    correctionEntryId: entryId,
+                })
+            ).rejects.toThrow('is not a correction_applied action');
+        });
+
+        it('should fail reject correction when correction details are missing', async () => {
+            const pklPath = await createTestTranscript(transcriptsDir, '2025/2/reject-missing-details.pkl', {
+                title: 'Reject Missing Details',
+                content: 'Content',
+            });
+
+            const writable = PklTranscript.open(pklPath, { readOnly: false });
+            let entryId = 0;
+            try {
+                writable.enhancementLog.logStep(new Date(), 'enhance', 'correction_applied', {});
+                const entries = writable.getEnhancementLog();
+                entryId = entries[entries.length - 1]?.id ?? 0;
+            } finally {
+                writable.close();
+            }
+
+            await expect(
+                handleRejectCorrection({
+                    transcriptPath: '2025/2/reject-missing-details.pkl',
+                    correctionEntryId: entryId,
+                })
+            ).rejects.toThrow('missing original/replacement details');
+        });
+
+        it('should use simple-replace phase when original correction phase is unrecognized', async () => {
+            const pklPath = await createTestTranscript(transcriptsDir, '2025/2/reject-fallback-phase.pkl', {
+                title: 'Reject Fallback Phase',
+                content: 'doccident appears once.',
+            });
+
+            const writable = PklTranscript.open(pklPath, { readOnly: false });
+            let entryId = 0;
+            try {
+                (writable.enhancementLog.logStep as any)(
+                    new Date(),
+                    'unexpected-phase',
+                    'correction_applied',
+                    {
+                        original: 'document',
+                        replacement: 'doccident',
+                    }
+                );
+                const entries = writable.getEnhancementLog();
+                entryId = entries[entries.length - 1]?.id ?? 0;
+            } finally {
+                writable.close();
+            }
+
+            const result = await handleRejectCorrection({
+                transcriptPath: '2025/2/reject-fallback-phase.pkl',
+                correctionEntryId: entryId,
+            });
+            expect(result.success).toBe(true);
+
+            const transcript = PklTranscript.open(pklPath, { readOnly: true });
+            try {
+                const entries = transcript.getEnhancementLog();
+                const rejectionEntry = entries[entries.length - 1];
+                expect(rejectionEntry.action).toBe('correction_rejected');
+                expect(rejectionEntry.phase).toBe('simple-replace');
+            } finally {
+                transcript.close();
+            }
+        });
+
         it('should create a new note', async () => {
             const result = await handleCreateNote({
                 title: 'My New Note',
