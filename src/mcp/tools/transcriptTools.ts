@@ -7,9 +7,10 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { resolve, dirname } from 'node:path';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 import * as Context from '@/context';
 import { Agentic, Phases, Reasoning, Routing, Transcript } from '@redaksjon/protokoll-engine';
-import { DEFAULT_MODEL } from '@/constants';
+import { DEFAULT_MODEL, MAX_CONTENT_LENGTH } from '@/constants';
 
 import { fileExists, getConfiguredDirectory, getContextDirectories, sanitizePath, validatePathWithinDirectory, validatePathWithinOutputDirectory, validateNotRemoteMode, resolveTranscriptPath } from './shared.js';
 import * as Metadata from '@redaksjon/protokoll-engine';
@@ -40,6 +41,72 @@ interface TaskCandidate {
     suggestedEntities: Array<{ id: string; name: string; type: 'person' | 'project' | 'term' | 'company' }>;
     suggestedTags: string[];
 }
+
+interface SummaryStylePreset {
+    label: string;
+    instructions: string;
+}
+
+interface StoredSummary {
+    id: string;
+    title: string;
+    audience: string;
+    guidance: string;
+    stylePreset: string;
+    styleLabel: string;
+    content: string;
+    generatedAt: string;
+}
+
+function parseStoredSummaries(raw: string): StoredSummary[] {
+    try {
+        const parsed = JSON.parse(raw) as unknown;
+        if (!Array.isArray(parsed)) {
+            return [];
+        }
+        return parsed
+            .map((item) => {
+                if (!item || typeof item !== 'object') {
+                    return null;
+                }
+                const record = item as Record<string, unknown>;
+                const id = String(record.id || '').trim();
+                const content = String(record.content || '').trim();
+                if (!id || !content) {
+                    return null;
+                }
+                return {
+                    id,
+                    title: String(record.title || '').trim(),
+                    audience: String(record.audience || '').trim(),
+                    guidance: String(record.guidance || '').trim(),
+                    stylePreset: String(record.stylePreset || 'detailed').trim() || 'detailed',
+                    styleLabel: String(record.styleLabel || 'Detailed summary').trim() || 'Detailed summary',
+                    content,
+                    generatedAt: String(record.generatedAt || '').trim() || new Date().toISOString(),
+                } satisfies StoredSummary;
+            })
+            .filter((summary): summary is StoredSummary => summary !== null)
+            .sort((a, b) => b.generatedAt.localeCompare(a.generatedAt));
+    } catch {
+        return [];
+    }
+}
+
+const SUMMARY_STYLE_PRESETS: Record<string, SummaryStylePreset> = {
+    quick_bullets: {
+        label: 'Quick paragraph + bullet points',
+        instructions: 'Write one concise paragraph followed by 4-8 bullets covering decisions, actions, and risks.',
+    },
+    detailed: {
+        label: 'Detailed summary',
+        instructions: 'Write a structured summary with context, key discussion points, decisions, open questions, and next steps.',
+    },
+    attendee_facing: {
+        label: 'Attendee-facing summary',
+        instructions: 'Write a professional external-facing summary suitable for attendees; avoid private/internal reflections unless explicitly approved.',
+    },
+};
 
 function splitIntoCandidateSentences(content: string): string[] {
     return content
@@ -312,6 +379,80 @@ export const editTranscriptTool: Tool = {
             },
         },
         required: ['transcriptPath'],
+    },
+};
+
+export const summarizeTranscriptTool: Tool = {
+    name: 'protokoll_summarize_transcript',
+    description:
+        'Generate an audience-aware summary for a transcript using privacy/sensitivity guardrails. ' +
+        'Returns markdown summary text and does not modify transcript content.',
+    inputSchema: {
+        type: 'object',
+        properties: {
+            transcriptPath: {
+                type: 'string',
+                description:
+                    'Transcript URI (preferred) or relative path from output directory. ' +
+                    'URI format: "protokoll://transcript/2026/2/12-1606-meeting" (no file extension). ' +
+                    'Path format: "2026/2/12-1606-meeting" or "2026/2/12-1606-meeting.pkl"',
+            },
+            audience: {
+                type: 'string',
+                description: 'Optional audience label (e.g. internal team, project attendees, external partner)',
+            },
+            stylePreset: {
+                type: 'string',
+                enum: ['quick_bullets', 'detailed', 'attendee_facing'],
+                description: 'Summary style preset (default: detailed)',
+                default: 'detailed',
+            },
+            guidance: {
+                type: 'string',
+                description: 'Optional extra instructions, especially for privacy/sensitivity constraints',
+            },
+            summaryTitle: {
+                type: 'string',
+                description: 'Optional title to use in the generated summary',
+            },
+            model: {
+                type: 'string',
+                description: `LLM model for summary generation (default: ${DEFAULT_MODEL})`,
+            },
+            contextDirectory: {
+                type: 'string',
+                description: 'Optional: Path to the .protokoll context directory',
+            },
+        },
+        required: ['transcriptPath'],
+    },
+};
+
+export const deleteTranscriptSummaryTool: Tool = {
+    name: 'protokoll_delete_transcript_summary',
+    description:
+        'Delete a previously generated summary from transcript artifact storage by summary ID. ' +
+        'Path is relative to the configured output directory.',
+    inputSchema: {
+        type: 'object',
+        properties: {
+            transcriptPath: {
+                type: 'string',
+                description:
+                    'Transcript URI (preferred) or relative path from output directory. ' +
+                    'URI format: "protokoll://transcript/2026/2/12-1606-meeting" (no file extension). ' +
+                    'Path format: "2026/2/12-1606-meeting" or "2026/2/12-1606-meeting.pkl"',
+            },
+            summaryId: {
+                type: 'string',
+                description: 'Summary ID to remove (for example: "summary-174..." )',
+            },
+            contextDirectory: {
+                type: 'string',
+                description: 'Optional: Path to the .protokoll context directory',
+            },
+        },
+        required: ['transcriptPath', 'summaryId'],
     },
 };
 
@@ -698,6 +839,34 @@ export const correctToEntityTool: Tool = {
     },
 };
 
+export const rejectCorrectionTool: Tool = {
+    name: 'protokoll_reject_correction',
+    description:
+        'Reject a previously applied enhancement correction and undo its text replacement in the transcript. ' +
+        'Also logs the rejection in enhancement_log for auditability.',
+    inputSchema: {
+        type: 'object',
+        properties: {
+            transcriptPath: {
+                type: 'string',
+                description:
+                    'Transcript URI (preferred) or relative path from output directory. ' +
+                    'URI format: "protokoll://transcript/2026/2/12-1606-meeting" (no file extension). ' +
+                    'Path format: "2026/2/12-1606-meeting" or "2026/2/12-1606-meeting.pkl"',
+            },
+            correctionEntryId: {
+                type: 'number',
+                description: 'Enhancement log entry id for the correction_applied event to reject',
+            },
+            contextDirectory: {
+                type: 'string',
+                description: 'Optional: Path to the .protokoll context directory',
+            },
+        },
+        required: ['transcriptPath', 'correctionEntryId'],
+    },
+};
+
 // ============================================================================
 // Tool Handlers
 // ============================================================================
@@ -715,6 +884,16 @@ export async function handleReadTranscript(args: {
     // Convert to relative path for response
     const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
     const relativePath = await sanitizePath(absolutePath, outputDirectory);
+
+    const transcriptHandle = PklTranscript.open(absolutePath, { readOnly: true });
+    let summaries: StoredSummary[] = [];
+    try {
+        const historyArtifact = transcriptHandle.getArtifact('summary_history');
+        const rawHistory = historyArtifact?.data?.toString('utf8') || '[]';
+        summaries = parseStoredSummaries(rawHistory);
+    } finally {
+        transcriptHandle.close();
+    }
 
     // Return complete structured JSON for client display
     // Clients should NOT need to parse this - all data is ready to display
@@ -738,6 +917,7 @@ export async function handleReadTranscript(args: {
         content: transcriptData.content,
         hasRawTranscript: transcriptData.hasRawTranscript,
         contentLength: transcriptData.content.length,
+        summaries,
     };
 }
 
@@ -879,6 +1059,223 @@ export async function handleIdentifyTasksFromTranscript(args: {
             ? `Identified ${candidates.length} task candidate(s).`
             : 'No likely task candidates found in transcript content.',
     };
+}
+
+export async function handleSummarizeTranscript(args: {
+    transcriptPath: string;
+    audience?: string;
+    stylePreset?: 'quick_bullets' | 'detailed' | 'attendee_facing' | string;
+    guidance?: string;
+    summaryTitle?: string;
+    model?: string;
+    contextDirectory?: string;
+}) {
+    const startedAt = Date.now();
+    const logSummary = (message: string, data: Record<string, unknown>) => {
+        process.stdout.write(`Protokoll: [SUMMARY] ${message} ${JSON.stringify(data)}\n`);
+    };
+
+    logSummary('Tool call received', {
+        transcriptPath: args.transcriptPath,
+        audience: args.audience,
+        stylePreset: args.stylePreset || 'detailed',
+        hasGuidance: !!args.guidance?.trim(),
+        hasSummaryTitle: !!args.summaryTitle?.trim(),
+        model: args.model || DEFAULT_MODEL,
+    });
+
+    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
+    logSummary('Resolved transcript path', {
+        transcriptPath: args.transcriptPath,
+        absolutePath,
+    });
+
+    const transcriptData = await readTranscriptFromStorage(absolutePath);
+
+    const transcriptContent = (transcriptData.content || '').trim();
+    if (!transcriptContent) {
+        logSummary('Transcript content empty, cannot summarize', {
+            transcriptPath: args.transcriptPath,
+            absolutePath,
+        });
+        throw new Error('Transcript content is empty; cannot generate summary.');
+    }
+
+    const audience = (args.audience || '').trim() || 'General audience';
+
+    const stylePreset = (args.stylePreset || 'detailed').trim();
+    const selectedStyle = SUMMARY_STYLE_PRESETS[stylePreset] || SUMMARY_STYLE_PRESETS.detailed;
+    const guidance = (args.guidance || '').trim();
+    const model = args.model || DEFAULT_MODEL;
+
+    const transcriptTitle = transcriptData.metadata.title || 'Untitled transcript';
+    const transcriptDate = transcriptData.metadata.date instanceof Date
+        ? transcriptData.metadata.date.toISOString().slice(0, 10)
+        : 'unknown date';
+    const preferredTitle = (args.summaryTitle || '').trim();
+
+    const boundedContent = transcriptContent.length > MAX_CONTENT_LENGTH
+        ? `${transcriptContent.slice(0, MAX_CONTENT_LENGTH)}\n\n[...transcript truncated for summarization input length...]`
+        : transcriptContent;
+    const truncated = transcriptContent.length > MAX_CONTENT_LENGTH;
+    logSummary('Prepared summary input', {
+        transcriptTitle,
+        transcriptDate,
+        transcriptLength: transcriptContent.length,
+        boundedLength: boundedContent.length,
+        truncated,
+        stylePreset,
+    });
+
+    const reasoning = Reasoning.create({
+        model,
+        reasoningLevel: 'medium',
+    });
+
+    const prompt = [
+        'Create an audience-aware summary for the transcript below.',
+        '',
+        `Transcript title: ${transcriptTitle}`,
+        `Transcript date: ${transcriptDate}`,
+        `Audience: ${audience}`,
+        `Style preset: ${selectedStyle.label}`,
+        preferredTitle ? `Preferred summary title: ${preferredTitle}` : 'Preferred summary title: (generate one)',
+        '',
+        'Style instructions:',
+        selectedStyle.instructions,
+        '',
+        'Privacy and sensitivity guardrails:',
+        '- Treat transcript content as potentially sensitive by default.',
+        '- Exclude private internal reflections, personal judgments, or sensitive notes not appropriate for the audience.',
+        '- If unsure whether a detail is audience-appropriate, exclude it or generalize safely.',
+        '- Prefer factual and neutral language over speculative interpretation.',
+        '',
+        'Additional guidance:',
+        guidance || 'No extra guidance provided.',
+        '',
+        'Required output shape:',
+        '1) Title',
+        '2) Summary body matching the selected style preset',
+        '3) Optional "Redactions / Exclusions" section listing what was intentionally omitted for audience safety',
+        '',
+        'Transcript:',
+        boundedContent,
+    ].join('\n');
+
+    const result = await reasoning.complete({
+        prompt,
+        systemPrompt: 'You are an expert meeting summarizer. Return markdown only.',
+    });
+    logSummary('Reasoning call completed', {
+        transcriptPath: args.transcriptPath,
+        model: result.model || model,
+        durationMs: result.duration ?? null,
+        finishReason: result.finishReason ?? null,
+    });
+
+    const summary = (result.content || '').trim();
+    if (!summary) {
+        logSummary('Empty summary response', {
+            transcriptPath: args.transcriptPath,
+            model: result.model || model,
+        });
+        throw new Error('No summary text generated.');
+    }
+
+    logSummary('Summary generated successfully', {
+        transcriptPath: args.transcriptPath,
+        summaryLength: summary.length,
+        elapsedMs: Date.now() - startedAt,
+    });
+
+    const generatedAt = new Date().toISOString();
+    const summaryId = `summary-${Date.now()}-${randomUUID().slice(0, 8)}`;
+    const stylePresetKey = SUMMARY_STYLE_PRESETS[stylePreset] ? stylePreset : 'detailed';
+    const storedSummary: StoredSummary = {
+        id: summaryId,
+        title: preferredTitle || `${transcriptTitle} Summary`,
+        audience,
+        guidance,
+        stylePreset: stylePresetKey,
+        styleLabel: selectedStyle.label,
+        content: summary,
+        generatedAt,
+    };
+    const transcriptHandle = PklTranscript.open(absolutePath, { readOnly: false });
+    try {
+        const existingHistory = transcriptHandle.getArtifact('summary_history');
+        const existingSummaries = parseStoredSummaries(existingHistory?.data?.toString('utf8') || '[]');
+        const nextSummaries = [storedSummary, ...existingSummaries.filter((entry) => entry.id !== summaryId)];
+
+        transcriptHandle.addArtifact(
+            'summary_history',
+            Buffer.from(JSON.stringify(nextSummaries), 'utf8'),
+            {
+                version: 1,
+                count: nextSummaries.length,
+                updatedAt: generatedAt,
+                model: result.model || model,
+            }
+        );
+    } finally {
+        transcriptHandle.close();
+    }
+    logSummary('Summary persisted to transcript artifact storage', {
+        transcriptPath: args.transcriptPath,
+        summaryId,
+        generatedAt,
+    });
+
+    return {
+        summary,
+        audience,
+        stylePreset: stylePresetKey,
+        model: result.model || model,
+        summaryId,
+        generatedAt,
+    };
+}
+
+export async function handleDeleteTranscriptSummary(args: {
+    transcriptPath: string;
+    summaryId: string;
+    contextDirectory?: string;
+}) {
+    const summaryId = (args.summaryId || '').trim();
+    if (!summaryId) {
+        throw new Error('summaryId is required');
+    }
+
+    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
+    const transcriptHandle = PklTranscript.open(absolutePath, { readOnly: false });
+    try {
+        const historyArtifact = transcriptHandle.getArtifact('summary_history');
+        const existingSummaries = parseStoredSummaries(historyArtifact?.data?.toString('utf8') || '[]');
+        const remainingSummaries = existingSummaries.filter((entry) => entry.id !== summaryId);
+
+        if (remainingSummaries.length === existingSummaries.length) {
+            throw new Error(`Summary not found: ${summaryId}`);
+        }
+
+        transcriptHandle.addArtifact(
+            'summary_history',
+            Buffer.from(JSON.stringify(remainingSummaries), 'utf8'),
+            {
+                version: 1,
+                count: remainingSummaries.length,
+                updatedAt: new Date().toISOString(),
+                deletedSummaryId: summaryId,
+            }
+        );
+
+        return {
+            success: true,
+            summaryId,
+            remaining: remainingSummaries.length,
+        };
+    } finally {
+        transcriptHandle.close();
+    }
 }
 
 export async function handleEditTranscript(args: {
@@ -1795,6 +2192,105 @@ function applyCorrections(
     }
     
     return correctedText;
+}
+
+function countOccurrencesCaseInsensitive(text: string, target: string): number {
+    if (!target.trim()) {
+        return 0;
+    }
+    const regex = new RegExp(target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    const matches = text.match(regex);
+    return matches ? matches.length : 0;
+}
+
+export async function handleRejectCorrection(args: {
+    transcriptPath: string;
+    correctionEntryId: number;
+    contextDirectory?: string;
+}) {
+    if (!Number.isInteger(args.correctionEntryId) || args.correctionEntryId < 1) {
+        throw new Error('correctionEntryId must be a positive integer');
+    }
+
+    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
+    const transcript = PklTranscript.open(absolutePath, { readOnly: false });
+
+    try {
+        const allEntries = transcript.getEnhancementLog();
+        const correctionEntry = allEntries.find((entry) => entry.id === args.correctionEntryId);
+
+        if (!correctionEntry) {
+            throw new Error(`Correction entry not found: ${args.correctionEntryId}`);
+        }
+        if (correctionEntry.action !== 'correction_applied') {
+            throw new Error(`Entry ${args.correctionEntryId} is not a correction_applied action`);
+        }
+
+        const details = (correctionEntry.details || {}) as Record<string, unknown>;
+        const original = String(details.original || '').trim();
+        const replacement = String(details.replacement || '').trim();
+        if (!original || !replacement) {
+            throw new Error(`Correction entry ${args.correctionEntryId} is missing original/replacement details`);
+        }
+
+        const alreadyRejected = allEntries.some((entry) => {
+            if (entry.action !== 'correction_rejected') {
+                return false;
+            }
+            const rejectDetails = (entry.details || {}) as Record<string, unknown>;
+            return Number(rejectDetails.correctionEntryId) === args.correctionEntryId;
+        });
+        if (alreadyRejected) {
+            return {
+                success: true,
+                alreadyRejected: true,
+                correctionEntryId: args.correctionEntryId,
+                original,
+                replacement,
+                revertedOccurrences: 0,
+                message: `Correction #${args.correctionEntryId} is already rejected`,
+            };
+        }
+
+        const originalContent = transcript.content || '';
+        const beforeCount = countOccurrencesCaseInsensitive(originalContent, replacement);
+        const revertedContent = applyCorrections(
+            originalContent,
+            new Map([[replacement, original]])
+        );
+        const afterCount = countOccurrencesCaseInsensitive(revertedContent, replacement);
+        const revertedOccurrences = Math.max(0, beforeCount - afterCount);
+        const rejectionPhase = correctionEntry.phase === 'transcribe'
+            || correctionEntry.phase === 'enhance'
+            || correctionEntry.phase === 'simple-replace'
+            ? correctionEntry.phase
+            : 'simple-replace';
+
+        transcript.updateContent(revertedContent);
+        transcript.enhancementLog.logStep(
+            new Date(),
+            rejectionPhase,
+            'correction_rejected',
+            {
+                correctionEntryId: args.correctionEntryId,
+                original,
+                replacement,
+                revertedOccurrences,
+                sourceTimestamp: correctionEntry.timestamp.toISOString(),
+            }
+        );
+
+        return {
+            success: true,
+            correctionEntryId: args.correctionEntryId,
+            original,
+            replacement,
+            revertedOccurrences,
+            message: `Rejected correction #${args.correctionEntryId} and restored "${replacement}" to "${original}"`,
+        };
+    } finally {
+        transcript.close();
+    }
 }
 
 export async function handleCorrectToEntity(args: {

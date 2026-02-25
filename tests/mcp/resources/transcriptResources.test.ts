@@ -47,6 +47,7 @@ vi.mock('@redaksjon/protokoll-format', () => ({
                 duration: 120,
                 transcribedAt: '2026-02-14T12:00:00Z',
             },
+            getArtifact: vi.fn().mockReturnValue(undefined),
             close: vi.fn(),
         }),
     },
@@ -133,6 +134,7 @@ describe('transcriptResources', () => {
             vi.mocked(PklTranscript.open).mockReturnValueOnce({
                 hasRawTranscript: false,
                 rawTranscript: null,
+                getArtifact: vi.fn().mockReturnValue(undefined),
                 close: vi.fn(),
             } as any);
             
