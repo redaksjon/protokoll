@@ -13,12 +13,14 @@ import {
     handleUpdateTranscriptContent,
     handleUpdateTranscriptEntityReferences,
     handleProvideFeedback,
+    handleEnhanceTranscript,
     handleCreateNote,
 } from '../../src/mcp/tools/transcriptTools';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { PklTranscript } from '@redaksjon/protokoll-format';
+import * as ContextModule from '../../src/context';
 
 // Mock serverConfig for validateNotRemoteMode and getContextDirectories
 vi.mock('../../src/mcp/serverConfig', () => ({
@@ -108,10 +110,34 @@ import { getConfiguredDirectory } from '../../src/mcp/tools/shared';
 
 // Mock Transcript.processFeedback for handleProvideFeedback (avoids LLM calls)
 const mockProcessFeedback = vi.hoisted(() => vi.fn());
+const mockReasoningCreate = vi.hoisted(() => vi.fn());
+const mockRoutingCreate = vi.hoisted(() => vi.fn());
+const mockSimpleReplacePhaseCreate = vi.hoisted(() => vi.fn());
+const mockAgenticCreate = vi.hoisted(() => vi.fn());
 vi.mock('@redaksjon/protokoll-engine', async (importOriginal) => {
     const actual = await importOriginal<typeof import('@redaksjon/protokoll-engine')>();
+    mockReasoningCreate.mockImplementation((...args) => (actual.Reasoning.create as any)(...args));
+    mockRoutingCreate.mockImplementation((...args) => (actual.Routing.create as any)(...args));
+    mockSimpleReplacePhaseCreate.mockImplementation((...args) => (actual.Phases.createSimpleReplacePhase as any)(...args));
+    mockAgenticCreate.mockImplementation((...args) => (actual.Agentic.create as any)(...args));
     return {
         ...actual,
+        Reasoning: {
+            ...actual.Reasoning,
+            create: mockReasoningCreate,
+        },
+        Routing: {
+            ...actual.Routing,
+            create: mockRoutingCreate,
+        },
+        Phases: {
+            ...actual.Phases,
+            createSimpleReplacePhase: mockSimpleReplacePhaseCreate,
+        },
+        Agentic: {
+            ...actual.Agentic,
+            create: mockAgenticCreate,
+        },
         Transcript: {
             ...actual.Transcript,
             processFeedback: mockProcessFeedback,
@@ -574,6 +600,148 @@ describe('transcriptTools - extended handlers', () => {
             expect(result.success).toBe(true);
             const { metadata } = readTestTranscript(path.join(transcriptsDir, '2025/2/test.pkl'));
             expect(metadata.title).toBe('New Title');
+        });
+    });
+
+    describe('handleEnhanceTranscript', () => {
+        it('should enhance transcript using explicit original text and update metadata', async () => {
+            const pklPath = await createTestTranscript(transcriptsDir, '2025/2/enhance-test.pkl', {
+                title: 'Enhance Test',
+                status: 'initial',
+                content: 'Old enhanced content',
+            });
+
+            const contextCreateSpy = vi.spyOn(ContextModule, 'create').mockResolvedValue({
+                getAllProjects: () => [],
+                getProject: (id: string) => ({ id, name: `Project ${id}` }),
+                getPerson: () => undefined,
+                getTerm: () => undefined,
+                getCompany: () => undefined,
+            } as any);
+            mockRoutingCreate.mockReturnValue({
+                route: () => ({
+                    projectId: 'project-123',
+                    destination: { path: transcriptsDir, structure: 'month', filename_options: ['date'] },
+                    confidence: 0.9,
+                    signals: [],
+                    reasoning: 'test routing',
+                    alternateMatches: [],
+                }),
+                buildOutputPath: () => '',
+                addProject: () => {},
+                updateDefaultRoute: () => {},
+                getConfig: () => ({
+                    default: { path: transcriptsDir, structure: 'month', filename_options: ['date'] },
+                    projects: [],
+                    conflict_resolution: 'primary',
+                }),
+            } as any);
+            mockSimpleReplacePhaseCreate.mockReturnValue({
+                replace: vi.fn(async (text: string) => ({
+                    text: text.replace('orig', 'original'),
+                    stats: {
+                        tier1Replacements: 1,
+                        tier2Replacements: 0,
+                        totalReplacements: 1,
+                        tier1MappingsConsidered: 1,
+                        tier2MappingsConsidered: 0,
+                        projectContext: 'project-123',
+                        classificationConfidence: 0.9,
+                        processingTimeMs: 5,
+                        appliedMappings: [
+                            {
+                                soundsLike: 'orig',
+                                correctText: 'original',
+                                tier: 1,
+                                occurrences: 1,
+                                entityId: 'term-1',
+                                entityType: 'term',
+                            },
+                        ],
+                    },
+                    replacementsMade: true,
+                })),
+            } as any);
+            mockReasoningCreate.mockReturnValue({} as any);
+            mockAgenticCreate.mockReturnValue({
+                process: vi.fn(async (text: string) => ({
+                    enhancedText: `${text}\n\nEnhanced transcript output with enough length to satisfy the enhancement-success threshold.`,
+                    toolsUsed: ['lookup_person', 'route_note'],
+                    iterations: 2,
+                    totalTokens: 123,
+                    state: {
+                        referencedEntities: {
+                            people: new Set<string>(),
+                            projects: new Set<string>(['project-123']),
+                            terms: new Set<string>(),
+                            companies: new Set<string>(),
+                        },
+                        routeDecision: {
+                            projectId: 'project-123',
+                            destination: { path: transcriptsDir, structure: 'month' },
+                            confidence: 0.95,
+                            signals: [],
+                            reasoning: 'agentic route',
+                        },
+                    },
+                })),
+            } as any);
+
+            const result = await handleEnhanceTranscript({
+                transcriptPath: '2025/2/enhance-test.pkl',
+                originalText: 'orig text from original tab',
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.changed).toBe(true);
+            expect(result.projectId).toBe('project-123');
+            expect(result.toolsUsed).toContain('route_note');
+
+            const transcript = PklTranscript.open(pklPath, { readOnly: true });
+            try {
+                expect(transcript.content).toContain('Enhanced transcript output');
+                expect(transcript.metadata.status).toBe('enhanced');
+                expect(transcript.getEnhancementLogCount()).toBeGreaterThan(0);
+            } finally {
+                transcript.close();
+            }
+
+            contextCreateSpy.mockRestore();
+            mockRoutingCreate.mockReset();
+            mockSimpleReplacePhaseCreate.mockReset();
+            mockReasoningCreate.mockReset();
+            mockAgenticCreate.mockReset();
+        });
+
+        it('should throw when no source text is available', async () => {
+            const pklPath = await createTestTranscript(transcriptsDir, '2025/2/enhance-empty.pkl', {
+                title: 'Enhance Empty',
+                content: '',
+            });
+
+            // Ensure there's no raw transcript fallback
+            const writable = PklTranscript.open(pklPath, { readOnly: false });
+            try {
+                writable.updateContent('');
+            } finally {
+                writable.close();
+            }
+
+            const contextCreateSpy = vi.spyOn(ContextModule, 'create').mockResolvedValue({
+                getAllProjects: () => [],
+                getProject: () => undefined,
+                getPerson: () => undefined,
+                getTerm: () => undefined,
+                getCompany: () => undefined,
+            } as any);
+
+            await expect(
+                handleEnhanceTranscript({
+                    transcriptPath: '2025/2/enhance-empty.pkl',
+                })
+            ).rejects.toThrow('No source text available to enhance');
+
+            contextCreateSpy.mockRestore();
         });
     });
 

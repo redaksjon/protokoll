@@ -5,9 +5,10 @@
  
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { resolve, dirname } from 'node:path';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import * as Context from '@/context';
-import { Reasoning, Transcript } from '@redaksjon/protokoll-engine';
+import { Agentic, Phases, Reasoning, Routing, Transcript } from '@redaksjon/protokoll-engine';
 import { DEFAULT_MODEL } from '@/constants';
 
 import { fileExists, getConfiguredDirectory, getContextDirectories, sanitizePath, validatePathWithinDirectory, validatePathWithinOutputDirectory, validateNotRemoteMode, resolveTranscriptPath } from './shared.js';
@@ -18,6 +19,7 @@ import {
     PklTranscript, 
     readTranscript as readTranscriptFromStorage,
     listTranscripts as listTranscriptsFromStorage,
+    type TranscriptMetadata,
 } from '@redaksjon/protokoll-format';
 
 // ============================================================================
@@ -269,6 +271,42 @@ export const provideFeedbackTool: Tool = {
             },
         },
         required: ['transcriptPath', 'feedback'],
+    },
+};
+
+export const enhanceTranscriptTool: Tool = {
+    name: 'protokoll_enhance_transcript',
+    description:
+        'Enhance an existing transcript using the same post-transcription pipeline flow ' +
+        '(simple-replace + agentic tool-based enhancement) used after Whisper completes. ' +
+        'Reads from originalText when provided, otherwise uses raw transcript text if available, ' +
+        'falling back to current transcript content. Writes enhanced content and updates metadata/status.',
+    inputSchema: {
+        type: 'object',
+        properties: {
+            transcriptPath: {
+                type: 'string',
+                description:
+                    'Transcript URI (preferred) or relative path from output directory. ' +
+                    'URI format: "protokoll://transcript/2026/2/12-1606-meeting" (no file extension). ' +
+                    'Path format: "2026/2/12-1606-meeting" or "2026/2/12-1606-meeting.pkl"',
+            },
+            originalText: {
+                type: 'string',
+                description:
+                    'Optional explicit source text to enhance (usually the Original tab text). ' +
+                    'If omitted, tool uses raw transcript text when present, else current content.',
+            },
+            model: {
+                type: 'string',
+                description: `LLM model for enhancement (default: ${DEFAULT_MODEL})`,
+            },
+            contextDirectory: {
+                type: 'string',
+                description: 'Optional: Path to the .protokoll context directory',
+            },
+        },
+        required: ['transcriptPath'],
     },
 };
 
@@ -1125,6 +1163,253 @@ export async function handleProvideFeedback(args: {
             moved: false,
         };
     } finally {
+        transcript.close();
+    }
+}
+
+export async function handleEnhanceTranscript(args: {
+    transcriptPath: string;
+    originalText?: string;
+    model?: string;
+    contextDirectory?: string;
+}) {
+    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
+    const pklPath = ensurePklExtension(absolutePath);
+    const transcript = PklTranscript.open(pklPath, { readOnly: false });
+
+    let tempDir: string | null = null;
+
+    try {
+        const explicitOriginal = (args.originalText || '').trim();
+        const rawOriginal = (transcript.rawTranscript?.text || '').trim();
+        const currentContent = (transcript.content || '').trim();
+        const sourceText = explicitOriginal || rawOriginal || currentContent;
+
+        if (!sourceText) {
+            throw new Error('No source text available to enhance. Save or provide Original content first.');
+        }
+
+        const model = args.model || DEFAULT_MODEL;
+        const startedAt = Date.now();
+        let toolCallCount = 0;
+
+        // Build context and routing similar to the standard pipeline.
+        const contextDirectories = await getContextDirectories();
+        const context = await Context.create({
+            startingDir: args.contextDirectory || dirname(pklPath),
+            contextDirectories,
+        });
+        const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
+        const defaultStructure = 'month' as const;
+        const defaultFilenameOptions = ['date', 'time', 'subject'] as const;
+        const routingProjects: Routing.ProjectRoute[] = context.getAllProjects()
+            .filter(project => project.active !== false)
+            .map(project => ({
+                projectId: project.id,
+                destination: {
+                    path: project.routing?.destination || outputDirectory,
+                    structure: project.routing?.structure || defaultStructure,
+                    filename_options: project.routing?.filename_options || [...defaultFilenameOptions],
+                    createDirectories: true,
+                },
+                classification: project.classification,
+                active: project.active,
+                auto_tags: project.routing?.auto_tags,
+            }));
+        const routing = Routing.create({
+            default: {
+                path: outputDirectory,
+                structure: defaultStructure,
+                filename_options: [...defaultFilenameOptions],
+                createDirectories: true,
+            },
+            projects: routingProjects,
+            conflict_resolution: 'primary',
+        }, context);
+
+        const fallbackDate = transcript.metadata.date instanceof Date
+            ? transcript.metadata.date
+            : new Date();
+        const fallbackHash = transcript.metadata.audioHash || transcript.metadata.id || '';
+        const routingContext: Routing.RoutingContext = {
+            transcriptText: sourceText,
+            audioDate: fallbackDate,
+            sourceFile: pklPath,
+            hash: fallbackHash,
+        };
+        const routeResult = routing.route(routingContext);
+        const projectForReplace = routeResult.projectId || transcript.metadata.projectId || transcript.metadata.project;
+
+        transcript.enhancementLog.logStep(new Date(), 'enhance', 'enhancement_start', {
+            model,
+            transcriptPath: args.transcriptPath,
+            hasExplicitOriginal: explicitOriginal.length > 0,
+            source: explicitOriginal ? 'explicit_original_text' : (rawOriginal ? 'raw_transcript' : 'enhanced_content_fallback'),
+            routedProject: routeResult.projectId || null,
+            routedConfidence: routeResult.confidence,
+        });
+
+        // Run simple-replace with the same engine phase used by audio processing.
+        tempDir = await mkdtemp(resolve(tmpdir(), 'protokoll-enhance-'));
+        const simpleReplace = Phases.createSimpleReplacePhase({ debug: false }, context);
+        const simpleReplaceResult = await simpleReplace.replace(
+            sourceText,
+            {
+                project: projectForReplace || undefined,
+                confidence: routeResult.confidence,
+            },
+            tempDir,
+            transcript.metadata.id || 'manual-enhancement'
+        );
+
+        if (simpleReplaceResult.stats.totalReplacements > 0) {
+            transcript.enhancementLog.logStep(new Date(), 'simple-replace', 'phase_complete', {
+                totalReplacements: simpleReplaceResult.stats.totalReplacements,
+                tier1Replacements: simpleReplaceResult.stats.tier1Replacements,
+                tier2Replacements: simpleReplaceResult.stats.tier2Replacements,
+                projectContext: simpleReplaceResult.stats.projectContext,
+                processingTimeMs: simpleReplaceResult.stats.processingTimeMs,
+            });
+            for (const mapping of simpleReplaceResult.stats.appliedMappings) {
+                transcript.enhancementLog.logStep(new Date(), 'simple-replace', 'correction_applied', {
+                    original: mapping.soundsLike,
+                    replacement: mapping.correctText,
+                    tier: mapping.tier,
+                    occurrences: mapping.occurrences,
+                    entityId: mapping.entityId,
+                    entityType: mapping.entityType,
+                });
+            }
+        }
+
+        const preIdentifiedEntities: Agentic.ToolContext['preIdentifiedEntities'] = {
+            people: new Set<string>(),
+            projects: new Set<string>(),
+            terms: new Set<string>(),
+            companies: new Set<string>(),
+        };
+        for (const mapping of simpleReplaceResult.stats.appliedMappings) {
+            if (!mapping.entityId || !mapping.entityType) {
+                continue;
+            }
+            if (mapping.entityType === 'person') {
+                preIdentifiedEntities.people.add(mapping.entityId);
+            } else if (mapping.entityType === 'project') {
+                preIdentifiedEntities.projects.add(mapping.entityId);
+            } else if (mapping.entityType === 'term') {
+                preIdentifiedEntities.terms.add(mapping.entityId);
+            }
+        }
+
+        // Run agentic enhancement exactly like pipeline enhancement stage.
+        const reasoning = Reasoning.create({ model, reasoningLevel: 'medium' });
+        const executor = Agentic.create(reasoning, {
+            transcriptText: simpleReplaceResult.text,
+            audioDate: fallbackDate,
+            sourceFile: pklPath,
+            contextInstance: context,
+            routingInstance: routing,
+            interactiveMode: false,
+            preIdentifiedEntities,
+            onToolCallStart: (tool, input) => {
+                toolCallCount++;
+                transcript.enhancementLog.logStep(new Date(), 'enhance', 'tool_start', {
+                    callIndex: toolCallCount,
+                    tool,
+                    input,
+                });
+            },
+            onToolCallComplete: (entry) => {
+                transcript.enhancementLog.logStep(entry.timestamp, 'enhance', 'tool_complete', {
+                    tool: entry.tool,
+                    input: entry.input,
+                    output: entry.output,
+                    durationMs: entry.durationMs,
+                    success: entry.success,
+                });
+            },
+        });
+
+        const agenticResult = await executor.process(simpleReplaceResult.text);
+        const enhancedText = (agenticResult.enhancedText || '').trim() || sourceText;
+        const enhancementSucceeded = enhancedText.length > 50 && enhancedText !== sourceText;
+        const finalStatus = enhancementSucceeded ? 'enhanced' : (transcript.metadata.status || 'initial');
+
+        const referenced = agenticResult.state.referencedEntities;
+        const entities = {
+            people: [] as Metadata.EntityReference[],
+            projects: [] as Metadata.EntityReference[],
+            terms: [] as Metadata.EntityReference[],
+            companies: [] as Metadata.EntityReference[],
+        };
+        for (const personId of referenced.people) {
+            const person = context.getPerson(personId);
+            if (person) {
+                entities.people.push({ id: person.id, name: person.name, type: 'person' });
+            }
+        }
+        for (const projectId of referenced.projects) {
+            const project = context.getProject(projectId);
+            if (project) {
+                entities.projects.push({ id: project.id, name: project.name, type: 'project' });
+            }
+        }
+        for (const termId of referenced.terms) {
+            const term = context.getTerm(termId);
+            if (term) {
+                entities.terms.push({ id: term.id, name: term.name, type: 'term' });
+            }
+        }
+        for (const companyId of referenced.companies) {
+            const company = context.getCompany(companyId);
+            if (company) {
+                entities.companies.push({ id: company.id, name: company.name, type: 'company' });
+            }
+        }
+        const hasEntities = entities.people.length > 0
+            || entities.projects.length > 0
+            || entities.terms.length > 0
+            || entities.companies.length > 0;
+
+        const decidedProjectId = agenticResult.state.routeDecision?.projectId || routeResult.projectId || undefined;
+        const decidedProject = decidedProjectId ? context.getProject(decidedProjectId) : undefined;
+        const decidedConfidence = agenticResult.state.routeDecision?.confidence ?? routeResult.confidence;
+
+        transcript.updateContent(enhancedText);
+        transcript.updateMetadata({
+            status: finalStatus as TranscriptMetadata['status'],
+            projectId: decidedProjectId || transcript.metadata.projectId,
+            project: decidedProject?.name || transcript.metadata.project,
+            confidence: typeof decidedConfidence === 'number' ? decidedConfidence : transcript.metadata.confidence,
+            entities: hasEntities ? entities : transcript.metadata.entities,
+        });
+
+        transcript.enhancementLog.logStep(new Date(), 'enhance', 'enhancement_complete', {
+            status: finalStatus,
+            toolsUsed: agenticResult.toolsUsed,
+            totalToolCalls: toolCallCount,
+            iterations: agenticResult.iterations,
+            processingTimeMs: Date.now() - startedAt,
+        });
+
+        return {
+            success: true,
+            transcriptPath: args.transcriptPath,
+            status: finalStatus,
+            projectId: decidedProjectId || null,
+            projectName: decidedProject?.name || null,
+            toolsUsed: agenticResult.toolsUsed,
+            totalToolCalls: toolCallCount,
+            iterations: agenticResult.iterations,
+            processingTimeMs: Date.now() - startedAt,
+            sourceLength: sourceText.length,
+            enhancedLength: enhancedText.length,
+            changed: enhancedText !== sourceText,
+        };
+    } finally {
+        if (tempDir) {
+            await rm(tempDir, { recursive: true, force: true });
+        }
         transcript.close();
     }
 }

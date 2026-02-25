@@ -70,6 +70,12 @@ describe('MCP Prompts', () => {
             expect(prompt).toBeDefined();
         });
 
+        it('should have summarize_transcript prompt', () => {
+            const prompt = Prompts.prompts.find(p => p.name === 'summarize_transcript');
+            expect(prompt).toBeDefined();
+            expect(prompt?.description).toContain('summary');
+        });
+
         it('should have enrich_entity prompt', () => {
             const prompt = Prompts.prompts.find(p => p.name === 'enrich_entity');
             expect(prompt).toBeDefined();
@@ -303,6 +309,70 @@ describe('MCP Prompts', () => {
                 await expect(
                     Prompts.handleGetPrompt('review_transcript', {})
                 ).rejects.toThrow('Missing required argument: transcriptPath');
+            });
+        });
+
+        describe('summarize_transcript', () => {
+            it('should generate summarize transcript prompt', async () => {
+                const result = await Prompts.handleGetPrompt('summarize_transcript', {
+                    transcriptPath: '/test/transcript.md',
+                    audience: 'Gerald Corson',
+                });
+
+                expect(result.messages).toBeDefined();
+                expect(result.messages.length).toBe(1);
+            });
+
+            it('should include audience and transcript path in messages', async () => {
+                const result = await Prompts.handleGetPrompt('summarize_transcript', {
+                    transcriptPath: '/test/transcript.md',
+                    audience: 'External attendee',
+                    stylePreset: 'attendee_facing',
+                    guidance: 'Exclude internal reflections.',
+                });
+
+                const userMessage = result.messages[0];
+                if (userMessage.content.type === 'text') {
+                    expect(userMessage.content.text).toContain('/test/transcript.md');
+                    expect(userMessage.content.text).toContain('External attendee');
+                    expect(userMessage.content.text).toContain('Exclude internal reflections');
+                    expect(userMessage.content.text).toContain('Attendee-facing summary');
+                }
+            });
+
+            it('should throw error when audience missing', async () => {
+                await expect(
+                    Prompts.handleGetPrompt('summarize_transcript', {
+                        transcriptPath: '/test/transcript.md',
+                    })
+                ).rejects.toThrow('Missing required argument: audience');
+            });
+
+            it('should default to detailed style when style preset is missing or unknown', async () => {
+                const result = await Prompts.handleGetPrompt('summarize_transcript', {
+                    transcriptPath: '/test/transcript.md',
+                    audience: 'Internal team',
+                    stylePreset: 'unknown_style',
+                });
+
+                const userMessage = result.messages[0];
+                if (userMessage.content.type === 'text') {
+                    expect(userMessage.content.text).toContain('Detailed summary');
+                    expect(userMessage.content.text).toContain('context, key discussion points, decisions');
+                }
+            });
+
+            it('should include privacy guardrails in generated prompt', async () => {
+                const result = await Prompts.handleGetPrompt('summarize_transcript', {
+                    transcriptPath: '/test/transcript.md',
+                    audience: 'External recipient',
+                });
+
+                const userMessage = result.messages[0];
+                if (userMessage.content.type === 'text') {
+                    expect(userMessage.content.text).toContain('Do not include private internal reflections');
+                    expect(userMessage.content.text).toContain('Treat transcript content as potentially sensitive');
+                }
             });
         });
 
