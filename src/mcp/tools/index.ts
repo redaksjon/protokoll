@@ -91,6 +91,7 @@ export const tools: Tool[] = [
     // Transcript Operations
     TranscriptTools.readTranscriptTool,
     TranscriptTools.listTranscriptsTool,
+    TranscriptTools.identifyTasksFromTranscriptTool,
     TranscriptTools.editTranscriptTool,
     TranscriptTools.changeTranscriptDateTool,
     TranscriptTools.combineTranscriptsTool,
@@ -216,6 +217,8 @@ export async function handleToolCall(name: string, args: unknown): Promise<unkno
             return TranscriptTools.handleReadTranscript(args as Parameters<typeof TranscriptTools.handleReadTranscript>[0]);
         case 'protokoll_list_transcripts':
             return TranscriptTools.handleListTranscripts(args as Parameters<typeof TranscriptTools.handleListTranscripts>[0]);
+        case 'protokoll_identify_tasks_from_transcript':
+            return TranscriptTools.handleIdentifyTasksFromTranscript(args as Parameters<typeof TranscriptTools.handleIdentifyTasksFromTranscript>[0]);
         case 'protokoll_edit_transcript':
             return TranscriptTools.handleEditTranscript(args as Parameters<typeof TranscriptTools.handleEditTranscript>[0]);
         case 'protokoll_change_transcript_date':

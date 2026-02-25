@@ -70,6 +70,12 @@ describe('MCP Prompts', () => {
             expect(prompt).toBeDefined();
         });
 
+        it('should have identify_tasks_from_transcript prompt', () => {
+            const prompt = Prompts.prompts.find(p => p.name === 'identify_tasks_from_transcript');
+            expect(prompt).toBeDefined();
+            expect(prompt?.description).toContain('Identify task candidates');
+        });
+
         it('should have summarize_transcript prompt', () => {
             const prompt = Prompts.prompts.find(p => p.name === 'summarize_transcript');
             expect(prompt).toBeDefined();
@@ -308,6 +314,29 @@ describe('MCP Prompts', () => {
             it('should throw error when transcript path missing', async () => {
                 await expect(
                     Prompts.handleGetPrompt('review_transcript', {})
+                ).rejects.toThrow('Missing required argument: transcriptPath');
+            });
+        });
+
+        describe('identify_tasks_from_transcript', () => {
+            it('should generate identify tasks prompt', async () => {
+                const result = await Prompts.handleGetPrompt('identify_tasks_from_transcript', {
+                    transcriptPath: '/test/transcript.md',
+                });
+
+                expect(result.messages).toBeDefined();
+                expect(result.messages.length).toBe(1);
+                const userMessage = result.messages[0];
+                if (userMessage.content.type === 'text') {
+                    expect(userMessage.content.text).toContain('/test/transcript.md');
+                    expect(userMessage.content.text).toContain('protokoll_identify_tasks_from_transcript');
+                    expect(userMessage.content.text).toContain('default all candidates to not selected');
+                }
+            });
+
+            it('should throw error when transcript path missing', async () => {
+                await expect(
+                    Prompts.handleGetPrompt('identify_tasks_from_transcript', {})
                 ).rejects.toThrow('Missing required argument: transcriptPath');
             });
         });

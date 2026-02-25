@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
     handleReadTranscript,
+    handleIdentifyTasksFromTranscript,
     handleUpdateTranscriptEntityReferences,
     handleProvideFeedback,
     handleCreateNote,
@@ -322,6 +323,94 @@ describe('transcriptTools - complete (edge cases and uncovered paths)', () => {
             expect(result.metadata.tags).toEqual([]);
             expect(result.metadata.status).toBeDefined();
             expect(result.contentLength).toBeGreaterThan(0);
+        });
+    });
+
+    describe('handleIdentifyTasksFromTranscript', () => {
+        it('identifies explicit and inferred task candidates with confidence buckets', async () => {
+            await createTestTranscript(transcriptsDir, '2025/2/tasks.pkl', {
+                title: 'Task Note',
+                content: [
+                    'I need to send the proposal tomorrow.',
+                    'We should review the onboarding draft next week.',
+                    'This is just context with no action.',
+                ].join(' '),
+            });
+
+            const result = await handleIdentifyTasksFromTranscript({
+                transcriptPath: '2025/2/tasks.pkl',
+            });
+
+            expect(result.totalCandidates).toBeGreaterThan(0);
+            expect(result.candidates[0]).toMatchObject({
+                id: expect.any(String),
+                taskText: expect.any(String),
+                confidence: expect.any(Number),
+                confidenceBucket: expect.stringMatching(/^(high|medium|low)$/),
+                rationale: expect.any(String),
+                sourceExcerpt: expect.any(String),
+            });
+        });
+
+        it('respects maxCandidates limit', async () => {
+            await createTestTranscript(transcriptsDir, '2025/2/limited.pkl', {
+                title: 'Limit Note',
+                content: [
+                    'I need to call Sarah.',
+                    'I should draft the update.',
+                    'We should schedule a review.',
+                ].join(' '),
+            });
+
+            const result = await handleIdentifyTasksFromTranscript({
+                transcriptPath: '2025/2/limited.pkl',
+                maxCandidates: 1,
+            });
+
+            expect(result.totalCandidates).toBe(1);
+        });
+
+        it('returns empty candidates for empty transcript content', async () => {
+            await createTestTranscript(transcriptsDir, '2025/2/empty.pkl', {
+                title: 'Empty',
+                content: '',
+            });
+
+            const result = await handleIdentifyTasksFromTranscript({
+                transcriptPath: '2025/2/empty.pkl',
+            });
+
+            expect(result.totalCandidates).toBe(0);
+            expect(result.candidates).toEqual([]);
+        });
+
+        it('disables tag suggestions when includeTagSuggestions is false', async () => {
+            await createTestTranscript(transcriptsDir, '2025/2/no-tags.pkl', {
+                title: 'No Tag Suggestions',
+                content: 'I should send the update #followup tomorrow.',
+            });
+
+            const result = await handleIdentifyTasksFromTranscript({
+                transcriptPath: '2025/2/no-tags.pkl',
+                includeTagSuggestions: false,
+            });
+
+            expect(result.totalCandidates).toBeGreaterThan(0);
+            expect(result.candidates[0].suggestedTags).toEqual([]);
+        });
+
+        it('returns no-likely-candidates message for non-action text', async () => {
+            await createTestTranscript(transcriptsDir, '2025/2/no-actions.pkl', {
+                title: 'No Actions',
+                content: 'The weather is sunny. The room is quiet. Background context only.',
+            });
+
+            const result = await handleIdentifyTasksFromTranscript({
+                transcriptPath: '2025/2/no-actions.pkl',
+            });
+
+            expect(result.totalCandidates).toBe(0);
+            expect(result.message).toBe('No likely task candidates found in transcript content.');
         });
     });
 });

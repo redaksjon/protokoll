@@ -339,6 +339,14 @@ describe('handleToolCall routing', () => {
             expect(TranscriptTools.handleListTranscripts).toHaveBeenCalledWith(args);
         });
 
+        it('routes protokoll_identify_tasks_from_transcript to handleIdentifyTasksFromTranscript', async () => {
+            vi.spyOn(TranscriptTools, 'handleIdentifyTasksFromTranscript').mockResolvedValue({ candidates: [] });
+            const args = { transcriptPath: '2025/2/test.pkl', contextDirectory: '/test' };
+            const result = await handleToolCall('protokoll_identify_tasks_from_transcript', args);
+            expect(result).toEqual({ candidates: [] });
+            expect(TranscriptTools.handleIdentifyTasksFromTranscript).toHaveBeenCalledWith(args);
+        });
+
         it('routes protokoll_edit_transcript to handleEditTranscript', async () => {
             vi.spyOn(TranscriptTools, 'handleEditTranscript').mockResolvedValue({ editTranscript: 'mocked' });
             const args = { uri: 'protokoll://transcript/1', edits: [], contextDirectory: '/test' };

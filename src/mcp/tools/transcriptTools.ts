@@ -26,6 +26,117 @@ import {
 // Helper Functions
 // ============================================================================
 
+type CandidateConfidence = 'high' | 'medium' | 'low';
+
+interface TaskCandidate {
+    id: string;
+    taskText: string;
+    confidence: number;
+    confidenceBucket: CandidateConfidence;
+    rationale: string;
+    sourceExcerpt: string;
+    suggestedDueDate: string | null;
+    suggestedProject: { id: string | null; name: string | null };
+    suggestedEntities: Array<{ id: string; name: string; type: 'person' | 'project' | 'term' | 'company' }>;
+    suggestedTags: string[];
+}
+
+function splitIntoCandidateSentences(content: string): string[] {
+    return content
+        .split(/\n+|(?<=[.!?])\s+/g)
+        .map((sentence) => sentence.trim())
+        .filter((sentence) => sentence.length >= 8);
+}
+
+function normalizeTaskText(sentence: string): string {
+    const normalized = sentence
+        .replace(/^(?:i need to|we need to|i should|we should|let'?s|remember to|todo:|action item:)\s+/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+function inferDueDate(sentence: string): string | null {
+    const lower = sentence.toLowerCase();
+    if (lower.includes('today')) {
+        return 'today';
+    }
+    if (lower.includes('tomorrow')) {
+        return 'tomorrow';
+    }
+    if (lower.includes('next week')) {
+        return 'next week';
+    }
+    if (lower.includes('this week')) {
+        return 'this week';
+    }
+    if (lower.includes('by friday')) {
+        return 'by friday';
+    }
+    return null;
+}
+
+function extractHashtagTags(sentence: string): string[] {
+    const matches = sentence.match(/#[a-z0-9_-]+/gi) || [];
+    return Array.from(new Set(matches.map((tag) => tag.slice(1).toLowerCase())));
+}
+
+function toConfidenceBucket(score: number): CandidateConfidence {
+    if (score >= 0.75) {
+        return 'high';
+    }
+    if (score >= 0.5) {
+        return 'medium';
+    }
+    return 'low';
+}
+
+function scoreTaskCandidate(sentence: string): { score: number; rationale: string } | null {
+    const explicitActionPattern = /\b(i need to|we need to|i should|we should|let'?s|remember to|todo|action item|i will|i'll|must)\b/i;
+    const inferredIntentPattern = /\b(follow up|check|review|investigate|confirm|decide|plan|schedule|reach out|send|draft|prepare|update|fix|create|write|call|email|look into|figure out)\b/i;
+
+    let score = 0;
+    const rationaleParts: string[] = [];
+
+    if (explicitActionPattern.test(sentence)) {
+        score += 0.55;
+        rationaleParts.push('explicit action language');
+    }
+
+    if (inferredIntentPattern.test(sentence)) {
+        score += 0.35;
+        rationaleParts.push('inferred follow-up intent');
+    }
+
+    if (inferDueDate(sentence)) {
+        score += 0.1;
+        rationaleParts.push('time cue detected');
+    }
+
+    if (score < 0.3) {
+        return null;
+    }
+
+    return {
+        score: Math.min(1, Number(score.toFixed(2))),
+        rationale: rationaleParts.join('; '),
+    };
+}
+
+function getSuggestedEntities(
+    entities: NonNullable<TranscriptMetadata['entities']> | undefined
+): Array<{ id: string; name: string; type: 'person' | 'project' | 'term' | 'company' }> {
+    if (!entities) {
+        return [];
+    }
+
+    const people = (entities.people || []).map((entity) => ({ ...entity, type: 'person' as const }));
+    const projects = (entities.projects || []).map((entity) => ({ ...entity, type: 'project' as const }));
+    const terms = (entities.terms || []).map((entity) => ({ ...entity, type: 'term' as const }));
+    const companies = (entities.companies || []).map((entity) => ({ ...entity, type: 'company' as const }));
+    return [...people, ...projects, ...terms, ...companies];
+}
+
 // ============================================================================
 // Tool Definitions
 // ============================================================================
@@ -115,6 +226,41 @@ export const listTranscriptsTool: Tool = {
             },
         },
         required: [],
+    },
+};
+
+export const identifyTasksFromTranscriptTool: Tool = {
+    name: 'protokoll_identify_tasks_from_transcript',
+    description:
+        'Identify task candidates from transcript or note content without creating tasks. ' +
+        'Returns structured candidates with confidence buckets, rationale, and metadata suggestions ' +
+        'so users can review and choose which tasks to create.',
+    inputSchema: {
+        type: 'object',
+        properties: {
+            transcriptPath: {
+                type: 'string',
+                description:
+                    'Transcript URI (preferred) or relative path from output directory. ' +
+                    'URI format: "protokoll://transcript/2026/2/12-1606-meeting" (no file extension). ' +
+                    'Path format: "2026/2/12-1606-meeting" or "2026/2/12-1606-meeting.pkl"',
+            },
+            maxCandidates: {
+                type: 'number',
+                description: 'Maximum number of candidates to return (default: 25, max: 50)',
+                default: 25,
+            },
+            includeTagSuggestions: {
+                type: 'boolean',
+                description: 'Whether to include suggested tags based on transcript metadata and hashtags (default: true)',
+                default: true,
+            },
+            contextDirectory: {
+                type: 'string',
+                description: 'Optional: Path to the .protokoll context directory',
+            },
+        },
+        required: ['transcriptPath'],
     },
 };
 
@@ -663,6 +809,75 @@ export async function handleListTranscripts(args: {
             entityId: args.entityId,
             entityType: args.entityType,
         },
+    };
+}
+
+export async function handleIdentifyTasksFromTranscript(args: {
+    transcriptPath: string;
+    maxCandidates?: number;
+    includeTagSuggestions?: boolean;
+    contextDirectory?: string;
+}) {
+    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
+    const transcriptData = await readTranscriptFromStorage(absolutePath);
+
+    const content = transcriptData.content?.trim() || '';
+    if (!content) {
+        return {
+            transcriptPath: args.transcriptPath,
+            candidates: [] as TaskCandidate[],
+            totalCandidates: 0,
+            message: 'Transcript content is empty; no task candidates identified.',
+        };
+    }
+
+    const limit = Math.max(1, Math.min(50, args.maxCandidates ?? 25));
+    const includeTagSuggestions = args.includeTagSuggestions !== false;
+    const existingTags = transcriptData.metadata.tags || [];
+    const suggestedEntities = getSuggestedEntities(transcriptData.metadata.entities);
+    const suggestedProject = {
+        id: transcriptData.metadata.projectId || null,
+        name: transcriptData.metadata.project || null,
+    };
+
+    const candidates = splitIntoCandidateSentences(content)
+        .map((sentence, index) => {
+            const scored = scoreTaskCandidate(sentence);
+            if (!scored) {
+                return null;
+            }
+
+            const sentenceTags = includeTagSuggestions ? extractHashtagTags(sentence) : [];
+            const mergedTags = includeTagSuggestions
+                ? Array.from(new Set([...existingTags.map((tag) => tag.toLowerCase()), ...sentenceTags]))
+                : [];
+
+            const candidate: TaskCandidate = {
+                id: `candidate-${index + 1}`,
+                taskText: normalizeTaskText(sentence),
+                confidence: scored.score,
+                confidenceBucket: toConfidenceBucket(scored.score),
+                rationale: scored.rationale,
+                sourceExcerpt: sentence,
+                suggestedDueDate: inferDueDate(sentence),
+                suggestedProject,
+                suggestedEntities,
+                suggestedTags: mergedTags,
+            };
+
+            return candidate;
+        })
+        .filter((candidate): candidate is TaskCandidate => candidate !== null)
+        .sort((a, b) => b.confidence - a.confidence)
+        .slice(0, limit);
+
+    return {
+        transcriptPath: args.transcriptPath,
+        candidates,
+        totalCandidates: candidates.length,
+        message: candidates.length > 0
+            ? `Identified ${candidates.length} task candidate(s).`
+            : 'No likely task candidates found in transcript content.',
     };
 }
 

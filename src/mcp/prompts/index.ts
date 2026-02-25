@@ -191,6 +191,29 @@ export function getPrompts(): McpPrompt[] {
             ],
         },
         {
+            name: 'identify_tasks_from_transcript',
+            description: 'Identify task candidates from a transcript with a review-first flow. ' +
+                'Instructs the assistant to identify first, present candidates with none preselected, ' +
+                'and only create tasks after explicit user approval.',
+            arguments: [
+                {
+                    name: 'transcriptPath',
+                    description: 'Path or URI to the transcript to analyze',
+                    required: true,
+                },
+                {
+                    name: 'maxCandidates',
+                    description: 'Optional maximum number of task candidates to identify (default: 25)',
+                    required: false,
+                },
+                {
+                    name: 'includeTagSuggestions',
+                    description: 'Optional flag to include suggested tags (default: true)',
+                    required: false,
+                },
+            ],
+        },
+        {
             name: 'summarize_transcript',
             description: 'Create an audience-aware transcript summary with privacy guardrails and style presets.',
             arguments: [
@@ -342,6 +365,8 @@ export async function getPrompt(
             return generateSetupProjectPrompt(args);
         case 'review_transcript':
             return generateReviewTranscriptPrompt(args);
+        case 'identify_tasks_from_transcript':
+            return generateIdentifyTasksFromTranscriptPrompt(args);
         case 'summarize_transcript':
             return generateSummarizeTranscriptPrompt(args);
         case 'enrich_entity':
@@ -482,6 +507,35 @@ async function generateReviewTranscriptPrompt(
     const content = fillTemplate(template, {
         transcriptPath,
         focusArea: focusText
+    });
+
+    return [
+        {
+            role: 'user',
+            content: {
+                type: 'text',
+                text: content,
+            },
+        },
+    ];
+}
+
+async function generateIdentifyTasksFromTranscriptPrompt(
+    args: Record<string, string>
+): Promise<McpPromptMessage[]> {
+    const transcriptPath = args.transcriptPath;
+    if (!transcriptPath) {
+        throw new Error('transcriptPath is required');
+    }
+
+    const maxCandidates = args.maxCandidates?.trim() || '25';
+    const includeTagSuggestions = args.includeTagSuggestions?.trim() || 'true';
+
+    const template = loadTemplate('identify_tasks_from_transcript');
+    const content = fillTemplate(template, {
+        transcriptPath,
+        maxCandidates,
+        includeTagSuggestions,
     });
 
     return [
