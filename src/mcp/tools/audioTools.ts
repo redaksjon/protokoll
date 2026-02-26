@@ -4,7 +4,8 @@
 // eslint-disable-next-line import/extensions
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { resolve, join, basename } from 'node:path';
-import { readdir } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { glob } from 'glob';
 import { Pipeline } from '@redaksjon/protokoll-engine';
 import {
@@ -36,26 +37,27 @@ async function findAudioFile(
         return filenameOrPath;
     }
 
+    const ServerConfig = await import('../serverConfig');
+    const inputStorage = ServerConfig.getInputStorage();
+
     // Get the input directory from workspace config
     const inputDirectory = await getConfiguredDirectory('inputDirectory');
     
     // Search for the audio file
-    const entries = await readdir(inputDirectory, { withFileTypes: true });
+    const entries = await inputStorage.listFiles('.');
     const matches: string[] = [];
     
     for (const entry of entries) {
-        if (entry.isFile()) {
-            const filename = entry.name;
-            const ext = filename.split('.').pop()?.toLowerCase();
-            
-            // Check if it's an audio file
-            if (ext && DEFAULT_AUDIO_EXTENSIONS.includes(ext)) {
-                // Check if filename matches
-                if (filename === filenameOrPath || 
-                    filename.includes(filenameOrPath) ||
-                    basename(filename, `.${ext}`) === filenameOrPath) {
-                    matches.push(join(inputDirectory, filename));
-                }
+        const filename = basename(entry);
+        const ext = filename.split('.').pop()?.toLowerCase();
+        
+        // Check if it's an audio file
+        if (ext && DEFAULT_AUDIO_EXTENSIONS.includes(ext)) {
+            // Check if filename matches
+            if (filename === filenameOrPath || 
+                filename.includes(filenameOrPath) ||
+                basename(filename, `.${ext}`) === filenameOrPath) {
+                matches.push(entry);
             }
         }
     }
@@ -68,11 +70,23 @@ async function findAudioFile(
     }
 
     if (matches.length === 1) {
-        return matches[0];
+        const matchedPath = matches[0];
+        if (inputStorage.name === 'filesystem') {
+            return join(inputDirectory, matchedPath);
+        }
+        const contents = await inputStorage.readFile(matchedPath);
+        const tempRoot = join(tmpdir(), 'protokoll-gcs-input');
+        await mkdir(tempRoot, { recursive: true });
+        const tempPath = join(
+            tempRoot,
+            `${Date.now()}-${Math.random().toString(36).slice(2)}-${basename(matchedPath)}`
+        );
+        await writeFile(tempPath, contents);
+        return tempPath;
     }
 
     // Multiple matches
-    const matchNames = matches.map(m => basename(m)).join(', ');
+    const matchNames = matches.map((m) => basename(m)).join(', ');
     throw new Error(
         `Multiple audio files match "${filenameOrPath}": ${matchNames}. ` +
         `Please be more specific.`

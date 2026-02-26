@@ -30,6 +30,7 @@ import * as Context from '@/context';
 import type { ProtokollContextInstance } from '@/context';
 import type { Person, Project, Term, Company, IgnoredTerm, Entity } from '@/context/types';
 import { parseUri, isProtokolUri } from '../uri';
+import { parseGcsUri } from '../storage/gcsUri';
 
 // ============================================================================
 // Shared Utilities
@@ -140,6 +141,19 @@ export async function createToolContext(contextDirectory?: string): Promise<Prot
     const contextDirs = rawDirs && rawDirs.length > 0
         ? rawDirs.map((d: string) => (isAbsolute(d) ? d : resolve(effectiveDir, d)))
         : undefined;
+
+    const storageConfig = ServerConfig.getStorageConfig();
+    if (storageConfig.backend === 'gcs' && storageConfig.gcs) {
+        const parsedContextUri = parseGcsUri(storageConfig.gcs.contextUri);
+        return Context.create({
+            startingDir: effectiveDir,
+            gcs: {
+                bucketName: parsedContextUri.bucket,
+                basePath: parsedContextUri.prefix,
+                credentialsFile: storageConfig.gcs.credentialsFile,
+            },
+        });
+    }
 
     return Context.create({
         startingDir: effectiveDir,

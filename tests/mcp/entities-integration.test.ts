@@ -96,6 +96,7 @@ routing:
       inputDirectory: path.join(tempDir, 'recordings'),
       outputDirectory: path.join(tempDir, 'notes'),
       processedDirectory: path.join(tempDir, 'processed'),
+      storageConfig: { backend: 'filesystem' },
       configFilePath: null,
       configFile: { contextDirectories: [contextDir] },
       initialized: true,

@@ -31,8 +31,14 @@ import type { SmartAssistanceConfig } from './types';
 // Re-export base types
 export type { BaseContextInstance as ContextInstance };
 
-// Use BaseCreateOptions directly (no protokoll-specific extensions needed)
-export type CreateOptions = BaseCreateOptions;
+// Extend base create options with optional GCS configuration.
+export interface CreateOptions extends BaseCreateOptions {
+    gcs?: {
+        bucketName: string;
+        basePath: string;
+        credentialsFile?: string;
+    };
+}
 
 /**
  * Get smart assistance configuration with defaults
@@ -72,7 +78,7 @@ export interface ProtokollContextInstance extends BaseContextInstance {
  * Create a new context instance with protokoll-specific extensions
  */
 export const create = async (options: CreateOptions = {}): Promise<ProtokollContextInstance> => {
-    const baseInstance = await createContext(options);
+    const baseInstance = await createContext(options as BaseCreateOptions);
     
     return {
         ...baseInstance,

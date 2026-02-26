@@ -28,9 +28,6 @@ import { StreamableHTTPTransport } from '@hono/mcp';
 import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
 import { bodyLimit } from 'hono/body-limit';
-// eslint-disable-next-line no-restricted-imports
-import { createReadStream } from 'node:fs';
-import * as fs from 'node:fs/promises';
 import { join, extname, basename, dirname } from 'node:path';
 // eslint-disable-next-line import/extensions
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -58,7 +55,6 @@ import { TranscriptionWorker } from './worker/transcription-worker';
 import { setWorkerInstance } from './tools/queueTools';
 import { Transcript as TranscriptOps } from '@redaksjon/protokoll-engine';
 import { PklTranscript } from '@redaksjon/protokoll-format';
-import { glob } from 'glob';
 
 const { createUploadTranscript, findTranscriptByUuid } = TranscriptOps;
 
@@ -402,18 +398,18 @@ app.post('/audio/upload',
             
             // Get output directory from server config
             const outputDir = ServerConfig.getOutputDirectory();
-            const uploadDir = join(outputDir, 'uploads');
+            const outputStorage = ServerConfig.getOutputStorage();
             
-            // Ensure upload directory exists
-            await fs.mkdir(uploadDir, { recursive: true });
+            // Ensure upload directory exists (no-op for GCS).
+            await outputStorage.mkdir('uploads');
             
             // Calculate file hash
             const buffer = await file.arrayBuffer();
             const hash = createHash('sha256').update(Buffer.from(buffer)).digest('hex');
             
             // Save uploaded file with hash-based name
-            const uploadedPath = join(uploadDir, `${hash}.${ext}`);
-            await fs.writeFile(uploadedPath, Buffer.from(buffer));
+            const uploadObjectPath = `uploads/${hash}.${ext}`;
+            await outputStorage.writeFile(uploadObjectPath, Buffer.from(buffer));
             
             // Extract optional title and project hints from form data
             const rawTitle = body['title'];
@@ -423,7 +419,7 @@ app.post('/audio/upload',
             
             // Create transcript PKL with uploaded status
             const { uuid } = await createUploadTranscript({
-                audioFile: basename(uploadedPath), // Store just the filename
+                audioFile: basename(uploadObjectPath), // Store just the filename
                 originalFilename: file.name,
                 audioHash: hash,
                 outputDirectory: outputDir,
@@ -466,7 +462,7 @@ app.get('/audio/:uuid', async (c) => {
         
         // Get output directory
         const outputDir = ServerConfig.getOutputDirectory();
-        const uploadDir = join(outputDir, 'uploads');
+        const outputStorage = ServerConfig.getOutputStorage();
         
         // Find transcript by UUID
         const filePath = await findTranscriptByUuid(uuid, [outputDir]);
@@ -484,23 +480,23 @@ app.get('/audio/:uuid', async (c) => {
         }
         
         // Find uploaded audio file by hash
-        const audioFiles = await glob(`${metadata.audioHash}.*`, { cwd: uploadDir, absolute: true });
+        const uploadedFiles = await outputStorage.listFiles('uploads', metadata.audioHash);
+        const audioFiles = uploadedFiles.filter((filePath) => basename(filePath).startsWith(`${metadata.audioHash}.`));
         if (audioFiles.length === 0) {
             return c.json({ error: 'Audio file not found in uploads directory' }, 404);
         }
         
         const audioFile = audioFiles[0];
         const ext = extname(audioFile);
-        const stat = await fs.stat(audioFile);
+        const audioBuffer = await outputStorage.readFile(audioFile);
         
         // Set appropriate headers
         c.header('Content-Type', getAudioMimeType(ext));
-        c.header('Content-Length', stat.size.toString());
+        c.header('Content-Length', audioBuffer.length.toString());
         c.header('Content-Disposition', `attachment; filename="${metadata.audioFile || `${uuid}${ext}`}"`);
         
-        // Stream file
-        const stream = createReadStream(audioFile);
-        return c.body(stream as any);
+        // Return full audio content.
+        return c.body(audioBuffer as any);
         
     } catch (error) {
         // eslint-disable-next-line no-console
@@ -1060,6 +1056,7 @@ async function main() {
                 ? contextDirs
                 : undefined,
             uploadDirectory,
+            outputStorage: ServerConfig.getOutputStorage(),
             scanInterval: 5000, // 5 second scan interval
             model: (cardigantimeConfig as any).model,
             transcriptionModel: (cardigantimeConfig as any).transcriptionModel,

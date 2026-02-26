@@ -14,7 +14,12 @@ import type { ContextInstance } from '@/context';
 import type { McpRoot } from './types';
 import { fileUriToPath } from './roots';
 import { resolve } from 'node:path';
+import { access } from 'node:fs/promises';
 import * as Cardigantime from '@utilarium/cardigantime';
+import { DEFAULT_STORAGE_CONFIG, type StorageConfig } from './storage/types';
+import { createGcsStorageProvider } from './storage/gcsProvider';
+import { FilesystemStorageProvider, type FileStorageProvider } from './storage/fileProviders';
+import { parseGcsUri } from './storage/gcsUri';
 
 const DEFAULT_CONFIG_FILE = 'protokoll-config.yaml';
 const cardigantime = Cardigantime.create({
@@ -65,6 +70,9 @@ interface ServerConfig {
     inputDirectory: string | null;
     outputDirectory: string | null;
     processedDirectory: string | null;
+    inputStorage: FileStorageProvider | null;
+    outputStorage: FileStorageProvider | null;
+    storageConfig: StorageConfig;
     configFilePath: string | null;
     configFile: Record<string, unknown> | null;
     initialized: boolean;
@@ -77,10 +85,117 @@ let serverConfig: ServerConfig = {
     inputDirectory: null,
     outputDirectory: null,
     processedDirectory: null,
+    inputStorage: null,
+    outputStorage: null,
+    storageConfig: DEFAULT_STORAGE_CONFIG,
     configFilePath: null,
     configFile: null,
     initialized: false,
 };
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
+}
+
+function parseStorageConfig(configFile: Record<string, unknown> | null): StorageConfig {
+    if (!configFile) {
+        return DEFAULT_STORAGE_CONFIG;
+    }
+
+    const rawStorage = configFile.storage;
+    if (!isObjectRecord(rawStorage)) {
+        return DEFAULT_STORAGE_CONFIG;
+    }
+
+    const backend = rawStorage.backend === 'gcs' ? 'gcs' : 'filesystem';
+    if (backend !== 'gcs') {
+        return DEFAULT_STORAGE_CONFIG;
+    }
+
+    const rawGcs = isObjectRecord(rawStorage.gcs) ? rawStorage.gcs : {};
+    const inputUri = typeof rawGcs.inputUri === 'string' ? rawGcs.inputUri : '';
+    const outputUri = typeof rawGcs.outputUri === 'string' ? rawGcs.outputUri : '';
+    const contextUri = typeof rawGcs.contextUri === 'string' ? rawGcs.contextUri : '';
+    const credentialsFile = typeof rawGcs.credentialsFile === 'string' ? rawGcs.credentialsFile : undefined;
+
+    return {
+        backend: 'gcs',
+        gcs: {
+            inputUri,
+            outputUri,
+            contextUri,
+            credentialsFile,
+        },
+    };
+}
+
+function resolveCredentialsFilePath(
+    credentialsFile: string | undefined,
+    configDir: string,
+): string | undefined {
+    if (!credentialsFile || credentialsFile.trim().length === 0) {
+        return undefined;
+    }
+    return resolve(configDir, credentialsFile);
+}
+
+async function validateGcsStorageConfig(storageConfig: StorageConfig, configDir: string): Promise<string | undefined> {
+    if (storageConfig.backend !== 'gcs') {
+        return undefined;
+    }
+
+    if (!storageConfig.gcs) {
+        throw new Error('storage.backend is set to gcs, but storage.gcs is missing.');
+    }
+
+    if (!storageConfig.gcs.inputUri || !storageConfig.gcs.outputUri || !storageConfig.gcs.contextUri) {
+        throw new Error('storage.gcs.inputUri, storage.gcs.outputUri, and storage.gcs.contextUri are required when storage.backend is gcs.');
+    }
+
+    parseGcsUri(storageConfig.gcs.inputUri);
+    parseGcsUri(storageConfig.gcs.outputUri);
+    parseGcsUri(storageConfig.gcs.contextUri);
+
+    const credentialsFile = resolveCredentialsFilePath(storageConfig.gcs.credentialsFile, configDir);
+    if (credentialsFile) {
+        try {
+            await access(credentialsFile);
+        } catch {
+            throw new Error(`GCS credentials file is not readable: ${credentialsFile}`);
+        }
+    }
+
+    return credentialsFile;
+}
+
+async function createStorageProviders(
+    storageConfig: StorageConfig,
+    inputDirectory: string,
+    outputDirectory: string,
+    configDir: string,
+): Promise<{ inputStorage: FileStorageProvider; outputStorage: FileStorageProvider }> {
+    if (storageConfig.backend === 'filesystem') {
+        return {
+            inputStorage: new FilesystemStorageProvider(inputDirectory),
+            outputStorage: new FilesystemStorageProvider(outputDirectory),
+        };
+    }
+
+    if (!storageConfig.gcs) {
+        throw new Error('storage.backend is set to gcs, but storage.gcs is missing.');
+    }
+
+    const credentialsFile = await validateGcsStorageConfig(storageConfig, configDir);
+    const inputStorage = createGcsStorageProvider(storageConfig.gcs.inputUri, credentialsFile);
+    const outputStorage = createGcsStorageProvider(storageConfig.gcs.outputUri, credentialsFile);
+    await inputStorage.verifyBucketAccess();
+    await outputStorage.verifyBucketAccess();
+
+    return {
+        inputStorage,
+        outputStorage,
+    };
+}
 
 // ============================================================================
 // Initialization
@@ -106,6 +221,9 @@ export async function initializeServerConfig(roots: McpRoot[], mode: ServerMode 
             inputDirectory: resolve(process.cwd(), './recordings'),
             outputDirectory: resolve(process.cwd(), './notes'),
             processedDirectory: resolve(process.cwd(), './processed'),
+            inputStorage: new FilesystemStorageProvider(resolve(process.cwd(), './recordings')),
+            outputStorage: new FilesystemStorageProvider(resolve(process.cwd(), './notes')),
+            storageConfig: DEFAULT_STORAGE_CONFIG,
             configFilePath: null,
             configFile: null,
             initialized: true,
@@ -129,27 +247,46 @@ export async function initializeServerConfig(roots: McpRoot[], mode: ServerMode 
 
         // contextDirectories are resolved by CardiganTime via resolvePathArray config
         const resolvedContextDirs = configFile.contextDirectories as string[] | undefined;
-
-        // Load context from workspace root, using explicit contextDirectories if provided
-        const context = await Context.create({
+        const contextCreateOptions: Context.CreateOptions = {
             startingDir: workspaceRoot,
             contextDirectories: resolvedContextDirs,
-        });
+        };
+
+        const storageConfig = parseStorageConfig(configFile as Record<string, unknown>);
+        const credentialsFile = await validateGcsStorageConfig(storageConfig, configDir);
+        if (storageConfig.backend === 'gcs' && storageConfig.gcs) {
+            const parsedContextUri = parseGcsUri(storageConfig.gcs.contextUri);
+            contextCreateOptions.gcs = {
+                bucketName: parsedContextUri.bucket,
+                basePath: parsedContextUri.prefix,
+                credentialsFile,
+            };
+            delete contextCreateOptions.contextDirectories;
+        }
+
+        // Load context from workspace root, using explicit contextDirectories if provided
+        const context = await Context.create(contextCreateOptions);
 
         const contextConfig = context.getConfig();
         const mergedConfig = {
             ...contextConfig,
             ...configFile,
         } as Record<string, unknown>;
+        const inputDirectory = (mergedConfig.inputDirectory as string) || resolve(configDir, './recordings');
+        const outputDirectory = (mergedConfig.outputDirectory as string) || resolve(configDir, './notes');
+        const { inputStorage, outputStorage } = await createStorageProviders(storageConfig, inputDirectory, outputDirectory, configDir);
         
         serverConfig = {
             mode,
             context,
             workspaceRoot,
             // CardiganTime already resolved these paths; just provide defaults if not set
-            inputDirectory: (mergedConfig.inputDirectory as string) || resolve(configDir, './recordings'),
-            outputDirectory: (mergedConfig.outputDirectory as string) || resolve(configDir, './notes'),
+            inputDirectory,
+            outputDirectory,
             processedDirectory: (mergedConfig.processedDirectory as string) || resolve(configDir, './processed'),
+            inputStorage,
+            outputStorage,
+            storageConfig,
             configFilePath,
             configFile: configFile ?? null,
             initialized: true,
@@ -168,15 +305,22 @@ export async function initializeServerConfig(roots: McpRoot[], mode: ServerMode 
             : workspaceRoot;
         
         const mergedConfig = (configFile ?? {}) as Record<string, unknown>;
+        const storageConfig = parseStorageConfig(configFile as Record<string, unknown>);
+        const inputDirectory = (mergedConfig.inputDirectory as string) || resolve(configDir, './recordings');
+        const outputDirectory = (mergedConfig.outputDirectory as string) || resolve(configDir, './notes');
+        const { inputStorage, outputStorage } = await createStorageProviders(storageConfig, inputDirectory, outputDirectory, configDir);
 
         serverConfig = {
             mode,
             context: null,
             workspaceRoot,
             // CardiganTime already resolved these paths; just provide defaults if not set
-            inputDirectory: (mergedConfig.inputDirectory as string) || resolve(configDir, './recordings'),
-            outputDirectory: (mergedConfig.outputDirectory as string) || resolve(configDir, './notes'),
+            inputDirectory,
+            outputDirectory,
             processedDirectory: (mergedConfig.processedDirectory as string) || resolve(configDir, './processed'),
+            inputStorage,
+            outputStorage,
+            storageConfig,
             configFilePath,
             configFile: configFile ?? null,
             initialized: true,
@@ -202,6 +346,9 @@ export function clearServerConfig(): void {
         inputDirectory: null,
         outputDirectory: null,
         processedDirectory: null,
+        inputStorage: null,
+        outputStorage: null,
+        storageConfig: DEFAULT_STORAGE_CONFIG,
         configFilePath: null,
         configFile: null,
         initialized: false,
@@ -223,6 +370,7 @@ export function getServerConfig(): {
     inputDirectory: string;
     outputDirectory: string;
     processedDirectory: string | null;
+    storageConfig: StorageConfig;
     configFilePath: string | null;
     configFile: Record<string, unknown> | null;
     initialized: boolean;
@@ -238,6 +386,7 @@ export function getServerConfig(): {
         inputDirectory: serverConfig.inputDirectory!,
         outputDirectory: serverConfig.outputDirectory!,
         processedDirectory: serverConfig.processedDirectory,
+        storageConfig: serverConfig.storageConfig,
         configFilePath: serverConfig.configFilePath,
         configFile: serverConfig.configFile,
         initialized: serverConfig.initialized,
@@ -289,6 +438,36 @@ export function getProcessedDirectory(): string | null {
         return null;
     }
     return serverConfig.processedDirectory;
+}
+
+/**
+ * Get the normalized storage config.
+ * Defaults to filesystem mode when storage config is not present.
+ */
+export function getStorageConfig(): StorageConfig {
+    return serverConfig.storageConfig;
+}
+
+/**
+ * Get the input storage provider.
+ * Defaults to filesystem storage rooted at ./recordings if uninitialized.
+ */
+export function getInputStorage(): FileStorageProvider {
+    if (!serverConfig.initialized || !serverConfig.inputStorage) {
+        return new FilesystemStorageProvider(resolve(process.cwd(), './recordings'));
+    }
+    return serverConfig.inputStorage;
+}
+
+/**
+ * Get the output storage provider.
+ * Defaults to filesystem storage rooted at ./notes if uninitialized.
+ */
+export function getOutputStorage(): FileStorageProvider {
+    if (!serverConfig.initialized || !serverConfig.outputStorage) {
+        return new FilesystemStorageProvider(resolve(process.cwd(), './notes'));
+    }
+    return serverConfig.outputStorage;
 }
 
 /**
