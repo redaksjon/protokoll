@@ -99,6 +99,35 @@ function readNonEmptyString(value: unknown): string | undefined {
     return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
 }
 
+function readEnvString(name: string): string | undefined {
+    return readNonEmptyString(process.env[name]);
+}
+
+function buildEnvStorageConfig(): Record<string, unknown> | undefined {
+    const configuredBackend = readEnvString('PROTOKOLL_STORAGE_BACKEND');
+    const gcs = {
+        projectId: readEnvString('PROTOKOLL_STORAGE_GCS_PROJECT_ID'),
+        inputUri: readEnvString('PROTOKOLL_STORAGE_GCS_INPUT_URI'),
+        outputUri: readEnvString('PROTOKOLL_STORAGE_GCS_OUTPUT_URI'),
+        contextUri: readEnvString('PROTOKOLL_STORAGE_GCS_CONTEXT_URI'),
+        inputBucket: readEnvString('PROTOKOLL_STORAGE_GCS_INPUT_BUCKET'),
+        inputPrefix: readEnvString('PROTOKOLL_STORAGE_GCS_INPUT_PREFIX'),
+        outputBucket: readEnvString('PROTOKOLL_STORAGE_GCS_OUTPUT_BUCKET'),
+        outputPrefix: readEnvString('PROTOKOLL_STORAGE_GCS_OUTPUT_PREFIX'),
+        contextBucket: readEnvString('PROTOKOLL_STORAGE_GCS_CONTEXT_BUCKET'),
+        contextPrefix: readEnvString('PROTOKOLL_STORAGE_GCS_CONTEXT_PREFIX'),
+        credentialsFile: readEnvString('PROTOKOLL_STORAGE_GCS_CREDENTIALS_FILE'),
+    };
+    const hasGcsValue = Object.values(gcs).some(value => value !== undefined);
+    const backend = configuredBackend ?? (hasGcsValue ? 'gcs' : undefined);
+    if (!backend) return undefined;
+
+    const storage: Record<string, unknown> = {};
+    if (backend) storage.backend = backend;
+    if (hasGcsValue) storage.gcs = gcs;
+    return storage;
+}
+
 function describeRawStorageConfig(config: Record<string, unknown>): string[] {
     const lines: string[] = [];
     const rawStorage = config.storage;
@@ -719,11 +748,18 @@ app.post('/mcp', async (c) => {
             : (process.env.WORKSPACE_ROOT || process.cwd());
         const configPathDisplay = resolve(configRoot, DEFAULT_CONFIG_FILE);
 
-        const workspaceRoot = process.env.WORKSPACE_ROOT || process.cwd();
-        const initialRoots: McpRoot[] = [{
-            uri: `file://${workspaceRoot}`,
-            name: 'Workspace',
-        }];
+        const startupResolvedConfigDirs = (startupConfig as { resolvedConfigDirs?: string[] }).resolvedConfigDirs;
+        const rootCandidates = Array.isArray(startupResolvedConfigDirs) && startupResolvedConfigDirs.length > 0
+            ? startupResolvedConfigDirs
+            : [process.env.WORKSPACE_ROOT || process.cwd()];
+        const workspaceRoot = rootCandidates[0];
+        const initialRoots: McpRoot[] = rootCandidates.map((rootPath, index) => ({
+            uri: `file://${rootPath}`,
+            name: index === 0 ? 'Workspace' : `Workspace ${index + 1}`,
+        }));
+
+        // Keep environment aligned with the root used for remote config discovery.
+        process.env.WORKSPACE_ROOT = workspaceRoot;
 
         Roots.setRoots(initialRoots);
         await ServerConfig.initializeServerConfig(initialRoots, 'remote');
@@ -1107,6 +1143,7 @@ async function main() {
         transcriptionModel: (args.transcriptionModel as string | undefined) ?? process.env.PROTOKOLL_TRANSCRIPTION_MODEL,
         debug: (args.debug as boolean | undefined) ?? parseBooleanEnv(process.env.PROTOKOLL_DEBUG),
         verbose: (args.verbose as boolean | undefined) ?? parseBooleanEnv(process.env.PROTOKOLL_VERBOSE),
+        storage: buildEnvStorageConfig(),
     });
 
     configureHttpLogLevel((cardigantimeConfig as any).debug === true);

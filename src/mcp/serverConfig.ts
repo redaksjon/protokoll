@@ -46,10 +46,91 @@ async function readConfigFromDirectory(directory: string): Promise<Record<string
     const previousCwd = process.cwd();
     try {
         process.chdir(directory);
-        return await cardigantime.read({});
+        const discoveredConfig = await cardigantime.read({});
+        return mergeConfigWithEnv(discoveredConfig);
     } finally {
         process.chdir(previousCwd);
     }
+}
+
+function parseBooleanEnv(value: string | undefined): boolean | undefined {
+    if (!value) return undefined;
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true') return true;
+    if (normalized === 'false') return false;
+    return undefined;
+}
+
+function parseCsvEnv(value: string | undefined): string[] | undefined {
+    if (!value) return undefined;
+    const parsed = value
+        .split(',')
+        .map(part => part.trim())
+        .filter(Boolean);
+    return parsed.length > 0 ? parsed : undefined;
+}
+
+function readEnvString(name: string): string | undefined {
+    return readString(process.env[name]);
+}
+
+function mergeNestedObjects(
+    base: Record<string, unknown>,
+    overrides: Record<string, unknown>,
+): Record<string, unknown> {
+    const merged = { ...base };
+    for (const [key, value] of Object.entries(overrides)) {
+        if (value === undefined) continue;
+        const existing = merged[key];
+        if (isObjectRecord(existing) && isObjectRecord(value)) {
+            merged[key] = mergeNestedObjects(existing, value);
+            continue;
+        }
+        merged[key] = value;
+    }
+    return merged;
+}
+
+function buildEnvStorageConfig(): Record<string, unknown> | undefined {
+    const configuredBackend = readEnvString('PROTOKOLL_STORAGE_BACKEND');
+    const gcs = {
+        projectId: readEnvString('PROTOKOLL_STORAGE_GCS_PROJECT_ID'),
+        inputUri: readEnvString('PROTOKOLL_STORAGE_GCS_INPUT_URI'),
+        outputUri: readEnvString('PROTOKOLL_STORAGE_GCS_OUTPUT_URI'),
+        contextUri: readEnvString('PROTOKOLL_STORAGE_GCS_CONTEXT_URI'),
+        inputBucket: readEnvString('PROTOKOLL_STORAGE_GCS_INPUT_BUCKET'),
+        inputPrefix: readEnvString('PROTOKOLL_STORAGE_GCS_INPUT_PREFIX'),
+        outputBucket: readEnvString('PROTOKOLL_STORAGE_GCS_OUTPUT_BUCKET'),
+        outputPrefix: readEnvString('PROTOKOLL_STORAGE_GCS_OUTPUT_PREFIX'),
+        contextBucket: readEnvString('PROTOKOLL_STORAGE_GCS_CONTEXT_BUCKET'),
+        contextPrefix: readEnvString('PROTOKOLL_STORAGE_GCS_CONTEXT_PREFIX'),
+        credentialsFile: readEnvString('PROTOKOLL_STORAGE_GCS_CREDENTIALS_FILE'),
+    };
+    const hasGcsValue = Object.values(gcs).some(value => value !== undefined);
+    const backend = configuredBackend ?? (hasGcsValue ? 'gcs' : undefined);
+    if (!backend) return undefined;
+
+    const storage: Record<string, unknown> = {};
+    if (backend) storage.backend = backend;
+    if (hasGcsValue) storage.gcs = gcs;
+    return storage;
+}
+
+function mergeConfigWithEnv(config: Record<string, unknown>): Record<string, unknown> {
+    const envOverrides: Record<string, unknown> = {
+        inputDirectory: readEnvString('PROTOKOLL_INPUT_DIRECTORY'),
+        outputDirectory: readEnvString('PROTOKOLL_OUTPUT_DIRECTORY'),
+        processedDirectory: readEnvString('PROTOKOLL_PROCESSED_DIRECTORY'),
+        contextDirectories: parseCsvEnv(process.env.PROTOKOLL_CONTEXT_DIRECTORIES),
+        model: readEnvString('PROTOKOLL_MODEL'),
+        classifyModel: readEnvString('PROTOKOLL_CLASSIFY_MODEL'),
+        composeModel: readEnvString('PROTOKOLL_COMPOSE_MODEL'),
+        transcriptionModel: readEnvString('PROTOKOLL_TRANSCRIPTION_MODEL'),
+        debug: parseBooleanEnv(process.env.PROTOKOLL_DEBUG),
+        verbose: parseBooleanEnv(process.env.PROTOKOLL_VERBOSE),
+        storage: buildEnvStorageConfig(),
+    };
+    return mergeNestedObjects(config, envOverrides);
 }
 
 // ============================================================================

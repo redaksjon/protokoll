@@ -1,0 +1,43 @@
+.git
+.gitignore
+.gcloudignore
+.dockerignore
+
+# Node/build artifacts
+node_modules/
+dist/
+coverage/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local editor/system files
+.DS_Store
+.idea/
+.vscode/
+
+# Local runtime/config secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Local Protokoll data directories (avoid uploading large data)
+recordings/
+inbound/
+activity/
+notes/
+processed/
+context/
+uploads/
+
+# Misc caches/temp
+.cache/
+tmp/
+temp/
+

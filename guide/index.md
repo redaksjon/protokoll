@@ -30,6 +30,7 @@ Protokoll transforms audio recordings into intelligent, context-enhanced transcr
 
 ### AI Integration
 - [**MCP Integration**](./mcp-integration.md): Use Protokoll through AI assistants
+- [**Cloud Run Deployment**](./cloud-run.md): Deploy MCP HTTP server to Google Cloud Run
 
 ### Development
 - [**Development**](./development.md): Building and testing

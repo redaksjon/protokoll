@@ -2,7 +2,7 @@
  * Tests for Entity Resources
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock dependencies - must be before imports
 vi.mock('@/context', () => ({
@@ -11,6 +11,19 @@ vi.mock('@/context', () => ({
 
 vi.mock('js-yaml', () => ({
     dump: vi.fn((obj: unknown) => `yaml-dump:${JSON.stringify(obj)}`),
+    load: vi.fn((raw: string) => {
+        const lines = raw.split('\n').filter(Boolean);
+        const data: Record<string, string> = {};
+        for (const line of lines) {
+            const idx = line.indexOf(':');
+            if (idx > 0) {
+                const key = line.slice(0, idx).trim();
+                const value = line.slice(idx + 1).trim();
+                data[key] = value;
+            }
+        }
+        return data;
+    }),
 }));
 
 vi.mock('../../../src/mcp/uri', () => ({
@@ -18,9 +31,15 @@ vi.mock('../../../src/mcp/uri', () => ({
     buildEntitiesListUri: vi.fn((type: string) => `protokoll://entities/${type}`),
 }));
 
+vi.mock('../../../src/mcp/storage/gcsProvider', () => ({
+    createGcsStorageProvider: vi.fn(),
+}));
+
 import * as Context from '@/context';
 import * as yaml from 'js-yaml';
 import { buildEntityUri, buildEntitiesListUri } from '../../../src/mcp/uri';
+import * as ServerConfig from '../../../src/mcp/serverConfig';
+import { createGcsStorageProvider } from '../../../src/mcp/storage/gcsProvider';
 import {
     readEntityResource,
     readEntitiesListResource,
@@ -45,6 +64,10 @@ describe('entityResources', () => {
         vi.clearAllMocks();
         vi.mocked(Context.create).mockResolvedValue(mockContext as any);
         mockContext.hasContext.mockReturnValue(true);
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
     });
 
     describe('readEntityResource', () => {
@@ -132,6 +155,29 @@ describe('entityResources', () => {
             );
             expect(mockContext.getPerson).not.toHaveBeenCalled();
             expect(mockContext.getProject).not.toHaveBeenCalled();
+        });
+
+        it('should read entity from gcs when configured', async () => {
+            vi.spyOn(ServerConfig, 'isInitialized').mockReturnValue(true);
+            vi.spyOn(ServerConfig, 'getStorageConfig').mockReturnValue({
+                backend: 'gcs',
+                gcs: {
+                    contextBucket: 'test-bucket',
+                    contextPrefix: 'ctx',
+                },
+            } as any);
+            vi.mocked(createGcsStorageProvider).mockReturnValue({
+                listFiles: vi.fn().mockResolvedValue(['people/john.yaml', 'people/ignored.txt']),
+                readFile: vi.fn().mockResolvedValue(Buffer.from('id: john\nname: John Doe\nslug: john-doe\n', 'utf8')),
+            } as any);
+
+            const result = await readEntityResource('person', 'john');
+
+            expect(result.uri).toBe('protokoll://entity/person/john');
+            expect(result.mimeType).toBe('application/yaml');
+            expect(result.text).toContain('yaml-dump:');
+            expect(Context.create).not.toHaveBeenCalled();
+            expect(mockContext.getPerson).not.toHaveBeenCalled();
         });
     });
 
@@ -274,6 +320,64 @@ describe('entityResources', () => {
                 'Unknown entity type: invalid'
             );
             expect(mockContext.getAllPeople).not.toHaveBeenCalled();
+        });
+
+        it('should read entities list from gcs when configured', async () => {
+            vi.spyOn(ServerConfig, 'isInitialized').mockReturnValue(true);
+            vi.spyOn(ServerConfig, 'getStorageConfig').mockReturnValue({
+                backend: 'gcs',
+                gcs: {
+                    contextUri: 'gs://test-bucket/context',
+                },
+            } as any);
+            vi.mocked(createGcsStorageProvider).mockReturnValue({
+                listFiles: vi.fn().mockResolvedValue(['projects/p1.yaml', 'projects/readme.md']),
+                readFile: vi.fn().mockResolvedValue(Buffer.from('id: p1\nname: Project One\n', 'utf8')),
+            } as any);
+
+            const result = await readEntitiesListResource('project');
+            const data = JSON.parse(result.text);
+
+            expect(result.uri).toBe('protokoll://entities/project');
+            expect(data.count).toBe(1);
+            expect(data.entities[0].id).toBe('p1');
+            expect(Context.create).not.toHaveBeenCalled();
+        });
+
+        it('should use initialized server context for entity lists', async () => {
+            const serverContext = {
+                ...mockContext,
+                hasContext: vi.fn().mockReturnValue(true),
+                getAllPeople: vi.fn().mockReturnValue([{ id: 's1', name: 'Server User' }]),
+            };
+            vi.spyOn(ServerConfig, 'isInitialized').mockReturnValue(true);
+            vi.spyOn(ServerConfig, 'getStorageConfig').mockReturnValue({ backend: 'local' } as any);
+            vi.spyOn(ServerConfig, 'getContext').mockReturnValue(serverContext as any);
+
+            const result = await readEntitiesListResource('person');
+            const data = JSON.parse(result.text);
+
+            expect(data.count).toBe(1);
+            expect(data.entities[0].id).toBe('s1');
+            expect(Context.create).not.toHaveBeenCalled();
+        });
+
+        it('should resolve configured context directories when server context is unavailable', async () => {
+            vi.spyOn(ServerConfig, 'isInitialized').mockReturnValue(true);
+            vi.spyOn(ServerConfig, 'getStorageConfig').mockReturnValue({ backend: 'local' } as any);
+            vi.spyOn(ServerConfig, 'getContext').mockReturnValue(null);
+            vi.spyOn(ServerConfig, 'getWorkspaceRoot').mockReturnValue('/workspace/root');
+            vi.spyOn(ServerConfig, 'getServerConfig').mockReturnValue({
+                configFile: { contextDirectories: ['contexts', '/abs/contexts'] },
+            } as any);
+            mockContext.getAllPeople.mockReturnValue([]);
+
+            await readEntitiesListResource('person');
+
+            expect(Context.create).toHaveBeenCalledWith({
+                startingDir: '/workspace/root',
+                contextDirectories: ['/workspace/root/contexts', '/abs/contexts'],
+            });
         });
     });
 });

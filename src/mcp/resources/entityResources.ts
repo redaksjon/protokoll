@@ -12,6 +12,91 @@ import * as ServerConfig from '../serverConfig';
 import { createToolContext } from '../tools/shared';
 import * as yaml from 'js-yaml';
 import { resolve, isAbsolute } from 'node:path';
+import { createGcsStorageProvider } from '../storage/gcsProvider';
+
+type EntityType = 'person' | 'project' | 'term' | 'company' | 'ignored';
+
+const ENTITY_DIRECTORY: Record<EntityType, string> = {
+    person: 'people',
+    project: 'projects',
+    term: 'terms',
+    company: 'companies',
+    ignored: 'ignored',
+};
+
+function buildContextGcsUri(): { uri: string; projectId?: string; credentialsFile?: string } | null {
+    const storageConfig = ServerConfig.getStorageConfig();
+    if (storageConfig.backend !== 'gcs' || !storageConfig.gcs) {
+        return null;
+    }
+
+    const gcs = storageConfig.gcs;
+    const contextUri = gcs.contextUri
+        || (gcs.contextBucket
+            ? `gs://${gcs.contextBucket}/${(gcs.contextPrefix || '').replace(/^\/+|\/+$/g, '')}`
+            : undefined);
+    if (!contextUri) {
+        return null;
+    }
+
+    return {
+        uri: contextUri,
+        projectId: gcs.projectId,
+        credentialsFile: gcs.credentialsFile,
+    };
+}
+
+async function loadEntitiesFromGcs(entityType: EntityType): Promise<Array<Record<string, unknown>>> {
+    const contextGcs = buildContextGcsUri();
+    if (!contextGcs) {
+        return [];
+    }
+
+    const provider = createGcsStorageProvider(contextGcs.uri, contextGcs.credentialsFile, contextGcs.projectId);
+    const directory = ENTITY_DIRECTORY[entityType];
+    const files = await provider.listFiles(`${directory}/`);
+    const yamlFiles = files.filter((pathValue) => pathValue.endsWith('.yaml') || pathValue.endsWith('.yml'));
+    const entities: Array<Record<string, unknown>> = [];
+
+    for (const filePath of yamlFiles) {
+        try {
+            const raw = await provider.readFile(filePath);
+            const parsed = yaml.load(raw.toString('utf8'));
+            if (parsed && typeof parsed === 'object') {
+                entities.push(parsed as Record<string, unknown>);
+            }
+        } catch {
+            // Ignore unreadable YAML entries so one bad file does not block all entities.
+        }
+    }
+
+    return entities;
+}
+
+async function findEntityInGcs(entityType: EntityType, entityId: string): Promise<Record<string, unknown> | null> {
+    const entities = await loadEntitiesFromGcs(entityType);
+    const normalized = entityId.trim().toLowerCase();
+    const prefix = normalized.match(/^([a-f0-9]{8})/)?.[1];
+
+    for (const entity of entities) {
+        const id = typeof entity.id === 'string' ? entity.id : '';
+        const slug = typeof entity.slug === 'string' ? entity.slug : '';
+        const idLower = id.toLowerCase();
+        const slugLower = slug.toLowerCase();
+
+        if (idLower === normalized || slugLower === normalized) {
+            return entity;
+        }
+        if (normalized && (idLower.startsWith(normalized) || normalized.startsWith(idLower))) {
+            return entity;
+        }
+        if (prefix && idLower.startsWith(prefix)) {
+            return entity;
+        }
+    }
+
+    return null;
+}
 
 /**
  * Read a single entity resource.
@@ -23,6 +108,21 @@ export async function readEntityResource(
     entityId: string,
     contextDirectory?: string
 ): Promise<McpResourceContents> {
+    if ((entityType as EntityType) in ENTITY_DIRECTORY && ServerConfig.isInitialized()) {
+        const storageConfig = ServerConfig.getStorageConfig();
+        if (storageConfig.backend === 'gcs') {
+            const gcsEntity = await findEntityInGcs(entityType as EntityType, entityId);
+            if (gcsEntity) {
+                const yamlContent = yaml.dump(gcsEntity);
+                return {
+                    uri: buildEntityUri(entityType as any, entityId),
+                    mimeType: 'application/yaml',
+                    text: yamlContent,
+                };
+            }
+        }
+    }
+
     const effectiveDir = contextDirectory || ServerConfig.getWorkspaceRoot() || process.cwd();
     // eslint-disable-next-line no-console
     console.log(`   [entity] Looking up ${entityType}/${entityId} (context from ${effectiveDir})`);
@@ -90,6 +190,35 @@ export async function readEntitiesListResource(
     entityType: string,
     contextDirectory?: string
 ): Promise<McpResourceContents> {
+    if ((entityType as EntityType) in ENTITY_DIRECTORY && ServerConfig.isInitialized()) {
+        const storageConfig = ServerConfig.getStorageConfig();
+        if (storageConfig.backend === 'gcs') {
+            const entitiesFromGcs = await loadEntitiesFromGcs(entityType as EntityType);
+            const entities = entitiesFromGcs.map((entity) => {
+                const id = String(entity.id || '');
+                const name = String(entity.name || '');
+                return {
+                    uri: buildEntityUri(entityType as any, id),
+                    id,
+                    name,
+                    ...entity,
+                };
+            });
+
+            const responseData = {
+                entityType,
+                count: entities.length,
+                entities,
+            };
+
+            return {
+                uri: buildEntitiesListUri(entityType as any),
+                mimeType: 'application/json',
+                text: JSON.stringify(responseData, null, 2),
+            };
+        }
+    }
+
     // Use server's pre-initialized context when available (HTTP/remote mode with protokoll-config.yaml)
     let context: ContextInstance;
     if (ServerConfig.isInitialized()) {
