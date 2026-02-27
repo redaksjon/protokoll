@@ -130,6 +130,10 @@ export async function getContextDirectories(): Promise<string[] | undefined> {
  */
 export async function createToolContext(contextDirectory?: string): Promise<ProtokollContextInstance> {
     const ServerConfig = await import('../serverConfig');
+    const serverContext = ServerConfig.getContext();
+    if (serverContext?.hasContext()) {
+        return serverContext;
+    }
 
     const configFile = ServerConfig.isInitialized()
         ? ServerConfig.getServerConfig().configFile as { contextDirectories?: string[] } | null
@@ -144,7 +148,14 @@ export async function createToolContext(contextDirectory?: string): Promise<Prot
 
     const storageConfig = ServerConfig.getStorageConfig();
     if (storageConfig.backend === 'gcs' && storageConfig.gcs) {
-        const parsedContextUri = parseGcsUri(storageConfig.gcs.contextUri as string);
+        const contextUri = storageConfig.gcs.contextUri
+            || (storageConfig.gcs.contextBucket
+                ? `gs://${storageConfig.gcs.contextBucket}/${(storageConfig.gcs.contextPrefix || '').replace(/^\/+|\/+$/g, '')}`
+                : undefined);
+        if (!contextUri) {
+            throw new Error('GCS storage is enabled but context URI/bucket configuration is missing.');
+        }
+        const parsedContextUri = parseGcsUri(contextUri);
         return Context.create({
             startingDir: effectiveDir,
             gcs: {

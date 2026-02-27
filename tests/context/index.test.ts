@@ -127,6 +127,34 @@ routing:
       expect(context.getAllCompanies().length).toBe(1);
       expect(context.getAllTerms().length).toBe(1);
     });
+
+    it('should resolve entities by slug and UUID prefix aliases', async () => {
+      const protokollDir = path.join(tempDir, '.protokoll');
+      const peopleDir = path.join(protokollDir, 'context', 'people');
+      await fs.mkdir(peopleDir, { recursive: true });
+      await fs.writeFile(path.join(protokollDir, 'config.yaml'), 'version: 1');
+
+      await fs.writeFile(
+        path.join(peopleDir, 'alias-person.yaml'),
+        `id: cffd998f-ff32-4d27-9ea7-7976172c44d1
+name: Alias Person
+slug: alias-person`
+      );
+      await fs.writeFile(
+        path.join(peopleDir, 'same-prefix.yaml'),
+        `id: cffd998f-1111-2222-3333-444444444444
+name: Prefix Variant`
+      );
+
+      const context = await Context.create({ startingDir: tempDir });
+
+      expect(context.getPerson('alias-person')?.id).toBe('cffd998f-ff32-4d27-9ea7-7976172c44d1');
+      expect(context.getPerson('ALIAS-PERSON')?.name).toBe('Alias Person');
+      expect(context.getPerson('CFFD998F-FF32-4D27-9EA7-7976172C44D1')).toBeDefined();
+      expect(context.getPerson('cffd998f')).toBeDefined();
+      expect(context.getPerson('cffd998f-9999-8888-7777-666666666666')).toBeDefined();
+      expect(context.getPerson('   ')).toBeUndefined();
+    });
   });
   
   describe('search', () => {

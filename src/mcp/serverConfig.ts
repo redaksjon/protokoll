@@ -10,7 +10,7 @@
  */
 
 import * as Context from '@/context';
-import type { ContextInstance } from '@/context';
+import type { ProtokollContextInstance } from '@/context';
 import type { McpRoot } from './types';
 import { fileUriToPath } from './roots';
 import { resolve } from 'node:path';
@@ -67,7 +67,7 @@ export type ServerMode = 'remote' | 'local';
 
 interface ServerConfig {
     mode: ServerMode;
-    context: ContextInstance | null;
+    context: ProtokollContextInstance | null;
     workspaceRoot: string | null;
     inputDirectory: string | null;
     outputDirectory: string | null;
@@ -454,7 +454,7 @@ export function clearServerConfig(): void {
  */
 export function getServerConfig(): {
     mode: ServerMode;
-    context: ContextInstance | null;
+    context: ProtokollContextInstance | null;
     workspaceRoot: string;
     inputDirectory: string;
     outputDirectory: string;
@@ -485,7 +485,7 @@ export function getServerConfig(): {
 /**
  * Get the context instance
  */
-export function getContext(): ContextInstance | null {
+export function getContext(): ProtokollContextInstance | null {
     return serverConfig.context;
 }
 

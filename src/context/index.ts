@@ -79,9 +79,53 @@ export interface ProtokollContextInstance extends BaseContextInstance {
  */
 export const create = async (options: CreateOptions = {}): Promise<ProtokollContextInstance> => {
     const baseInstance = await createContext(options as BaseCreateOptions);
+
+    const resolveEntityByIdentifier = <T extends { id: string; slug?: string }>(
+        identifier: string,
+        directLookup: (id: string) => T | undefined,
+        listAll: () => T[],
+    ): T | undefined => {
+        const normalized = identifier.trim();
+        if (!normalized) {
+            return undefined;
+        }
+
+        const direct = directLookup(normalized);
+        if (direct) {
+            return direct;
+        }
+
+        const normalizedLower = normalized.toLowerCase();
+        const uuidPrefix = normalizedLower.match(/^([a-f0-9]{8})/)?.[1];
+
+        for (const entity of listAll()) {
+            const entityId = entity.id.toLowerCase();
+            const entitySlug = entity.slug?.toLowerCase();
+
+            if (entityId === normalizedLower) {
+                return entity;
+            }
+            if (entitySlug && entitySlug === normalizedLower) {
+                return entity;
+            }
+            if (entityId.startsWith(normalizedLower) || normalizedLower.startsWith(entityId)) {
+                return entity;
+            }
+            if (uuidPrefix && entityId.startsWith(uuidPrefix)) {
+                return entity;
+            }
+        }
+
+        return undefined;
+    };
     
     return {
         ...baseInstance,
+        getPerson: (id: string) => resolveEntityByIdentifier(id, baseInstance.getPerson, baseInstance.getAllPeople),
+        getProject: (id: string) => resolveEntityByIdentifier(id, baseInstance.getProject, baseInstance.getAllProjects),
+        getCompany: (id: string) => resolveEntityByIdentifier(id, baseInstance.getCompany, baseInstance.getAllCompanies),
+        getTerm: (id: string) => resolveEntityByIdentifier(id, baseInstance.getTerm, baseInstance.getAllTerms),
+        getIgnored: (id: string) => resolveEntityByIdentifier(id, baseInstance.getIgnored, baseInstance.getAllIgnored),
         getSmartAssistanceConfig: () => getSmartAssistanceConfig(baseInstance.getConfig()),
     };
 };

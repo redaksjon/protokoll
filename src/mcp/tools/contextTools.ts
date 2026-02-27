@@ -32,7 +32,7 @@ async function getContextInstance(contextDirectory?: string): Promise<ContextIns
     
     // If server has an initialized context, use it
     const serverContext = ServerConfig.getContext();
-    if (serverContext) {
+    if (serverContext?.hasContext()) {
         return serverContext;
     }
     

@@ -690,24 +690,12 @@ app.post('/mcp', async (c) => {
     // Check if this is an initialize request
     const isInitialize = jsonRpcMessage.method === 'initialize';
 
-    if (!sessionIdHeader && !isInitialize) {
-        return c.json({
-            jsonrpc: '2.0',
-            error: { code: -32000, message: 'Missing Mcp-Session-Id header' },
-            id: jsonRpcMessage.id || null,
-        }, 400);
-    }
-
-    let session: SessionData;
-
-    if (isInitialize) {
-        // Create new session
-        const newSessionId = randomUUID();
+    const createSession = async (sessionId: string): Promise<SessionData> => {
         const server = createMcpServer();
         const transport = new StreamableHTTPTransport();
-        
-        session = {
-            sessionId: newSessionId,
+
+        const newSession: SessionData = {
+            sessionId,
             server,
             transport,
             initialized: false,
@@ -715,13 +703,13 @@ app.post('/mcp', async (c) => {
             subscriptions: new Set(),
             sseWriters: new Set(),
         };
-        
-        sessions.set(newSessionId, session);
+
+        sessions.set(sessionId, newSession);
         sessionLogger.info('created', {
-            sessionId: newSessionId,
+            sessionId,
             workspaceRoot: process.env.WORKSPACE_ROOT || process.cwd(),
         });
-        
+
         // Use the config loaded once at startup
         const cardigantimeConfig = startupConfig;
 
@@ -730,28 +718,28 @@ app.post('/mcp', async (c) => {
             ? resolvedConfigDirs[0]
             : (process.env.WORKSPACE_ROOT || process.cwd());
         const configPathDisplay = resolve(configRoot, DEFAULT_CONFIG_FILE);
-        
+
         const workspaceRoot = process.env.WORKSPACE_ROOT || process.cwd();
         const initialRoots: McpRoot[] = [{
             uri: `file://${workspaceRoot}`,
             name: 'Workspace',
         }];
-        
+
         Roots.setRoots(initialRoots);
         await ServerConfig.initializeServerConfig(initialRoots, 'remote');
-        
+
         // Get the full initialized config from ServerConfig
         const serverConfig = ServerConfig.getServerConfig();
         const storageConfig = ServerConfig.getStorageConfig();
         const context = ServerConfig.getContext();
         // Use getContextDirs() (actual loaded dirs) or fall back to configFile.contextDirectories
         const contextDirs = context?.getContextDirs?.() ?? (serverConfig.configFile as { contextDirectories?: string[] })?.contextDirectories;
-        const contextDirsDisplay = Array.isArray(contextDirs) && contextDirs.length > 0 
-            ? contextDirs.join(', ') 
+        const contextDirsDisplay = Array.isArray(contextDirs) && contextDirs.length > 0
+            ? contextDirs.join(', ')
             : 'NONE';
-        
+
         sessionLogger.info('configuration.loaded', {
-            sessionId: newSessionId,
+            sessionId,
             workingDirectory: workspaceRoot,
             configFile: configPathDisplay,
             inputDirectory: serverConfig.inputDirectory || null,
@@ -766,7 +754,7 @@ app.post('/mcp', async (c) => {
         });
         if (storageConfig.backend === 'gcs' && storageConfig.gcs) {
             sessionLogger.info('configuration.gcs', {
-                sessionId: newSessionId,
+                sessionId,
                 projectId: storageConfig.gcs.projectId ?? process.env.GOOGLE_CLOUD_PROJECT ?? 'default',
                 credentialsFile: storageConfig.gcs.credentialsFile ?? 'ADC/default environment',
                 inputBucket: storageConfig.gcs.inputBucket ?? null,
@@ -777,25 +765,34 @@ app.post('/mcp', async (c) => {
                 contextPrefix: storageConfig.gcs.contextPrefix ?? null,
             });
         }
-        
-        // Set session ID in response header
-        c.header('Mcp-Session-Id', newSessionId);
-        
+
         // Connect server to transport
-        await session.server.connect(transport);
+        await newSession.server.connect(transport);
+        return newSession;
+    };
+
+    let session: SessionData;
+
+    if (isInitialize) {
+        const newSessionId = randomUUID();
+        session = await createSession(newSessionId);
     } else {
-        // Use existing session
-        session = sessions.get(sessionIdHeader!)!;
+        const requestedSessionId = sessionIdHeader?.trim() || randomUUID();
+        session = sessions.get(requestedSessionId)!;
         if (!session) {
-            return c.json({
-                jsonrpc: '2.0',
-                error: { code: -32000, message: 'Session not found' },
-                id: jsonRpcMessage.id || null,
-            }, 404);
+            sessionLogger.warning('recovered.missing_session', {
+                requestedSessionId: sessionIdHeader ?? null,
+                rpcMethod: jsonRpcMessage.method ?? null,
+                rpcId: jsonRpcMessage.id ?? null,
+            });
+            session = await createSession(requestedSessionId);
         }
         session.lastActivity = Date.now();
         sessionLogger.debug('reused', { sessionId: session.sessionId });
     }
+
+    // Always echo effective session id so clients can recover from stale/missing state.
+    c.header('Mcp-Session-Id', session.sessionId);
 
     const isNotification = jsonRpcMessage.id === undefined || jsonRpcMessage.id === null;
     requestLogger.info('incoming', {

@@ -9,6 +9,7 @@ import { buildTranscriptUri, buildTranscriptsListUri } from '../uri';
 import { resolve, relative, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import * as fs from 'node:fs/promises';
+import Logging from '@fjell/logging';
 import { Transcript } from '@redaksjon/protokoll-engine';
 import { PklTranscript } from '@redaksjon/protokoll-format';
 import * as ServerConfig from '../serverConfig';
@@ -16,6 +17,7 @@ import { sanitizePath } from '../tools/shared';
 import type { FileStorageProvider } from '../storage/fileProviders';
 
 const { listTranscripts, resolveTranscriptPath, readTranscriptContent, stripTranscriptExtension } = Transcript;
+const logger = Logging.getLogger('@redaksjon/protokoll-mcp').get('transcript-resources');
 
 function parseStoredSummaries(raw: string): Array<{
     id: string;
@@ -341,6 +343,7 @@ async function listTranscriptsFromStorage(options: {
     limit: number;
     offset: number;
 }) {
+    const startedAt = Date.now();
     const {
         outputStorage,
         outputDirectory,
@@ -352,7 +355,23 @@ async function listTranscriptsFromStorage(options: {
         offset,
     } = options;
 
+    logger.info('transcripts.gcs.list.start', {
+        directory: outputDirectory,
+        limit,
+        offset,
+        startDate: startDate ?? null,
+        endDate: endDate ?? null,
+        projectId: projectId ?? null,
+        projectName: projectName ?? null,
+    });
+
+    const listStartedAt = Date.now();
     const allFiles = await outputStorage.listFiles('');
+    logger.info('transcripts.gcs.list.objects_loaded', {
+        totalObjects: allFiles.length,
+        elapsedMs: Date.now() - listStartedAt,
+    });
+
     const transcriptCandidates = allFiles.filter((pathValue) => {
         const normalized = pathValue.replace(/\\/g, '/').toLowerCase();
         return normalized.endsWith('.pkl')
@@ -362,11 +381,18 @@ async function listTranscriptsFromStorage(options: {
             && !normalized.includes('/.intermediate/');
     });
 
+    logger.info('transcripts.gcs.list.transcript_candidates', {
+        candidates: transcriptCandidates.length,
+        ignoredObjects: allFiles.length - transcriptCandidates.length,
+    });
+
+    let processedCandidates = 0;
+    const hydrateStartedAt = Date.now();
     const hydrated = await Promise.all(
         transcriptCandidates.map(async (pathValue) => {
             try {
                 const buffer = await outputStorage.readFile(pathValue);
-                return withTempPklFile(buffer, async (tempPath) => {
+                const hydratedEntry = await withTempPklFile(buffer, async (tempPath) => {
                     const { content, metadata, title } = await readTranscriptContent(tempPath);
                     const pklTranscript = PklTranscript.open(tempPath, { readOnly: true });
                     let hasRawTranscript = false;
@@ -412,8 +438,18 @@ async function listTranscriptsFromStorage(options: {
                         hasRawTranscript,
                     };
                 });
+                return hydratedEntry;
             } catch {
                 return null;
+            } finally {
+                processedCandidates++;
+                if (processedCandidates % 25 === 0 || processedCandidates === transcriptCandidates.length) {
+                    logger.info('transcripts.gcs.list.progress', {
+                        processed: processedCandidates,
+                        total: transcriptCandidates.length,
+                        elapsedMs: Date.now() - hydrateStartedAt,
+                    });
+                }
             }
         }),
     );
@@ -433,6 +469,14 @@ async function listTranscriptsFromStorage(options: {
         });
 
     const page = filtered.slice(offset, offset + limit);
+    logger.info('transcripts.gcs.list.complete', {
+        totalCandidates: transcriptCandidates.length,
+        totalAfterFilters: filtered.length,
+        returned: page.length,
+        hasMore: offset + limit < filtered.length,
+        elapsedMs: Date.now() - startedAt,
+    });
+
     return {
         transcripts: page,
         total: filtered.length,

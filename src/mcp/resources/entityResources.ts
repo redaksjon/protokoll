@@ -9,6 +9,7 @@ import { buildEntityUri, buildEntitiesListUri } from '../uri';
 import * as Context from '@/context';
 import type { ContextInstance } from '@/context';
 import * as ServerConfig from '../serverConfig';
+import { createToolContext } from '../tools/shared';
 import * as yaml from 'js-yaml';
 import { resolve, isAbsolute } from 'node:path';
 
@@ -22,20 +23,10 @@ export async function readEntityResource(
     entityId: string,
     contextDirectory?: string
 ): Promise<McpResourceContents> {
-    const configFile = ServerConfig.isInitialized()
-        ? ServerConfig.getServerConfig().configFile as { contextDirectories?: string[] } | null
-        : null;
-    const rawDirs = configFile?.contextDirectories;
     const effectiveDir = contextDirectory || ServerConfig.getWorkspaceRoot() || process.cwd();
-    const contextDirs = rawDirs && rawDirs.length > 0
-        ? rawDirs.map(d => (isAbsolute(d) ? d : resolve(effectiveDir, d)))
-        : undefined;
     // eslint-disable-next-line no-console
-    console.log(`   [entity] Looking up ${entityType}/${entityId} (fresh context from ${effectiveDir})`);
-    const context = await Context.create({
-        startingDir: effectiveDir,
-        contextDirectories: contextDirs,
-    });
+    console.log(`   [entity] Looking up ${entityType}/${entityId} (context from ${effectiveDir})`);
+    const context = await createToolContext(contextDirectory);
 
     if (!context.hasContext()) {
         const searchDir = contextDirectory || process.cwd();
