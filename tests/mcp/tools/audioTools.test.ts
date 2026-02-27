@@ -19,14 +19,17 @@ const mockGetConfiguredDirectory = vi.hoisted(() => vi.fn());
 const mockSanitizePath = vi.hoisted(() => vi.fn());
 const mockPipelineProcess = vi.hoisted(() => vi.fn());
 const mockPipelineCreate = vi.hoisted(() => vi.fn());
-const mockReaddir = vi.hoisted(() => vi.fn());
+const mockInputStorageListFiles = vi.hoisted(() => vi.fn());
+const mockInputStorageReadFile = vi.hoisted(() => vi.fn());
 const mockGlob = vi.hoisted(() => vi.fn());
 const mockGetServerConfig = vi.hoisted(() => vi.fn());
 const mockGetInputDirectory = vi.hoisted(() => vi.fn());
+const mockGetInputStorage = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../src/mcp/serverConfig', () => ({
     getServerConfig: (...args: unknown[]) => mockGetServerConfig(...args),
     getInputDirectory: (...args: unknown[]) => mockGetInputDirectory(...args),
+    getInputStorage: (...args: unknown[]) => mockGetInputStorage(...args),
 }));
 
 vi.mock('../../../src/mcp/tools/shared', () => ({
@@ -40,10 +43,6 @@ vi.mock('@redaksjon/protokoll-engine', () => ({
     Pipeline: {
         create: (...args: unknown[]) => mockPipelineCreate(...args),
     },
-}));
-
-vi.mock('node:fs/promises', () => ({
-    readdir: (...args: unknown[]) => mockReaddir(...args),
 }));
 
 vi.mock('glob', () => ({
@@ -86,6 +85,13 @@ describe('audioTools', () => {
             if (key === 'inputDirectory') return inputDir;
             if (key === 'outputDirectory') return outputDir;
             return processedDir;
+        });
+        mockInputStorageListFiles.mockResolvedValue([]);
+        mockInputStorageReadFile.mockResolvedValue(Buffer.from('audio'));
+        mockGetInputStorage.mockReturnValue({
+            name: 'filesystem',
+            listFiles: mockInputStorageListFiles,
+            readFile: mockInputStorageReadFile,
         });
 
         mockFileExists.mockResolvedValue(true);
@@ -138,9 +144,9 @@ describe('audioTools', () => {
 
         it('should process audio file when given filename (searches input directory)', async () => {
             mockFileExists.mockImplementation(async (path: string) => path.startsWith('/') && path === '/workspace/recordings/recording.m4a');
-            mockReaddir.mockResolvedValue([
-                { name: 'recording.m4a', isFile: () => true },
-                { name: 'other.txt', isFile: () => true },
+            mockInputStorageListFiles.mockResolvedValue([
+                'recording.m4a',
+                'other.txt',
             ]);
 
             const result = await handleProcessAudio({
@@ -149,7 +155,27 @@ describe('audioTools', () => {
 
             expect(result.enhancedText).toBe('Enhanced transcript text');
             expect(mockGetConfiguredDirectory).toHaveBeenCalledWith('inputDirectory');
-            expect(mockReaddir).toHaveBeenCalledWith(inputDir, { withFileTypes: true });
+            expect(mockInputStorageListFiles).toHaveBeenCalledWith('.');
+        });
+
+        it('should materialize gcs input file before processing', async () => {
+            mockGetInputStorage.mockReturnValue({
+                name: 'gcs',
+                listFiles: mockInputStorageListFiles,
+                readFile: mockInputStorageReadFile,
+            });
+            mockInputStorageListFiles.mockResolvedValue(['recording.m4a']);
+
+            await handleProcessAudio({
+                audioFile: 'recording.m4a',
+            });
+
+            expect(mockInputStorageReadFile).toHaveBeenCalledWith('recording.m4a');
+            expect(mockPipelineProcess).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    audioFile: expect.stringContaining('protokoll-gcs-input'),
+                })
+            );
         });
 
         it('should pass model and transcriptionModel to pipeline', async () => {
@@ -163,6 +189,29 @@ describe('audioTools', () => {
                 expect.objectContaining({
                     model: 'gpt-4o',
                     transcriptionModel: 'whisper-2',
+                })
+            );
+        });
+
+        it('should use default output settings when context config omits them', async () => {
+            mockGetServerConfig.mockReturnValue({
+                context: createMockContext({
+                    outputStructure: undefined,
+                    outputFilenameOptions: undefined,
+                }),
+                workspaceRoot: '/workspace',
+                outputDirectory: outputDir,
+                processedDirectory: processedDir,
+            });
+
+            await handleProcessAudio({
+                audioFile: '/workspace/recordings/recording.m4a',
+            });
+
+            expect(mockPipelineCreate).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    outputStructure: 'month',
+                    outputFilenameOptions: ['date', 'time', 'subject'],
                 })
             );
         });
@@ -220,7 +269,7 @@ describe('audioTools', () => {
 
         it('should throw when audio file not found (absolute path does not exist)', async () => {
             mockFileExists.mockResolvedValue(false);
-            mockReaddir.mockResolvedValue([]);
+            mockInputStorageListFiles.mockResolvedValue([]);
 
             await expect(
                 handleProcessAudio({
@@ -231,8 +280,8 @@ describe('audioTools', () => {
 
         it('should throw when filename matches no files in input directory', async () => {
             mockFileExists.mockResolvedValue(false);
-            mockReaddir.mockResolvedValue([
-                { name: 'other.m4a', isFile: () => true },
+            mockInputStorageListFiles.mockResolvedValue([
+                'other.m4a',
             ]);
 
             await expect(
@@ -244,9 +293,9 @@ describe('audioTools', () => {
 
         it('should throw when multiple files match filename', async () => {
             mockFileExists.mockResolvedValue(false);
-            mockReaddir.mockResolvedValue([
-                { name: 'recording1.m4a', isFile: () => true },
-                { name: 'recording2.m4a', isFile: () => true },
+            mockInputStorageListFiles.mockResolvedValue([
+                'recording1.m4a',
+                'recording2.m4a',
             ]);
 
             await expect(

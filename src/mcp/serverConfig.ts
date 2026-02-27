@@ -10,13 +10,20 @@
  */
 
 import * as Context from '@/context';
-import type { ContextInstance } from '@/context';
+import type { ProtokollContextInstance } from '@/context';
 import type { McpRoot } from './types';
 import { fileUriToPath } from './roots';
 import { resolve } from 'node:path';
+import { access } from 'node:fs/promises';
 import * as Cardigantime from '@utilarium/cardigantime';
+import Logging from '@fjell/logging';
+import { DEFAULT_STORAGE_CONFIG, type StorageConfig } from './storage/types';
+import { createGcsStorageProvider } from './storage/gcsProvider';
+import { FilesystemStorageProvider, type FileStorageProvider } from './storage/fileProviders';
+import { parseGcsUri } from './storage/gcsUri';
 
 const DEFAULT_CONFIG_FILE = 'protokoll-config.yaml';
+const logger = Logging.getLogger('@redaksjon/protokoll-mcp').get('server-config');
 const cardigantime = Cardigantime.create({
     defaults: {
         configDirectory: '.',
@@ -27,7 +34,7 @@ const cardigantime = Cardigantime.create({
         // pathFields determines which fields are processed, resolvePathArray determines
         // if array elements should be resolved individually
         pathResolution: {
-            pathFields: ['inputDirectory', 'outputDirectory', 'processedDirectory', 'contextDirectories'],
+            pathFields: ['inputDirectory', 'outputDirectory', 'processedDirectory', 'contextDirectories', 'storage.gcs.credentialsFile'],
             resolvePathArray: ['contextDirectories'],
         },
     },
@@ -39,10 +46,91 @@ async function readConfigFromDirectory(directory: string): Promise<Record<string
     const previousCwd = process.cwd();
     try {
         process.chdir(directory);
-        return await cardigantime.read({});
+        const discoveredConfig = await cardigantime.read({});
+        return mergeConfigWithEnv(discoveredConfig);
     } finally {
         process.chdir(previousCwd);
     }
+}
+
+function parseBooleanEnv(value: string | undefined): boolean | undefined {
+    if (!value) return undefined;
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true') return true;
+    if (normalized === 'false') return false;
+    return undefined;
+}
+
+function parseCsvEnv(value: string | undefined): string[] | undefined {
+    if (!value) return undefined;
+    const parsed = value
+        .split(',')
+        .map(part => part.trim())
+        .filter(Boolean);
+    return parsed.length > 0 ? parsed : undefined;
+}
+
+function readEnvString(name: string): string | undefined {
+    return readString(process.env[name]);
+}
+
+function mergeNestedObjects(
+    base: Record<string, unknown>,
+    overrides: Record<string, unknown>,
+): Record<string, unknown> {
+    const merged = { ...base };
+    for (const [key, value] of Object.entries(overrides)) {
+        if (value === undefined) continue;
+        const existing = merged[key];
+        if (isObjectRecord(existing) && isObjectRecord(value)) {
+            merged[key] = mergeNestedObjects(existing, value);
+            continue;
+        }
+        merged[key] = value;
+    }
+    return merged;
+}
+
+function buildEnvStorageConfig(): Record<string, unknown> | undefined {
+    const configuredBackend = readEnvString('PROTOKOLL_STORAGE_BACKEND');
+    const gcs = {
+        projectId: readEnvString('PROTOKOLL_STORAGE_GCS_PROJECT_ID'),
+        inputUri: readEnvString('PROTOKOLL_STORAGE_GCS_INPUT_URI'),
+        outputUri: readEnvString('PROTOKOLL_STORAGE_GCS_OUTPUT_URI'),
+        contextUri: readEnvString('PROTOKOLL_STORAGE_GCS_CONTEXT_URI'),
+        inputBucket: readEnvString('PROTOKOLL_STORAGE_GCS_INPUT_BUCKET'),
+        inputPrefix: readEnvString('PROTOKOLL_STORAGE_GCS_INPUT_PREFIX'),
+        outputBucket: readEnvString('PROTOKOLL_STORAGE_GCS_OUTPUT_BUCKET'),
+        outputPrefix: readEnvString('PROTOKOLL_STORAGE_GCS_OUTPUT_PREFIX'),
+        contextBucket: readEnvString('PROTOKOLL_STORAGE_GCS_CONTEXT_BUCKET'),
+        contextPrefix: readEnvString('PROTOKOLL_STORAGE_GCS_CONTEXT_PREFIX'),
+        credentialsFile: readEnvString('PROTOKOLL_STORAGE_GCS_CREDENTIALS_FILE'),
+    };
+    const hasGcsValue = Object.values(gcs).some(value => value !== undefined);
+    const backend = configuredBackend ?? (hasGcsValue ? 'gcs' : undefined);
+    if (!backend) return undefined;
+
+    const storage: Record<string, unknown> = {};
+    if (backend) storage.backend = backend;
+    if (hasGcsValue) storage.gcs = gcs;
+    return storage;
+}
+
+function mergeConfigWithEnv(config: Record<string, unknown>): Record<string, unknown> {
+    const envOverrides: Record<string, unknown> = {
+        inputDirectory: readEnvString('PROTOKOLL_INPUT_DIRECTORY'),
+        outputDirectory: readEnvString('PROTOKOLL_OUTPUT_DIRECTORY'),
+        processedDirectory: readEnvString('PROTOKOLL_PROCESSED_DIRECTORY'),
+        contextDirectories: parseCsvEnv(process.env.PROTOKOLL_CONTEXT_DIRECTORIES),
+        model: readEnvString('PROTOKOLL_MODEL'),
+        classifyModel: readEnvString('PROTOKOLL_CLASSIFY_MODEL'),
+        composeModel: readEnvString('PROTOKOLL_COMPOSE_MODEL'),
+        transcriptionModel: readEnvString('PROTOKOLL_TRANSCRIPTION_MODEL'),
+        debug: parseBooleanEnv(process.env.PROTOKOLL_DEBUG),
+        verbose: parseBooleanEnv(process.env.PROTOKOLL_VERBOSE),
+        storage: buildEnvStorageConfig(),
+    };
+    return mergeNestedObjects(config, envOverrides);
 }
 
 // ============================================================================
@@ -60,11 +148,14 @@ export type ServerMode = 'remote' | 'local';
 
 interface ServerConfig {
     mode: ServerMode;
-    context: ContextInstance | null;
+    context: ProtokollContextInstance | null;
     workspaceRoot: string | null;
     inputDirectory: string | null;
     outputDirectory: string | null;
     processedDirectory: string | null;
+    inputStorage: FileStorageProvider | null;
+    outputStorage: FileStorageProvider | null;
+    storageConfig: StorageConfig;
     configFilePath: string | null;
     configFile: Record<string, unknown> | null;
     initialized: boolean;
@@ -77,10 +168,200 @@ let serverConfig: ServerConfig = {
     inputDirectory: null,
     outputDirectory: null,
     processedDirectory: null,
+    inputStorage: null,
+    outputStorage: null,
+    storageConfig: DEFAULT_STORAGE_CONFIG,
     configFilePath: null,
     configFile: null,
     initialized: false,
 };
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
+}
+
+function readString(value: unknown): string | undefined {
+    return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function buildGcsUri(bucket: string, prefix?: string): string {
+    const trimmedBucket = bucket.trim();
+    const normalizedPrefix = (prefix ?? '')
+        .replace(/^\/+/, '')
+        .replace(/\/+/g, '/')
+        .replace(/\/+$/, '');
+    if (!normalizedPrefix) {
+        return `gs://${trimmedBucket}`;
+    }
+    return `gs://${trimmedBucket}/${normalizedPrefix}`;
+}
+
+function resolveGcsUri(rawUri: string | undefined, bucket: string | undefined, prefix: string | undefined): string {
+    if (bucket) {
+        return buildGcsUri(bucket, prefix);
+    }
+    return rawUri ?? '';
+}
+
+function resolveGcsUris(gcs: NonNullable<StorageConfig['gcs']>): {
+    inputUri: string;
+    outputUri: string;
+    contextUri: string;
+} {
+    return {
+        inputUri: resolveGcsUri(gcs.inputUri, gcs.inputBucket, gcs.inputPrefix),
+        outputUri: resolveGcsUri(gcs.outputUri, gcs.outputBucket, gcs.outputPrefix),
+        contextUri: resolveGcsUri(gcs.contextUri, gcs.contextBucket, gcs.contextPrefix),
+    };
+}
+
+function parseStorageConfig(configFile: Record<string, unknown> | null): StorageConfig {
+    if (!configFile) {
+        return DEFAULT_STORAGE_CONFIG;
+    }
+
+    const rawStorage = configFile.storage;
+    if (!isObjectRecord(rawStorage)) {
+        return DEFAULT_STORAGE_CONFIG;
+    }
+
+    const backend = rawStorage.backend === 'gcs' ? 'gcs' : 'filesystem';
+    if (backend !== 'gcs') {
+        return DEFAULT_STORAGE_CONFIG;
+    }
+
+    const rawGcs = isObjectRecord(rawStorage.gcs) ? rawStorage.gcs : {};
+    const projectId = readString(rawGcs.projectId);
+    const inputUri = readString(rawGcs.inputUri);
+    const outputUri = readString(rawGcs.outputUri);
+    const contextUri = readString(rawGcs.contextUri);
+    const inputBucket = readString(rawGcs.inputBucket);
+    const inputPrefix = readString(rawGcs.inputPrefix);
+    const outputBucket = readString(rawGcs.outputBucket);
+    const outputPrefix = readString(rawGcs.outputPrefix);
+    const contextBucket = readString(rawGcs.contextBucket);
+    const contextPrefix = readString(rawGcs.contextPrefix);
+    const credentialsFile = readString(rawGcs.credentialsFile);
+
+    return {
+        backend: 'gcs',
+        gcs: {
+            projectId,
+            inputUri,
+            outputUri,
+            contextUri,
+            inputBucket,
+            inputPrefix,
+            outputBucket,
+            outputPrefix,
+            contextBucket,
+            contextPrefix,
+            credentialsFile,
+        },
+    };
+}
+
+function resolveCredentialsFilePath(
+    credentialsFile: string | undefined,
+    configDir: string,
+): string | undefined {
+    if (!credentialsFile || credentialsFile.trim().length === 0) {
+        return undefined;
+    }
+    return resolve(configDir, credentialsFile);
+}
+
+async function validateGcsStorageConfig(storageConfig: StorageConfig, configDir: string): Promise<string | undefined> {
+    if (storageConfig.backend !== 'gcs') {
+        return undefined;
+    }
+
+    if (!storageConfig.gcs) {
+        throw new Error('storage.backend is set to gcs, but storage.gcs is missing.');
+    }
+
+    const startedAt = Date.now();
+    const { inputUri, outputUri, contextUri } = resolveGcsUris(storageConfig.gcs);
+    logger.debug('storage.gcs.validate.start', {
+        configDir,
+        inputUri,
+        outputUri,
+        contextUri,
+        projectId: storageConfig.gcs.projectId ?? null,
+        hasCredentialsFile: Boolean(storageConfig.gcs.credentialsFile),
+    });
+    if (!inputUri || !outputUri || !contextUri) {
+        throw new Error(
+            'GCS config is incomplete. Provide either storage.gcs.{inputUri,outputUri,contextUri} or storage.gcs.{inputBucket,inputPrefix,outputBucket,outputPrefix,contextBucket,contextPrefix}.'
+        );
+    }
+
+    parseGcsUri(inputUri);
+    parseGcsUri(outputUri);
+    parseGcsUri(contextUri);
+
+    const credentialsFile = resolveCredentialsFilePath(storageConfig.gcs.credentialsFile, configDir);
+    if (credentialsFile) {
+        try {
+            await access(credentialsFile);
+        } catch {
+            throw new Error(`GCS credentials file is not readable: ${credentialsFile}`);
+        }
+    }
+
+    logger.info('storage.gcs.validate.complete', {
+        inputUri,
+        outputUri,
+        contextUri,
+        projectId: storageConfig.gcs.projectId ?? null,
+        credentialsFile: credentialsFile ?? null,
+        elapsedMs: Date.now() - startedAt,
+    });
+
+    return credentialsFile;
+}
+
+async function createStorageProviders(
+    storageConfig: StorageConfig,
+    inputDirectory: string,
+    outputDirectory: string,
+    configDir: string,
+): Promise<{ inputStorage: FileStorageProvider; outputStorage: FileStorageProvider }> {
+    if (storageConfig.backend === 'filesystem') {
+        return {
+            inputStorage: new FilesystemStorageProvider(inputDirectory),
+            outputStorage: new FilesystemStorageProvider(outputDirectory),
+        };
+    }
+
+    if (!storageConfig.gcs) {
+        throw new Error('storage.backend is set to gcs, but storage.gcs is missing.');
+    }
+
+    const startedAt = Date.now();
+    const { inputUri, outputUri } = resolveGcsUris(storageConfig.gcs);
+    logger.debug('storage.providers.gcs.start', {
+        inputUri,
+        outputUri,
+        projectId: storageConfig.gcs.projectId ?? null,
+    });
+    const credentialsFile = await validateGcsStorageConfig(storageConfig, configDir);
+    const inputStorage = createGcsStorageProvider(inputUri, credentialsFile, storageConfig.gcs.projectId);
+    const outputStorage = createGcsStorageProvider(outputUri, credentialsFile, storageConfig.gcs.projectId);
+    await inputStorage.verifyBucketAccess();
+    await outputStorage.verifyBucketAccess();
+    logger.info('storage.providers.gcs.complete', {
+        inputUri,
+        outputUri,
+        projectId: storageConfig.gcs.projectId ?? null,
+        elapsedMs: Date.now() - startedAt,
+    });
+
+    return {
+        inputStorage,
+        outputStorage,
+    };
+}
 
 // ============================================================================
 // Initialization
@@ -106,6 +387,9 @@ export async function initializeServerConfig(roots: McpRoot[], mode: ServerMode 
             inputDirectory: resolve(process.cwd(), './recordings'),
             outputDirectory: resolve(process.cwd(), './notes'),
             processedDirectory: resolve(process.cwd(), './processed'),
+            inputStorage: new FilesystemStorageProvider(resolve(process.cwd(), './recordings')),
+            outputStorage: new FilesystemStorageProvider(resolve(process.cwd(), './notes')),
+            storageConfig: DEFAULT_STORAGE_CONFIG,
             configFilePath: null,
             configFile: null,
             initialized: true,
@@ -129,27 +413,50 @@ export async function initializeServerConfig(roots: McpRoot[], mode: ServerMode 
 
         // contextDirectories are resolved by CardiganTime via resolvePathArray config
         const resolvedContextDirs = configFile.contextDirectories as string[] | undefined;
-
-        // Load context from workspace root, using explicit contextDirectories if provided
-        const context = await Context.create({
+        const contextCreateOptions: Context.CreateOptions = {
             startingDir: workspaceRoot,
             contextDirectories: resolvedContextDirs,
-        });
+        };
+
+        const storageConfig = parseStorageConfig(configFile as Record<string, unknown>);
+        const credentialsFile = await validateGcsStorageConfig(storageConfig, configDir);
+        if (storageConfig.backend === 'gcs' && storageConfig.gcs) {
+            if (storageConfig.gcs.projectId) {
+                process.env.GOOGLE_CLOUD_PROJECT = storageConfig.gcs.projectId;
+            }
+            const { contextUri } = resolveGcsUris(storageConfig.gcs);
+            const parsedContextUri = parseGcsUri(contextUri);
+            contextCreateOptions.gcs = {
+                bucketName: parsedContextUri.bucket,
+                basePath: parsedContextUri.prefix,
+                credentialsFile,
+            };
+            delete contextCreateOptions.contextDirectories;
+        }
+
+        // Load context from workspace root, using explicit contextDirectories if provided
+        const context = await Context.create(contextCreateOptions);
 
         const contextConfig = context.getConfig();
         const mergedConfig = {
             ...contextConfig,
             ...configFile,
         } as Record<string, unknown>;
+        const inputDirectory = (mergedConfig.inputDirectory as string) || resolve(configDir, './recordings');
+        const outputDirectory = (mergedConfig.outputDirectory as string) || resolve(configDir, './notes');
+        const { inputStorage, outputStorage } = await createStorageProviders(storageConfig, inputDirectory, outputDirectory, configDir);
         
         serverConfig = {
             mode,
             context,
             workspaceRoot,
             // CardiganTime already resolved these paths; just provide defaults if not set
-            inputDirectory: (mergedConfig.inputDirectory as string) || resolve(configDir, './recordings'),
-            outputDirectory: (mergedConfig.outputDirectory as string) || resolve(configDir, './notes'),
+            inputDirectory,
+            outputDirectory,
             processedDirectory: (mergedConfig.processedDirectory as string) || resolve(configDir, './processed'),
+            inputStorage,
+            outputStorage,
+            storageConfig,
             configFilePath,
             configFile: configFile ?? null,
             initialized: true,
@@ -168,15 +475,22 @@ export async function initializeServerConfig(roots: McpRoot[], mode: ServerMode 
             : workspaceRoot;
         
         const mergedConfig = (configFile ?? {}) as Record<string, unknown>;
+        const storageConfig = parseStorageConfig(configFile as Record<string, unknown>);
+        const inputDirectory = (mergedConfig.inputDirectory as string) || resolve(configDir, './recordings');
+        const outputDirectory = (mergedConfig.outputDirectory as string) || resolve(configDir, './notes');
+        const { inputStorage, outputStorage } = await createStorageProviders(storageConfig, inputDirectory, outputDirectory, configDir);
 
         serverConfig = {
             mode,
             context: null,
             workspaceRoot,
             // CardiganTime already resolved these paths; just provide defaults if not set
-            inputDirectory: (mergedConfig.inputDirectory as string) || resolve(configDir, './recordings'),
-            outputDirectory: (mergedConfig.outputDirectory as string) || resolve(configDir, './notes'),
+            inputDirectory,
+            outputDirectory,
             processedDirectory: (mergedConfig.processedDirectory as string) || resolve(configDir, './processed'),
+            inputStorage,
+            outputStorage,
+            storageConfig,
             configFilePath,
             configFile: configFile ?? null,
             initialized: true,
@@ -202,6 +516,9 @@ export function clearServerConfig(): void {
         inputDirectory: null,
         outputDirectory: null,
         processedDirectory: null,
+        inputStorage: null,
+        outputStorage: null,
+        storageConfig: DEFAULT_STORAGE_CONFIG,
         configFilePath: null,
         configFile: null,
         initialized: false,
@@ -218,11 +535,12 @@ export function clearServerConfig(): void {
  */
 export function getServerConfig(): {
     mode: ServerMode;
-    context: ContextInstance | null;
+    context: ProtokollContextInstance | null;
     workspaceRoot: string;
     inputDirectory: string;
     outputDirectory: string;
     processedDirectory: string | null;
+    storageConfig: StorageConfig;
     configFilePath: string | null;
     configFile: Record<string, unknown> | null;
     initialized: boolean;
@@ -238,6 +556,7 @@ export function getServerConfig(): {
         inputDirectory: serverConfig.inputDirectory!,
         outputDirectory: serverConfig.outputDirectory!,
         processedDirectory: serverConfig.processedDirectory,
+        storageConfig: serverConfig.storageConfig,
         configFilePath: serverConfig.configFilePath,
         configFile: serverConfig.configFile,
         initialized: serverConfig.initialized,
@@ -247,7 +566,7 @@ export function getServerConfig(): {
 /**
  * Get the context instance
  */
-export function getContext(): ContextInstance | null {
+export function getContext(): ProtokollContextInstance | null {
     return serverConfig.context;
 }
 
@@ -289,6 +608,36 @@ export function getProcessedDirectory(): string | null {
         return null;
     }
     return serverConfig.processedDirectory;
+}
+
+/**
+ * Get the normalized storage config.
+ * Defaults to filesystem mode when storage config is not present.
+ */
+export function getStorageConfig(): StorageConfig {
+    return serverConfig.storageConfig;
+}
+
+/**
+ * Get the input storage provider.
+ * Defaults to filesystem storage rooted at ./recordings if uninitialized.
+ */
+export function getInputStorage(): FileStorageProvider {
+    if (!serverConfig.initialized || !serverConfig.inputStorage) {
+        return new FilesystemStorageProvider(resolve(process.cwd(), './recordings'));
+    }
+    return serverConfig.inputStorage;
+}
+
+/**
+ * Get the output storage provider.
+ * Defaults to filesystem storage rooted at ./notes if uninitialized.
+ */
+export function getOutputStorage(): FileStorageProvider {
+    if (!serverConfig.initialized || !serverConfig.outputStorage) {
+        return new FilesystemStorageProvider(resolve(process.cwd(), './notes'));
+    }
+    return serverConfig.outputStorage;
 }
 
 /**

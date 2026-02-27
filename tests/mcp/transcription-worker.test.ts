@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
     providerGetModel: vi.fn(),
     fsStat: vi.fn(),
     fsUnlink: vi.fn(),
+    fsRm: vi.fn(),
+    fsWriteFile: vi.fn(),
     glob: vi.fn(),
     enhancementLogStep: vi.fn(),
     setRawTranscript: vi.fn(),
@@ -26,9 +28,13 @@ vi.mock('node:fs/promises', () => ({
     default: {
         stat: mocks.fsStat,
         unlink: mocks.fsUnlink,
+        rm: mocks.fsRm,
+        writeFile: mocks.fsWriteFile,
     },
     stat: mocks.fsStat,
     unlink: mocks.fsUnlink,
+    rm: mocks.fsRm,
+    writeFile: mocks.fsWriteFile,
 }));
 
 vi.mock('glob', () => ({
@@ -100,6 +106,8 @@ describe('TranscriptionWorker', () => {
         });
         mocks.fsStat.mockResolvedValue(undefined);
         mocks.fsUnlink.mockResolvedValue(undefined);
+        mocks.fsRm.mockResolvedValue(undefined);
+        mocks.fsWriteFile.mockResolvedValue(undefined);
         mocks.glob.mockResolvedValue([]);
         mocks.findUploadedTranscripts.mockResolvedValue([]);
         mocks.markTranscriptAsTranscribing.mockResolvedValue(undefined);
@@ -135,6 +143,30 @@ describe('TranscriptionWorker', () => {
 
         await worker.stop();
         expect(worker.isActive()).toBe(false);
+    });
+
+    it('starts when no model exists and build fails gracefully', async () => {
+        mocks.loadFromFile.mockResolvedValueOnce(null);
+        mocks.builderBuild.mockRejectedValueOnce(new Error('build failed'));
+
+        const worker = new TranscriptionWorker({
+            outputDirectory: '/tmp/out',
+            uploadDirectory: '/tmp/uploads',
+            scanInterval: 1,
+        });
+
+        const processQueueSpy = vi
+            .spyOn(worker as any, 'processQueue')
+            .mockResolvedValue(undefined);
+
+        await worker.start();
+
+        expect(worker.isActive()).toBe(true);
+        expect(mocks.providerLoadModel).not.toHaveBeenCalled();
+        expect(mocks.pipelineCreate).toHaveBeenCalledTimes(1);
+        expect(processQueueSpy).toHaveBeenCalledTimes(1);
+
+        await worker.stop();
     });
 
     it('processes transcript successfully and marks enhanced status', async () => {
@@ -263,6 +295,164 @@ describe('TranscriptionWorker', () => {
             'Pipeline not initialized'
         );
         expect(worker.getCurrentTask()).toBeUndefined();
+    });
+
+    it('marks transcript as failed when audio is missing and no audioHash exists', async () => {
+        const worker = new TranscriptionWorker({
+            outputDirectory: '/tmp/out',
+            uploadDirectory: '/tmp/uploads',
+        });
+
+        (worker as any).pipeline = { process: mocks.pipelineProcess };
+        mocks.fsStat.mockRejectedValueOnce(new Error('missing file'));
+
+        const item = {
+            uuid: 'uuid-4',
+            filePath: '/tmp/out/uploaded.pkl',
+            metadata: {
+                audioFile: '/tmp/uploads/missing-audio.m4a',
+            },
+        } as any;
+
+        await (worker as any).processNextTranscript(item);
+
+        expect(mocks.markTranscriptAsFailed).toHaveBeenCalledWith(
+            '/tmp/out/uploaded.pkl',
+            expect.stringContaining('no audioHash for fallback lookup')
+        );
+    });
+
+    it('resolves missing audio via gcs hash fallback when configured', async () => {
+        const outputStorage = {
+            name: 'gcs',
+            readFile: vi.fn().mockResolvedValue(Buffer.from('audio')),
+            writeFile: vi.fn(),
+            listFiles: vi.fn().mockResolvedValue(['uploads/abc123.wav']),
+            deleteFile: vi.fn(),
+            exists: vi.fn(),
+            mkdir: vi.fn(),
+        };
+        const worker = new TranscriptionWorker({
+            outputDirectory: '/tmp/out',
+            uploadDirectory: '/tmp/uploads',
+            outputStorage: outputStorage as any,
+        });
+
+        (worker as any).pipeline = { process: mocks.pipelineProcess };
+        mocks.fsStat.mockRejectedValueOnce(new Error('missing file'));
+        mocks.pipelineProcess.mockResolvedValue({
+            rawTranscript: 'raw transcript',
+            enhancedText: 'enhanced transcript content that is definitely longer than fifty characters',
+            outputPath: '/tmp/out/routed.pkl',
+            title: 'Title',
+            routedProject: 'project-1',
+            routedProjectName: 'Project One',
+            routingConfidence: 0.9,
+            entities: [],
+            toolsUsed: [],
+            processingTime: 100,
+        });
+
+        const item = {
+            uuid: 'uuid-5',
+            filePath: '/tmp/out/uploaded.pkl',
+            metadata: {
+                audioFile: '/tmp/uploads/missing-audio.m4a',
+                audioHash: 'abc123',
+            },
+        } as any;
+
+        await (worker as any).processNextTranscript(item);
+
+        expect(outputStorage.listFiles).toHaveBeenCalledWith('uploads', 'abc123');
+        expect(outputStorage.readFile).toHaveBeenCalledWith('uploads/abc123.wav');
+        expect(mocks.fsRm).toHaveBeenCalledWith(expect.stringContaining('protokoll-worker-'), { force: true });
+    });
+
+    it('marks transcript as failed when gcs hash fallback finds no matching object', async () => {
+        const outputStorage = {
+            name: 'gcs',
+            readFile: vi.fn().mockResolvedValue(Buffer.from('audio')),
+            writeFile: vi.fn(),
+            listFiles: vi.fn().mockResolvedValue(['uploads/not-a-match.wav']),
+            deleteFile: vi.fn(),
+            exists: vi.fn(),
+            mkdir: vi.fn(),
+        };
+        const worker = new TranscriptionWorker({
+            outputDirectory: '/tmp/out',
+            uploadDirectory: '/tmp/uploads',
+            outputStorage: outputStorage as any,
+        });
+
+        (worker as any).pipeline = { process: mocks.pipelineProcess };
+        mocks.fsStat.mockRejectedValueOnce(new Error('missing file'));
+
+        const item = {
+            uuid: 'uuid-6',
+            filePath: '/tmp/out/uploaded.pkl',
+            metadata: {
+                audioFile: '/tmp/uploads/missing-audio.m4a',
+                audioHash: 'abc123',
+            },
+        } as any;
+
+        await (worker as any).processNextTranscript(item);
+
+        expect(mocks.markTranscriptAsFailed).toHaveBeenCalledWith(
+            '/tmp/out/uploaded.pkl',
+            expect.stringContaining('no object matching hash abc123 in uploads')
+        );
+    });
+
+    it('materializes non-absolute gcs upload path before processing', async () => {
+        const outputStorage = {
+            name: 'gcs',
+            readFile: vi.fn().mockResolvedValue(Buffer.from('audio')),
+            writeFile: vi.fn(),
+            listFiles: vi.fn(),
+            deleteFile: vi.fn(),
+            exists: vi.fn(),
+            mkdir: vi.fn(),
+        };
+        const worker = new TranscriptionWorker({
+            outputDirectory: '/tmp/out',
+            uploadDirectory: '/tmp/uploads',
+            outputStorage: outputStorage as any,
+        });
+
+        (worker as any).pipeline = { process: mocks.pipelineProcess };
+        mocks.pipelineProcess.mockResolvedValue({
+            rawTranscript: 'raw transcript',
+            enhancedText: 'enhanced transcript content that is definitely longer than fifty characters',
+            outputPath: '/tmp/out/routed.pkl',
+            title: 'Title',
+            routedProject: 'project-1',
+            routedProjectName: 'Project One',
+            routingConfidence: 0.9,
+            entities: [],
+            toolsUsed: [],
+            processingTime: 100,
+        });
+
+        const item = {
+            uuid: 'uuid-7',
+            filePath: '/tmp/out/uploaded.pkl',
+            metadata: {
+                audioFile: 'recording.m4a',
+                audioHash: 'abc123',
+                date: new Date('2026-01-01T00:00:00.000Z'),
+            },
+        } as any;
+
+        await (worker as any).processNextTranscript(item);
+
+        expect(outputStorage.readFile).toHaveBeenCalledWith('uploads/recording.m4a');
+        expect(mocks.pipelineProcess).toHaveBeenCalledWith(
+            expect.objectContaining({
+                audioFile: expect.stringContaining('protokoll-worker-'),
+            })
+        );
     });
 
     it('exposes uptime and stats while idle', async () => {

@@ -30,6 +30,7 @@ import * as Context from '@/context';
 import type { ProtokollContextInstance } from '@/context';
 import type { Person, Project, Term, Company, IgnoredTerm, Entity } from '@/context/types';
 import { parseUri, isProtokolUri } from '../uri';
+import { parseGcsUri } from '../storage/gcsUri';
 
 // ============================================================================
 // Shared Utilities
@@ -129,6 +130,10 @@ export async function getContextDirectories(): Promise<string[] | undefined> {
  */
 export async function createToolContext(contextDirectory?: string): Promise<ProtokollContextInstance> {
     const ServerConfig = await import('../serverConfig');
+    const serverContext = ServerConfig.getContext();
+    if (serverContext?.hasContext()) {
+        return serverContext;
+    }
 
     const configFile = ServerConfig.isInitialized()
         ? ServerConfig.getServerConfig().configFile as { contextDirectories?: string[] } | null
@@ -140,6 +145,26 @@ export async function createToolContext(contextDirectory?: string): Promise<Prot
     const contextDirs = rawDirs && rawDirs.length > 0
         ? rawDirs.map((d: string) => (isAbsolute(d) ? d : resolve(effectiveDir, d)))
         : undefined;
+
+    const storageConfig = ServerConfig.getStorageConfig();
+    if (storageConfig.backend === 'gcs' && storageConfig.gcs) {
+        const contextUri = storageConfig.gcs.contextUri
+            || (storageConfig.gcs.contextBucket
+                ? `gs://${storageConfig.gcs.contextBucket}/${(storageConfig.gcs.contextPrefix || '').replace(/^\/+|\/+$/g, '')}`
+                : undefined);
+        if (!contextUri) {
+            throw new Error('GCS storage is enabled but context URI/bucket configuration is missing.');
+        }
+        const parsedContextUri = parseGcsUri(contextUri);
+        return Context.create({
+            startingDir: effectiveDir,
+            gcs: {
+                bucketName: parsedContextUri.bucket,
+                basePath: parsedContextUri.prefix,
+                credentialsFile: storageConfig.gcs.credentialsFile,
+            },
+        });
+    }
 
     return Context.create({
         startingDir: effectiveDir,

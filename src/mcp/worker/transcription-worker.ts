@@ -13,6 +13,7 @@ import { glob } from 'glob';
 import { Pipeline, Transcript as TranscriptOps, Weighting } from '@redaksjon/protokoll-engine';
 import { PklTranscript } from '@redaksjon/protokoll-format';
 import type { TranscriptMetadata } from '@redaksjon/protokoll-format';
+import type { FileStorageProvider } from '../storage/fileProviders';
 
 const { findUploadedTranscripts, markTranscriptAsTranscribing, markTranscriptAsFailed } = TranscriptOps;
 
@@ -27,6 +28,7 @@ export interface WorkerConfig {
     /** Explicit context directories from protokoll-config.yaml (preferred over discovery) */
     contextDirectories?: string[]; // e.g. ['~/.protokoll/projects']
     uploadDirectory: string;       // Where uploaded audio files are stored
+    outputStorage?: FileStorageProvider; // Optional storage provider for uploads in non-filesystem backends
     scanInterval?: number;         // Milliseconds between queue scans (default: 5000)
     model?: string;                // AI model for enhancement
     transcriptionModel?: string;   // Whisper model
@@ -39,6 +41,20 @@ interface UploadedTranscript {
     uuid: string;
     filePath: string;
     metadata: TranscriptMetadata;
+}
+
+async function materializeUploadedAudio(
+    outputStorage: FileStorageProvider,
+    uploadPath: string,
+): Promise<string> {
+    const fileName = uploadPath.split('/').pop() || 'uploaded-audio.bin';
+    const tempPath = join(
+        tmpdir(),
+        `protokoll-worker-${Date.now()}-${Math.random().toString(36).slice(2)}-${fileName}`,
+    );
+    const contents = await outputStorage.readFile(uploadPath);
+    await fs.writeFile(tempPath, contents);
+    return tempPath;
 }
 
 /**
@@ -219,6 +235,7 @@ export class TranscriptionWorker {
      */
     private async processNextTranscript(item: UploadedTranscript): Promise<void> {
         this.stats.currentTask = `Processing ${item.uuid}`;
+        let localTempAudioPath: string | null = null;
         
         // eslint-disable-next-line no-console
         console.log(`\n📝 Processing transcript: ${item.uuid}`);
@@ -237,17 +254,40 @@ export class TranscriptionWorker {
             let audioFilePath = item.metadata.audioFile && isAbsolute(item.metadata.audioFile)
                 ? item.metadata.audioFile
                 : join(this.config.uploadDirectory, item.metadata.audioFile || '');
+
+            const outputStorage = this.config.outputStorage;
+            const isGcsOutput = outputStorage?.name === 'gcs';
+
+            // In gcs mode, uploaded audio is stored in object storage and must be materialized locally for pipeline processing.
+            if (isGcsOutput && item.metadata.audioFile && !isAbsolute(item.metadata.audioFile)) {
+                const uploadObjectPath = join('uploads', item.metadata.audioFile).replace(/\\/g, '/');
+                localTempAudioPath = await materializeUploadedAudio(outputStorage, uploadObjectPath);
+                audioFilePath = localTempAudioPath;
+            }
             
             // Fallback: if file not found but we have audioHash, find by hash (handles legacy transcripts with originalFilename in audioFile)
             try {
                 await fs.stat(audioFilePath);
             } catch {
                 if (item.metadata.audioHash) {
-                    const byHash = await glob(`${item.metadata.audioHash}.*`, { cwd: this.config.uploadDirectory, absolute: true });
-                    if (byHash.length > 0) {
-                        audioFilePath = byHash[0];
+                    if (isGcsOutput && outputStorage) {
+                        const uploadMatches = await outputStorage.listFiles('uploads', item.metadata.audioHash);
+                        const byHash = uploadMatches.filter((candidate) =>
+                            candidate.split('/').pop()?.startsWith(`${item.metadata.audioHash}.`),
+                        );
+                        if (byHash.length > 0) {
+                            localTempAudioPath = await materializeUploadedAudio(outputStorage, byHash[0]);
+                            audioFilePath = localTempAudioPath;
+                        } else {
+                            throw new Error(`Audio file not found and no object matching hash ${item.metadata.audioHash} in uploads`);
+                        }
                     } else {
-                        throw new Error(`Audio file not found at ${audioFilePath} and no file matching hash ${item.metadata.audioHash} in uploads`);
+                        const byHash = await glob(`${item.metadata.audioHash}.*`, { cwd: this.config.uploadDirectory, absolute: true });
+                        if (byHash.length > 0) {
+                            audioFilePath = byHash[0];
+                        } else {
+                            throw new Error(`Audio file not found at ${audioFilePath} and no file matching hash ${item.metadata.audioHash} in uploads`);
+                        }
                     }
                 } else {
                     throw new Error(`Audio file not found at ${audioFilePath} and no audioHash for fallback lookup`);
@@ -385,7 +425,7 @@ export class TranscriptionWorker {
             
             // eslint-disable-next-line no-console
             console.log(`✅ Completed: ${item.uuid} (status: ${finalStatus}, ${toolCallCount} tool calls)`);
-            
+
         } catch (error) {
             // Attempt to close the transcript before marking as failed
             try { transcript.close(); } catch { /* already closed */ }
@@ -399,6 +439,10 @@ export class TranscriptionWorker {
             await markTranscriptAsFailed(item.filePath, errorMessage);
             
             this.stats.currentTask = undefined;
+        } finally {
+            if (localTempAudioPath) {
+                await fs.rm(localTempAudioPath, { force: true });
+            }
         }
     }
 

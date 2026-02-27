@@ -1,6 +1,6 @@
 {
   "name": "@redaksjon/protokoll",
-  "version": "1.0.21",
+  "version": "1.0.22",
   "description": "Focused audio transcription with intelligent context integration",
   "main": "dist/index.js",
   "type": "module",
@@ -15,6 +15,7 @@
   "homepage": "https://github.com/redaksjon/protokoll",
   "scripts": {
     "build": "npm run lint && tsc --noEmit && vite build && chmod +x dist/mcp/server.js dist/mcp/server-hono.js",
+    "postinstall": "node scripts/ensure-executable-bins.mjs",
     "dev": "vite",
     "watch": "vite build --watch",
     "test": "vitest run --coverage",
@@ -54,13 +55,15 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
+    "@fjell/logging": "^4.4.69",
+    "@google-cloud/storage": "^7.19.0",
     "@google/generative-ai": "^0.24.1",
     "@hono/mcp": "^0.2.3",
     "@hono/node-server": "^1.19.9",
     "@kjerneverk/riotprompt": "^1.0.6",
     "@modelcontextprotocol/sdk": "^1.25.2",
-    "@redaksjon/context": "^0.0.10",
-    "@redaksjon/protokoll-engine": "^0.1.9",
+    "@redaksjon/context": "^0.0.12",
+    "@redaksjon/protokoll-engine": "^0.1.10",
     "@redaksjon/protokoll-format": "^0.1.6",
     "@types/fluent-ffmpeg": "^2.1.28",
     "@utilarium/cardigantime": "^0.0.27",

@@ -2,7 +2,8 @@
  * Tests for Config Resource
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import * as ServerConfig from '../../../src/mcp/serverConfig';
 
 // Mock dependencies
 vi.mock('@/context', () => ({
@@ -37,6 +38,10 @@ vi.mock('../../../src/mcp/uri', () => ({
 import { readConfigResource } from '../../../src/mcp/resources/configResource';
 
 describe('configResource', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
     describe('readConfigResource', () => {
         it('should read config resource', async () => {
             const result = await readConfigResource();
@@ -126,6 +131,82 @@ describe('configResource', () => {
             const result = await readConfigResource();
             
             expect(result).toBeDefined();
+        });
+
+        it('should use initialized server context when available', async () => {
+            const Context = await import('@/context');
+            const createSpy = vi.mocked(Context.create);
+            createSpy.mockClear();
+
+            const serverContext = {
+                hasContext: vi.fn().mockReturnValue(true),
+                getDiscoveredDirs: vi.fn().mockReturnValue([{ path: '/server/.protokoll', level: 0 }]),
+                getConfig: vi.fn().mockReturnValue({
+                    outputDirectory: '/server/output',
+                    outputStructure: 'month',
+                    model: 'gpt-5',
+                }),
+                getAllProjects: vi.fn().mockReturnValue([]),
+                getAllPeople: vi.fn().mockReturnValue([]),
+                getAllTerms: vi.fn().mockReturnValue([]),
+                getAllCompanies: vi.fn().mockReturnValue([]),
+                getAllIgnored: vi.fn().mockReturnValue([]),
+                getSmartAssistanceConfig: vi.fn().mockReturnValue({ enabled: false }),
+            };
+
+            vi.spyOn(ServerConfig, 'isInitialized').mockReturnValue(true);
+            vi.spyOn(ServerConfig, 'getContext').mockReturnValue(serverContext as any);
+            vi.spyOn(ServerConfig, 'getWorkspaceRoot').mockReturnValue('/workspace/root');
+
+            const result = await readConfigResource();
+            const data = JSON.parse(result.text);
+
+            expect(data.hasContext).toBe(true);
+            expect(createSpy).not.toHaveBeenCalled();
+        });
+
+        it('should build context directories from server config when server context is unavailable', async () => {
+            const Context = await import('@/context');
+            const createSpy = vi.mocked(Context.create);
+            createSpy.mockClear();
+
+            vi.spyOn(ServerConfig, 'isInitialized').mockReturnValue(true);
+            vi.spyOn(ServerConfig, 'getContext').mockReturnValue(null);
+            vi.spyOn(ServerConfig, 'getWorkspaceRoot').mockReturnValue('/workspace/root');
+            vi.spyOn(ServerConfig, 'getServerConfig').mockReturnValue({
+                configFile: {
+                    contextDirectories: ['contexts', '/absolute/contexts'],
+                },
+            } as any);
+
+            await readConfigResource();
+
+            expect(createSpy).toHaveBeenCalledWith({
+                startingDir: '/workspace/root',
+                contextDirectories: ['/workspace/root/contexts', '/absolute/contexts'],
+            });
+        });
+
+        it('should tolerate server config access errors and fall back cleanly', async () => {
+            const Context = await import('@/context');
+            const createSpy = vi.mocked(Context.create);
+            createSpy.mockClear();
+
+            vi.spyOn(ServerConfig, 'isInitialized').mockReturnValue(true);
+            vi.spyOn(ServerConfig, 'getContext').mockReturnValue(null);
+            vi.spyOn(ServerConfig, 'getWorkspaceRoot').mockImplementation(() => {
+                throw new Error('workspace error');
+            });
+            vi.spyOn(ServerConfig, 'getServerConfig').mockImplementation(() => {
+                throw new Error('config error');
+            });
+
+            await readConfigResource('/explicit/path');
+
+            expect(createSpy).toHaveBeenCalledWith({
+                startingDir: '/explicit/path',
+                contextDirectories: undefined,
+            });
         });
     });
 });
