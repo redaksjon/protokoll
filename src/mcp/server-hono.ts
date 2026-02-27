@@ -43,6 +43,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { resolve } from 'node:path';
 import * as Cardigantime from '@utilarium/cardigantime';
+import Logging from '@fjell/logging';
 import { z } from 'zod';
 import * as Resources from './resources';
 import * as Prompts from './prompts';
@@ -58,6 +59,26 @@ import { PklTranscript } from '@redaksjon/protokoll-format';
 
 const { createUploadTranscript, findTranscriptByUuid } = TranscriptOps;
 
+/**
+ * Configure LOGGING_CONFIG as early as possible so top-level logger creation
+ * honors CLI/env debug settings before any logger instances are requested.
+ */
+function bootstrapHttpLogLevel(): void {
+    const debugFromCli = process.argv.includes('--debug');
+    const debugFromEnv = parseBooleanEnv(process.env.PROTOKOLL_DEBUG) === true;
+    configureHttpLogLevel(debugFromCli || debugFromEnv);
+}
+
+bootstrapHttpLogLevel();
+
+const rootLogger = Logging.getLogger('@redaksjon/protokoll-mcp').get('http');
+const sessionLogger = rootLogger.get('session');
+const requestLogger = rootLogger.get('request');
+const transportLogger = rootLogger.get('transport');
+const sseLogger = rootLogger.get('sse');
+const lifecycleLogger = rootLogger.get('lifecycle');
+const uploadLogger = rootLogger.get('upload');
+
 // ============================================================================
 // Configuration (resolved at startup — see main())
 // ============================================================================
@@ -72,6 +93,84 @@ const DEFAULT_AUDIO_EXTENSIONS = ['mp3', 'm4a', 'wav', 'webm', 'mp4', 'aac', 'og
 function parseBooleanEnv(value: string | undefined): boolean | undefined {
     if (!value) return undefined;
     return value.toLowerCase() === 'true';
+}
+
+function readNonEmptyString(value: unknown): string | undefined {
+    return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function describeRawStorageConfig(config: Record<string, unknown>): string[] {
+    const lines: string[] = [];
+    const rawStorage = config.storage;
+    if (!rawStorage || typeof rawStorage !== 'object') {
+        lines.push('🗄️  Storage Backend:  filesystem (default)');
+        return lines;
+    }
+
+    const storage = rawStorage as Record<string, unknown>;
+    const backend = storage.backend === 'gcs' ? 'gcs' : 'filesystem';
+    lines.push(`🗄️  Storage Backend:  ${backend}`);
+    if (backend !== 'gcs') {
+        return lines;
+    }
+
+    const gcs = (typeof storage.gcs === 'object' && storage.gcs !== null
+        ? storage.gcs
+        : {}) as Record<string, unknown>;
+
+    const projectId = readNonEmptyString(gcs.projectId);
+    const inputBucket = readNonEmptyString(gcs.inputBucket);
+    const inputPrefix = readNonEmptyString(gcs.inputPrefix) ?? '';
+    const outputBucket = readNonEmptyString(gcs.outputBucket);
+    const outputPrefix = readNonEmptyString(gcs.outputPrefix) ?? '';
+    const contextBucket = readNonEmptyString(gcs.contextBucket);
+    const contextPrefix = readNonEmptyString(gcs.contextPrefix) ?? '';
+    const inputUri = readNonEmptyString(gcs.inputUri);
+    const outputUri = readNonEmptyString(gcs.outputUri);
+    const contextUri = readNonEmptyString(gcs.contextUri);
+    const credentialsFile = readNonEmptyString(gcs.credentialsFile);
+
+    if (projectId) lines.push(`☁️  GCP Project:      ${projectId}`);
+    if (inputBucket) lines.push(`📥 GCS Input:         ${inputBucket}/${inputPrefix}`);
+    else if (inputUri) lines.push(`📥 GCS Input URI:     ${inputUri}`);
+    if (outputBucket) lines.push(`📤 GCS Output:        ${outputBucket}/${outputPrefix}`);
+    else if (outputUri) lines.push(`📤 GCS Output URI:    ${outputUri}`);
+    if (contextBucket) lines.push(`📚 GCS Context:       ${contextBucket}/${contextPrefix}`);
+    else if (contextUri) lines.push(`📚 GCS Context URI:   ${contextUri}`);
+    lines.push(`🔐 GCS Credentials:   ${credentialsFile ?? 'ADC/default environment'}`);
+
+    return lines;
+}
+
+function configureHttpLogLevel(debug: boolean): void {
+    const packageName = '@redaksjon/protokoll-mcp';
+    const logLevel = debug ? 'DEBUG' : 'INFO';
+    let parsed: Record<string, unknown> = {};
+    const raw = process.env.LOGGING_CONFIG;
+
+    if (raw) {
+        try {
+            parsed = JSON.parse(raw) as Record<string, unknown>;
+        } catch {
+            parsed = {};
+        }
+    }
+
+    const overrides = (parsed.overrides as Record<string, unknown> | undefined) || {};
+    const packageOverride = (overrides[packageName] as Record<string, unknown> | undefined) || {};
+
+    process.env.LOGGING_CONFIG = JSON.stringify({
+        logLevel: parsed.logLevel || 'INFO',
+        logFormat: parsed.logFormat || 'TEXT',
+        ...parsed,
+        overrides: {
+            ...overrides,
+            [packageName]: {
+                ...packageOverride,
+                logLevel,
+            },
+        },
+    });
 }
 
 function parseCsvList(value: string): string[] {
@@ -149,8 +248,10 @@ async function notifyEntityChanged(entityType: string, entityId: string): Promis
         }
     }
 
-    // eslint-disable-next-line no-console
-    console.log(`🔔 Entity change notification sent for ${entityUri} (${notified} writer(s) notified)`);
+    rootLogger.info('entity.notification.sent', {
+        entityUri,
+        notifiedWriters: notified,
+    });
 }
 
 /**
@@ -201,8 +302,10 @@ async function sendEntityChangeNotifications(
             await notifyEntityChanged(ref.entityType, ref.entityId);
         }
     } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn(`sendEntityChangeNotifications: error for ${toolName}:`, err);
+        rootLogger.error('entity.notification.error', {
+            toolName,
+            error: err instanceof Error ? err.message : String(err),
+        });
     }
 }
 
@@ -212,8 +315,7 @@ setInterval(() => {
     const now = Date.now();
     for (const [sessionId, session] of sessions.entries()) {
         if (now - session.lastActivity > SESSION_TIMEOUT) {
-            // eslint-disable-next-line no-console
-            console.log(`Cleaning up inactive session: ${sessionId}`);
+            sessionLogger.info('cleanup.inactive_session', { sessionId });
             sessions.delete(sessionId);
         }
     }
@@ -275,8 +377,10 @@ function createMcpServer(): Server {
 
             // Send push notifications to sessions subscribed to affected entity resources
             sendEntityChangeNotifications(name, args).catch((err) => {
-                // eslint-disable-next-line no-console
-                console.error('Failed to send entity change notifications:', err);
+                rootLogger.error('entity.notification.dispatch_error', {
+                    toolName: name,
+                    error: err instanceof Error ? err.message : String(err),
+                });
             });
 
             return {
@@ -427,8 +531,13 @@ app.post('/audio/upload',
                 project,
             });
             
-            // eslint-disable-next-line no-console
-            console.log(`\n📤 Audio uploaded: ${file.name} → ${uuid}`);
+            uploadLogger.info('audio.upload.complete', {
+                originalFilename: file.name,
+                transcriptUuid: uuid,
+                bytes: buffer.byteLength,
+                objectPath: uploadObjectPath,
+                storageBackend: outputStorage.name,
+            });
             
             return c.json({
                 success: true,
@@ -441,8 +550,9 @@ app.post('/audio/upload',
             });
             
         } catch (error) {
-            // eslint-disable-next-line no-console
-            console.error('Upload error:', error);
+            uploadLogger.error('audio.upload.error', {
+                error: error instanceof Error ? error.message : String(error),
+            });
             return c.json({ 
                 error: 'Upload failed', 
                 details: error instanceof Error ? error.message : String(error)
@@ -499,8 +609,10 @@ app.get('/audio/:uuid', async (c) => {
         return c.body(audioBuffer as any);
         
     } catch (error) {
-        // eslint-disable-next-line no-console
-        console.error('Download error:', error);
+        uploadLogger.error('audio.download.error', {
+            uuid: c.req.param('uuid'),
+            error: error instanceof Error ? error.message : String(error),
+        });
         return c.json({ 
             error: 'Download failed',
             details: error instanceof Error ? error.message : String(error)
@@ -550,6 +662,7 @@ app.get('/health', async (c) => {
 
 // MCP endpoint - handles POST requests (JSON-RPC)
 app.post('/mcp', async (c) => {
+    const requestStartedAt = Date.now();
     const sessionIdHeader = c.req.header('mcp-session-id');
     
     // Read request body
@@ -558,6 +671,14 @@ app.post('/mcp', async (c) => {
     let jsonRpcMessage;
     try {
         jsonRpcMessage = JSON.parse(body);
+        requestLogger.debug('request.parse_jsonrpc', {
+            method: 'POST',
+            route: '/mcp',
+            sessionId: sessionIdHeader ?? null,
+            rpcMethod: jsonRpcMessage.method ?? null,
+            rpcId: jsonRpcMessage.id ?? null,
+            elapsedMs: Date.now() - requestStartedAt,
+        });
     } catch {
         return c.json({
             jsonrpc: '2.0',
@@ -596,6 +717,10 @@ app.post('/mcp', async (c) => {
         };
         
         sessions.set(newSessionId, session);
+        sessionLogger.info('created', {
+            sessionId: newSessionId,
+            workspaceRoot: process.env.WORKSPACE_ROOT || process.cwd(),
+        });
         
         // Use the config loaded once at startup
         const cardigantimeConfig = startupConfig;
@@ -617,6 +742,7 @@ app.post('/mcp', async (c) => {
         
         // Get the full initialized config from ServerConfig
         const serverConfig = ServerConfig.getServerConfig();
+        const storageConfig = ServerConfig.getStorageConfig();
         const context = ServerConfig.getContext();
         // Use getContextDirs() (actual loaded dirs) or fall back to configFile.contextDirectories
         const contextDirs = context?.getContextDirs?.() ?? (serverConfig.configFile as { contextDirectories?: string[] })?.contextDirectories;
@@ -624,41 +750,33 @@ app.post('/mcp', async (c) => {
             ? contextDirs.join(', ') 
             : 'NONE';
         
-        // Print configuration summary
-        // eslint-disable-next-line no-console
-        console.log('\n=================================================================');
-        // eslint-disable-next-line no-console
-        console.log('SESSION CREATED');
-        // eslint-disable-next-line no-console
-        console.log('=================================================================');
-        // eslint-disable-next-line no-console
-        console.log(`Session ID: ${newSessionId}`);
-        // eslint-disable-next-line no-console
-        console.log(`Working Directory: ${workspaceRoot}`);
-        // eslint-disable-next-line no-console
-        console.log(`Config File:       ${configPathDisplay}`);
-        // eslint-disable-next-line no-console
-        console.log('\nCONFIGURATION LOADED:');
-        // eslint-disable-next-line no-console
-        console.log('-----------------------------------------------------------------');
-        // eslint-disable-next-line no-console
-        console.log(`📥 Input (Audio):     ${serverConfig.inputDirectory || 'NOT SET'}`);
-        // eslint-disable-next-line no-console
-        console.log(`📤 Output (Notes):    ${serverConfig.outputDirectory || 'NOT SET'}`);
-        // eslint-disable-next-line no-console
-        console.log(`✅ Processed (Done):  ${serverConfig.processedDirectory || 'NOT SET'}`);
-        // eslint-disable-next-line no-console
-        console.log(`📚 Context Dirs:      ${contextDirsDisplay}`);
-        // eslint-disable-next-line no-console
-        console.log(`🤖 AI Model:          ${(cardigantimeConfig as any).model || 'default'}`);
-        // eslint-disable-next-line no-console
-        console.log(`🎤 Transcribe Model:  ${(cardigantimeConfig as any).transcriptionModel || 'default'}`);
-        // eslint-disable-next-line no-console
-        console.log(`🐛 Debug Mode:        ${(cardigantimeConfig as any).debug ? 'ON' : 'OFF'}`);
-        // eslint-disable-next-line no-console
-        console.log(`📢 Verbose Mode:      ${(cardigantimeConfig as any).verbose ? 'ON' : 'OFF'}`);
-        // eslint-disable-next-line no-console
-        console.log('=================================================================\n');
+        sessionLogger.info('configuration.loaded', {
+            sessionId: newSessionId,
+            workingDirectory: workspaceRoot,
+            configFile: configPathDisplay,
+            inputDirectory: serverConfig.inputDirectory || null,
+            outputDirectory: serverConfig.outputDirectory || null,
+            processedDirectory: serverConfig.processedDirectory || null,
+            contextDirectories: contextDirsDisplay,
+            storageBackend: storageConfig.backend,
+            model: (cardigantimeConfig as any).model || 'default',
+            transcriptionModel: (cardigantimeConfig as any).transcriptionModel || 'default',
+            debugMode: (cardigantimeConfig as any).debug ? 'ON' : 'OFF',
+            verboseMode: (cardigantimeConfig as any).verbose ? 'ON' : 'OFF',
+        });
+        if (storageConfig.backend === 'gcs' && storageConfig.gcs) {
+            sessionLogger.info('configuration.gcs', {
+                sessionId: newSessionId,
+                projectId: storageConfig.gcs.projectId ?? process.env.GOOGLE_CLOUD_PROJECT ?? 'default',
+                credentialsFile: storageConfig.gcs.credentialsFile ?? 'ADC/default environment',
+                inputBucket: storageConfig.gcs.inputBucket ?? null,
+                inputPrefix: storageConfig.gcs.inputPrefix ?? null,
+                outputBucket: storageConfig.gcs.outputBucket ?? null,
+                outputPrefix: storageConfig.gcs.outputPrefix ?? null,
+                contextBucket: storageConfig.gcs.contextBucket ?? null,
+                contextPrefix: storageConfig.gcs.contextPrefix ?? null,
+            });
+        }
         
         // Set session ID in response header
         c.header('Mcp-Session-Id', newSessionId);
@@ -676,55 +794,56 @@ app.post('/mcp', async (c) => {
             }, 404);
         }
         session.lastActivity = Date.now();
+        sessionLogger.debug('reused', { sessionId: session.sessionId });
     }
 
-    // Log incoming request
     const isNotification = jsonRpcMessage.id === undefined || jsonRpcMessage.id === null;
-    // eslint-disable-next-line no-console
-    console.log('\n─────────────────────────────────────────────────────────────────');
-    // eslint-disable-next-line no-console
-    console.log(`📨 Incoming ${isNotification ? 'NOTIFICATION' : 'REQUEST'}`);
-    // eslint-disable-next-line no-console
-    console.log('─────────────────────────────────────────────────────────────────');
-    // eslint-disable-next-line no-console
-    console.log(`Method:     ${jsonRpcMessage.method}`);
-    // eslint-disable-next-line no-console
-    console.log(`ID:         ${jsonRpcMessage.id !== undefined ? jsonRpcMessage.id : '(none - notification)'}`);
-    // eslint-disable-next-line no-console
-    console.log(`Session:    ${sessionIdHeader || '(new session)'}`);
-    if (jsonRpcMessage.params && Object.keys(jsonRpcMessage.params).length > 0) {
-        // eslint-disable-next-line no-console
-        console.log(`Parameters:`);
-        // eslint-disable-next-line no-console
-        console.log(JSON.stringify(jsonRpcMessage.params, null, 2));
-    } else {
-        // eslint-disable-next-line no-console
-        console.log(`Parameters: (none)`);
-    }
-    // eslint-disable-next-line no-console
-    console.log('─────────────────────────────────────────────────────────────────');
+    requestLogger.info('incoming', {
+        method: 'POST',
+        route: '/mcp',
+        sessionId: session.sessionId,
+        rpcMethod: jsonRpcMessage.method ?? null,
+        rpcId: jsonRpcMessage.id ?? null,
+        rpcType: isNotification ? 'notification' : 'request',
+    });
+    requestLogger.debug('incoming.params', {
+        sessionId: session.sessionId,
+        rpcMethod: jsonRpcMessage.method ?? null,
+        rpcId: jsonRpcMessage.id ?? null,
+        params: jsonRpcMessage.params ?? null,
+    });
 
     // Handle notifications (no response expected)
     if (isNotification) {
         switch (jsonRpcMessage.method) {
             case 'notifications/initialized':
                 session.initialized = true;
-                // eslint-disable-next-line no-console
-                console.log('✅ Client initialized');
+                requestLogger.info('notification.initialized', {
+                    sessionId: session.sessionId,
+                    rpcMethod: jsonRpcMessage.method,
+                });
                 break;
             case 'notifications/cancelled':
-                // eslint-disable-next-line no-console
-                console.log('⚠️  Client cancelled request:', jsonRpcMessage.params);
+                requestLogger.info('notification.cancelled', {
+                    sessionId: session.sessionId,
+                    params: jsonRpcMessage.params ?? null,
+                });
                 break;
             default:
-                // eslint-disable-next-line no-console
-                console.log('⚠️  Unknown notification:', jsonRpcMessage.method);
+                requestLogger.debug('notification.unknown', {
+                    sessionId: session.sessionId,
+                    rpcMethod: jsonRpcMessage.method,
+                });
         }
-        
-        // eslint-disable-next-line no-console
-        console.log('📤 Response: 202 Accepted (notification)');
-        // eslint-disable-next-line no-console
-        console.log('─────────────────────────────────────────────────────────────────\n');
+        requestLogger.info('complete', {
+            method: 'POST',
+            route: '/mcp',
+            sessionId: session.sessionId,
+            rpcMethod: jsonRpcMessage.method ?? null,
+            rpcId: jsonRpcMessage.id ?? null,
+            status: 202,
+            elapsedMs: Date.now() - requestStartedAt,
+        });
         
         return c.body(null, 202);
     }
@@ -735,11 +854,21 @@ app.post('/mcp', async (c) => {
         const uri = jsonRpcMessage.params?.uri as string | undefined;
         if (uri) {
             session.subscriptions.add(uri);
-            // eslint-disable-next-line no-console
-            console.log(`\n📝 SUBSCRIPTION CREATED: ${uri} (session: ${session.sessionId})`);
-            // eslint-disable-next-line no-console
-            console.log(`   Total subscriptions for session: ${session.subscriptions.size}\n`);
+            sessionLogger.info('subscription.created', {
+                sessionId: session.sessionId,
+                uri,
+                totalSubscriptions: session.subscriptions.size,
+            });
         }
+        requestLogger.info('complete', {
+            method: 'POST',
+            route: '/mcp',
+            sessionId: session.sessionId,
+            rpcMethod: jsonRpcMessage.method,
+            rpcId: jsonRpcMessage.id ?? null,
+            status: 200,
+            elapsedMs: Date.now() - requestStartedAt,
+        });
         return c.json({ jsonrpc: '2.0', result: {}, id: jsonRpcMessage.id });
     }
 
@@ -747,16 +876,44 @@ app.post('/mcp', async (c) => {
         const uri = jsonRpcMessage.params?.uri as string | undefined;
         if (uri) {
             session.subscriptions.delete(uri);
-            // eslint-disable-next-line no-console
-            console.log(`\n📝 SUBSCRIPTION REMOVED: ${uri} (session: ${session.sessionId})`);
-            // eslint-disable-next-line no-console
-            console.log(`   Total subscriptions for session: ${session.subscriptions.size}\n`);
+            sessionLogger.info('subscription.removed', {
+                sessionId: session.sessionId,
+                uri,
+                totalSubscriptions: session.subscriptions.size,
+            });
         }
+        requestLogger.info('complete', {
+            method: 'POST',
+            route: '/mcp',
+            sessionId: session.sessionId,
+            rpcMethod: jsonRpcMessage.method,
+            rpcId: jsonRpcMessage.id ?? null,
+            status: 200,
+            elapsedMs: Date.now() - requestStartedAt,
+        });
         return c.json({ jsonrpc: '2.0', result: {}, id: jsonRpcMessage.id });
     }
 
     // Handle regular requests through transport
-    return session.transport.handleRequest(c);
+    transportLogger.debug('request.transport', {
+        method: 'POST',
+        route: '/mcp',
+        sessionId: session.sessionId,
+        rpcMethod: jsonRpcMessage.method ?? null,
+        rpcId: jsonRpcMessage.id ?? null,
+        elapsedMs: Date.now() - requestStartedAt,
+    });
+    const response = await session.transport.handleRequest(c);
+    requestLogger.info('complete', {
+        method: 'POST',
+        route: '/mcp',
+        sessionId: session.sessionId,
+        rpcMethod: jsonRpcMessage.method ?? null,
+        rpcId: jsonRpcMessage.id ?? null,
+        status: response!.status,
+        elapsedMs: Date.now() - requestStartedAt,
+    });
+    return response;
 });
 
 // MCP endpoint - handles GET requests (SSE)
@@ -802,8 +959,7 @@ app.get('/mcp', async (c) => {
         stream.onAbort(() => {
             clearInterval(pingInterval);
             session.sseWriters.delete(writer);
-            // eslint-disable-next-line no-console
-            console.log(`SSE client disconnected from session ${sessionId}`);
+            sseLogger.info('client.disconnected', { sessionId });
         });
 
         // Keep the stream open indefinitely
@@ -839,8 +995,7 @@ app.delete('/mcp', async (c) => {
     // Remove session
     sessions.delete(sessionId);
 
-    // eslint-disable-next-line no-console
-    console.log(`Session terminated: ${sessionId}`);
+    sessionLogger.info('terminated', { sessionId });
 
     return c.body(null, 200);
 });
@@ -957,6 +1112,8 @@ async function main() {
         verbose: (args.verbose as boolean | undefined) ?? parseBooleanEnv(process.env.PROTOKOLL_VERBOSE),
     });
 
+    configureHttpLogLevel((cardigantimeConfig as any).debug === true);
+
     // Set WORKSPACE_ROOT from resolved config dirs (when no explicit --config)
     if (!args.config) {
         const resolvedConfigDirs = (cardigantimeConfig as any).resolvedConfigDirs as string[] | undefined;
@@ -994,7 +1151,7 @@ async function main() {
     const host = (args.host as string | undefined) || '127.0.0.1';
     const portSource = portConfig.source === 'default' ? '(default)' : `(from ${portConfig.source})`;
 
-    // ── Display startup banner ────────────────────────────────────────────────
+    // ── Emit startup config logs ──────────────────────────────────────────────
     const resolvedConfigDirsForBanner = (cardigantimeConfig as any).resolvedConfigDirs as string[] | undefined;
     const configRoot = resolvedConfigDirsForBanner?.[0] ?? process.env.WORKSPACE_ROOT ?? process.cwd();
     const configPathDisplay = resolve(configRoot, DEFAULT_CONFIG_FILE);
@@ -1006,42 +1163,26 @@ async function main() {
         ? contextDirs.join(', ')
         : 'NOT SET';
     
-    // eslint-disable-next-line no-console
-    console.log('\n=================================================================');
-    // eslint-disable-next-line no-console
-    console.log('PROTOKOLL MCP HTTP SERVER (Hono)');
-    // eslint-disable-next-line no-console
-    console.log('=================================================================');
-    // eslint-disable-next-line no-console
-    console.log(`🌐 Server URL:        http://${host}:${port} ${portSource}`);
-    // eslint-disable-next-line no-console
-    console.log(`💚 Health Check:      http://${host}:${port}/health`);
-    // eslint-disable-next-line no-console
-    console.log(`🔌 MCP Endpoint:      http://${host}:${port}/mcp`);
-    // eslint-disable-next-line no-console
-    console.log(`📁 Working Directory: ${process.cwd()}`);
-    // eslint-disable-next-line no-console
-    console.log(`⚙️  Config File:       ${configPathDisplay}`);
-    // eslint-disable-next-line no-console
-    console.log('\nCONFIGURATION:');
-    // eslint-disable-next-line no-console
-    console.log('-----------------------------------------------------------------');
-    // eslint-disable-next-line no-console
-    console.log(`📥 Input (Audio):     ${inputDir}`);
-    // eslint-disable-next-line no-console
-    console.log(`📤 Output (Notes):    ${outputDir}`);
-    // eslint-disable-next-line no-console
-    console.log(`📚 Context Dirs:      ${contextDirsDisplay}`);
-    // eslint-disable-next-line no-console
-    console.log(`🤖 AI Model:          ${(cardigantimeConfig as any).model || 'default'}`);
-    // eslint-disable-next-line no-console
-    console.log(`🎤 Transcribe Model:  ${(cardigantimeConfig as any).transcriptionModel || 'default'}`);
-    // eslint-disable-next-line no-console
-    console.log(`🐛 Debug Mode:        ${(cardigantimeConfig as any).debug ? 'ON' : 'OFF'}`);
-    // eslint-disable-next-line no-console
-    console.log(`📢 Verbose Mode:      ${(cardigantimeConfig as any).verbose ? 'ON' : 'OFF'}`);
-    // eslint-disable-next-line no-console
-    console.log('=================================================================\n');
+    lifecycleLogger.info('startup', {
+        serverName: 'protokoll-mcp-http',
+        transport: 'hono',
+        serverUrl: `http://${host}:${port}`,
+        healthEndpoint: `http://${host}:${port}/health`,
+        mcpEndpoint: `http://${host}:${port}/mcp`,
+        portSource,
+        workingDirectory: process.cwd(),
+        configFile: configPathDisplay,
+        inputDirectory: inputDir,
+        outputDirectory: outputDir,
+        contextDirectories: contextDirsDisplay,
+        model: (cardigantimeConfig as any).model || 'default',
+        transcriptionModel: (cardigantimeConfig as any).transcriptionModel || 'default',
+        debugMode: (cardigantimeConfig as any).debug ? 'ON' : 'OFF',
+        verboseMode: (cardigantimeConfig as any).verbose ? 'ON' : 'OFF',
+    });
+    lifecycleLogger.debug('startup.storage', {
+        lines: describeRawStorageConfig(cardigantimeConfig as Record<string, unknown>),
+    });
 
     // Start background transcription worker
     if (outputDir !== 'NOT SET') {
@@ -1067,14 +1208,14 @@ async function main() {
         // Make worker available to queue tools
         setWorkerInstance(transcriptionWorker);
     } else {
-        // eslint-disable-next-line no-console
-        console.log('⚠️  Output directory not configured - transcription worker disabled');
+        lifecycleLogger.info('worker.disabled', {
+            reason: 'output_directory_not_configured',
+        });
     }
 
     // Graceful shutdown
     process.on('SIGTERM', async () => {
-        // eslint-disable-next-line no-console
-        console.log('\n🛑 Received SIGTERM, shutting down gracefully...');
+        lifecycleLogger.info('shutdown.signal_received', { signal: 'SIGTERM' });
         if (transcriptionWorker) {
             await transcriptionWorker.stop();
         }
@@ -1082,8 +1223,7 @@ async function main() {
     });
 
     process.on('SIGINT', async () => {
-        // eslint-disable-next-line no-console
-        console.log('\n🛑 Received SIGINT, shutting down gracefully...');
+        lifecycleLogger.info('shutdown.signal_received', { signal: 'SIGINT' });
         if (transcriptionWorker) {
             await transcriptionWorker.stop();
         }
@@ -1098,8 +1238,9 @@ async function main() {
 }
 
 main().catch((error) => {
-    // eslint-disable-next-line no-console
-    console.error('Failed to start server:', error);
+    lifecycleLogger.error('startup.failed', {
+        error: error instanceof Error ? error.message : String(error),
+    });
     process.exit(1);
 });
 

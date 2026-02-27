@@ -15,6 +15,7 @@
   "homepage": "https://github.com/redaksjon/protokoll",
   "scripts": {
     "build": "npm run lint && tsc --noEmit && vite build && chmod +x dist/mcp/server.js dist/mcp/server-hono.js",
+    "postinstall": "node scripts/ensure-executable-bins.mjs",
     "dev": "vite",
     "watch": "vite build --watch",
     "test": "vitest run --coverage",
@@ -54,6 +55,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
+    "@fjell/logging": "^4.4.69",
     "@google-cloud/storage": "^7.19.0",
     "@google/generative-ai": "^0.24.1",
     "@hono/mcp": "^0.2.3",

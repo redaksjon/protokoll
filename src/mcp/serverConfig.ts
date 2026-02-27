@@ -16,12 +16,14 @@ import { fileUriToPath } from './roots';
 import { resolve } from 'node:path';
 import { access } from 'node:fs/promises';
 import * as Cardigantime from '@utilarium/cardigantime';
+import Logging from '@fjell/logging';
 import { DEFAULT_STORAGE_CONFIG, type StorageConfig } from './storage/types';
 import { createGcsStorageProvider } from './storage/gcsProvider';
 import { FilesystemStorageProvider, type FileStorageProvider } from './storage/fileProviders';
 import { parseGcsUri } from './storage/gcsUri';
 
 const DEFAULT_CONFIG_FILE = 'protokoll-config.yaml';
+const logger = Logging.getLogger('@redaksjon/protokoll-mcp').get('server-config');
 const cardigantime = Cardigantime.create({
     defaults: {
         configDirectory: '.',
@@ -32,7 +34,7 @@ const cardigantime = Cardigantime.create({
         // pathFields determines which fields are processed, resolvePathArray determines
         // if array elements should be resolved individually
         pathResolution: {
-            pathFields: ['inputDirectory', 'outputDirectory', 'processedDirectory', 'contextDirectories'],
+            pathFields: ['inputDirectory', 'outputDirectory', 'processedDirectory', 'contextDirectories', 'storage.gcs.credentialsFile'],
             resolvePathArray: ['contextDirectories'],
         },
     },
@@ -97,6 +99,41 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null;
 }
 
+function readString(value: unknown): string | undefined {
+    return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function buildGcsUri(bucket: string, prefix?: string): string {
+    const trimmedBucket = bucket.trim();
+    const normalizedPrefix = (prefix ?? '')
+        .replace(/^\/+/, '')
+        .replace(/\/+/g, '/')
+        .replace(/\/+$/, '');
+    if (!normalizedPrefix) {
+        return `gs://${trimmedBucket}`;
+    }
+    return `gs://${trimmedBucket}/${normalizedPrefix}`;
+}
+
+function resolveGcsUri(rawUri: string | undefined, bucket: string | undefined, prefix: string | undefined): string {
+    if (bucket) {
+        return buildGcsUri(bucket, prefix);
+    }
+    return rawUri ?? '';
+}
+
+function resolveGcsUris(gcs: NonNullable<StorageConfig['gcs']>): {
+    inputUri: string;
+    outputUri: string;
+    contextUri: string;
+} {
+    return {
+        inputUri: resolveGcsUri(gcs.inputUri, gcs.inputBucket, gcs.inputPrefix),
+        outputUri: resolveGcsUri(gcs.outputUri, gcs.outputBucket, gcs.outputPrefix),
+        contextUri: resolveGcsUri(gcs.contextUri, gcs.contextBucket, gcs.contextPrefix),
+    };
+}
+
 function parseStorageConfig(configFile: Record<string, unknown> | null): StorageConfig {
     if (!configFile) {
         return DEFAULT_STORAGE_CONFIG;
@@ -113,17 +150,31 @@ function parseStorageConfig(configFile: Record<string, unknown> | null): Storage
     }
 
     const rawGcs = isObjectRecord(rawStorage.gcs) ? rawStorage.gcs : {};
-    const inputUri = typeof rawGcs.inputUri === 'string' ? rawGcs.inputUri : '';
-    const outputUri = typeof rawGcs.outputUri === 'string' ? rawGcs.outputUri : '';
-    const contextUri = typeof rawGcs.contextUri === 'string' ? rawGcs.contextUri : '';
-    const credentialsFile = typeof rawGcs.credentialsFile === 'string' ? rawGcs.credentialsFile : undefined;
+    const projectId = readString(rawGcs.projectId);
+    const inputUri = readString(rawGcs.inputUri);
+    const outputUri = readString(rawGcs.outputUri);
+    const contextUri = readString(rawGcs.contextUri);
+    const inputBucket = readString(rawGcs.inputBucket);
+    const inputPrefix = readString(rawGcs.inputPrefix);
+    const outputBucket = readString(rawGcs.outputBucket);
+    const outputPrefix = readString(rawGcs.outputPrefix);
+    const contextBucket = readString(rawGcs.contextBucket);
+    const contextPrefix = readString(rawGcs.contextPrefix);
+    const credentialsFile = readString(rawGcs.credentialsFile);
 
     return {
         backend: 'gcs',
         gcs: {
+            projectId,
             inputUri,
             outputUri,
             contextUri,
+            inputBucket,
+            inputPrefix,
+            outputBucket,
+            outputPrefix,
+            contextBucket,
+            contextPrefix,
             credentialsFile,
         },
     };
@@ -148,13 +199,25 @@ async function validateGcsStorageConfig(storageConfig: StorageConfig, configDir:
         throw new Error('storage.backend is set to gcs, but storage.gcs is missing.');
     }
 
-    if (!storageConfig.gcs.inputUri || !storageConfig.gcs.outputUri || !storageConfig.gcs.contextUri) {
-        throw new Error('storage.gcs.inputUri, storage.gcs.outputUri, and storage.gcs.contextUri are required when storage.backend is gcs.');
+    const startedAt = Date.now();
+    const { inputUri, outputUri, contextUri } = resolveGcsUris(storageConfig.gcs);
+    logger.debug('storage.gcs.validate.start', {
+        configDir,
+        inputUri,
+        outputUri,
+        contextUri,
+        projectId: storageConfig.gcs.projectId ?? null,
+        hasCredentialsFile: Boolean(storageConfig.gcs.credentialsFile),
+    });
+    if (!inputUri || !outputUri || !contextUri) {
+        throw new Error(
+            'GCS config is incomplete. Provide either storage.gcs.{inputUri,outputUri,contextUri} or storage.gcs.{inputBucket,inputPrefix,outputBucket,outputPrefix,contextBucket,contextPrefix}.'
+        );
     }
 
-    parseGcsUri(storageConfig.gcs.inputUri);
-    parseGcsUri(storageConfig.gcs.outputUri);
-    parseGcsUri(storageConfig.gcs.contextUri);
+    parseGcsUri(inputUri);
+    parseGcsUri(outputUri);
+    parseGcsUri(contextUri);
 
     const credentialsFile = resolveCredentialsFilePath(storageConfig.gcs.credentialsFile, configDir);
     if (credentialsFile) {
@@ -164,6 +227,15 @@ async function validateGcsStorageConfig(storageConfig: StorageConfig, configDir:
             throw new Error(`GCS credentials file is not readable: ${credentialsFile}`);
         }
     }
+
+    logger.info('storage.gcs.validate.complete', {
+        inputUri,
+        outputUri,
+        contextUri,
+        projectId: storageConfig.gcs.projectId ?? null,
+        credentialsFile: credentialsFile ?? null,
+        elapsedMs: Date.now() - startedAt,
+    });
 
     return credentialsFile;
 }
@@ -185,11 +257,24 @@ async function createStorageProviders(
         throw new Error('storage.backend is set to gcs, but storage.gcs is missing.');
     }
 
+    const startedAt = Date.now();
+    const { inputUri, outputUri } = resolveGcsUris(storageConfig.gcs);
+    logger.debug('storage.providers.gcs.start', {
+        inputUri,
+        outputUri,
+        projectId: storageConfig.gcs.projectId ?? null,
+    });
     const credentialsFile = await validateGcsStorageConfig(storageConfig, configDir);
-    const inputStorage = createGcsStorageProvider(storageConfig.gcs.inputUri, credentialsFile);
-    const outputStorage = createGcsStorageProvider(storageConfig.gcs.outputUri, credentialsFile);
+    const inputStorage = createGcsStorageProvider(inputUri, credentialsFile, storageConfig.gcs.projectId);
+    const outputStorage = createGcsStorageProvider(outputUri, credentialsFile, storageConfig.gcs.projectId);
     await inputStorage.verifyBucketAccess();
     await outputStorage.verifyBucketAccess();
+    logger.info('storage.providers.gcs.complete', {
+        inputUri,
+        outputUri,
+        projectId: storageConfig.gcs.projectId ?? null,
+        elapsedMs: Date.now() - startedAt,
+    });
 
     return {
         inputStorage,
@@ -255,7 +340,11 @@ export async function initializeServerConfig(roots: McpRoot[], mode: ServerMode 
         const storageConfig = parseStorageConfig(configFile as Record<string, unknown>);
         const credentialsFile = await validateGcsStorageConfig(storageConfig, configDir);
         if (storageConfig.backend === 'gcs' && storageConfig.gcs) {
-            const parsedContextUri = parseGcsUri(storageConfig.gcs.contextUri);
+            if (storageConfig.gcs.projectId) {
+                process.env.GOOGLE_CLOUD_PROJECT = storageConfig.gcs.projectId;
+            }
+            const { contextUri } = resolveGcsUris(storageConfig.gcs);
+            const parsedContextUri = parseGcsUri(contextUri);
             contextCreateOptions.gcs = {
                 bucketName: parsedContextUri.bucket,
                 basePath: parsedContextUri.prefix,

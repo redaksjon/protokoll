@@ -144,7 +144,7 @@ export async function createToolContext(contextDirectory?: string): Promise<Prot
 
     const storageConfig = ServerConfig.getStorageConfig();
     if (storageConfig.backend === 'gcs' && storageConfig.gcs) {
-        const parsedContextUri = parseGcsUri(storageConfig.gcs.contextUri);
+        const parsedContextUri = parseGcsUri(storageConfig.gcs.contextUri as string);
         return Context.create({
             startingDir: effectiveDir,
             gcs: {

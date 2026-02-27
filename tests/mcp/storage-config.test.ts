@@ -99,4 +99,37 @@ describe('storage config', () => {
       await fs.rm(tempDir, { recursive: true, force: true });
     }
   });
+
+  it('accepts split gcs bucket/prefix fields and validates credentials path', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'protokoll-storage-config-split-gcs-'));
+    try {
+      await fs.writeFile(
+        path.join(tempDir, 'protokoll-config.yaml'),
+        [
+          'storage:',
+          '  backend: gcs',
+          '  gcs:',
+          '    projectId: my-gcp-project',
+          '    inputBucket: bucket-input',
+          '    inputPrefix: protokoll/input',
+          '    outputBucket: bucket-output',
+          '    outputPrefix: protokoll/output',
+          '    contextBucket: bucket-context',
+          '    contextPrefix: shared/context',
+          '    credentialsFile: ./missing-service-account.json',
+          '',
+        ].join('\n'),
+        'utf8'
+      );
+
+      await expect(
+        initializeServerConfig(
+          [{ uri: pathToFileURL(tempDir).toString(), name: 'test-root' }],
+          'local'
+        )
+      ).rejects.toThrow('GCS credentials file is not readable');
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
 });
