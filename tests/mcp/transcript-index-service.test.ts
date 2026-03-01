@@ -10,17 +10,27 @@ const mocks = vi.hoisted(() => ({
   pklOpen: vi.fn(),
 }));
 
-vi.mock('@redaksjon/protokoll-engine', () => ({
-  Transcript: {
-    readTranscriptContent: mocks.readTranscriptContent,
-  },
-}));
+vi.mock('@redaksjon/protokoll-engine', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@redaksjon/protokoll-engine')>();
+  return {
+    ...actual,
+    Transcript: {
+      ...actual.Transcript,
+      readTranscriptContent: mocks.readTranscriptContent,
+    },
+  };
+});
 
-vi.mock('@redaksjon/protokoll-format', () => ({
-  PklTranscript: {
-    open: mocks.pklOpen,
-  },
-}));
+vi.mock('@redaksjon/protokoll-format', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@redaksjon/protokoll-format')>();
+  return {
+    ...actual,
+    PklTranscript: {
+      ...actual.PklTranscript,
+      open: mocks.pklOpen,
+    },
+  };
+});
 
 interface MockStorageState {
   metadata: StorageFileMetadata[];
