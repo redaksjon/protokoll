@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fileURLToPath } from 'node:url';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import {
     validatePathWithinDirectory,
     sanitizePath,
@@ -24,6 +27,7 @@ const mockGetOutputDirectory = vi.hoisted(() => vi.fn());
 const mockGetProcessedDirectory = vi.hoisted(() => vi.fn());
 const mockGetServerConfig = vi.hoisted(() => vi.fn());
 const mockIsRemoteMode = vi.hoisted(() => vi.fn());
+const mockGetOutputStorage = vi.hoisted(() => vi.fn());
 const mockGetAudioCreationTime = vi.hoisted(() => vi.fn());
 const mockHashFile = vi.hoisted(() => vi.fn());
 const mockTranscriptExists = vi.hoisted(() => vi.fn());
@@ -37,6 +41,7 @@ vi.mock('../../src/mcp/serverConfig', () => ({
     getProcessedDirectory: (...args: unknown[]) => mockGetProcessedDirectory(...args),
     getServerConfig: (...args: unknown[]) => mockGetServerConfig(...args),
     isRemoteMode: (...args: unknown[]) => mockIsRemoteMode(...args),
+    getOutputStorage: (...args: unknown[]) => mockGetOutputStorage(...args),
 }));
 
 vi.mock('@redaksjon/protokoll-engine', () => ({
@@ -64,6 +69,7 @@ describe('Shared Utilities', () => {
         mockGetProcessedDirectory.mockReturnValue('/test/processed');
         mockGetServerConfig.mockReturnValue({ configFile: { contextDirectories: ['/test/context'] } });
         mockIsRemoteMode.mockReturnValue(false);
+        mockGetOutputStorage.mockReturnValue({ name: 'local' });
         mockGetAudioCreationTime.mockResolvedValue(new Date('2026-02-14T12:00:00Z'));
         mockHashFile.mockResolvedValue('abc123456789');
         mockTranscriptExists.mockResolvedValue({ exists: true, path: '/test/output/2026/2/14-test.pkl' });
@@ -510,13 +516,33 @@ describe('Shared Utilities', () => {
             expect(result).toBe('/test/output/2026/2/14-meeting.pkl');
         });
 
+        it('should resolve Protokoll URI with query and fragment', async () => {
+            mockTranscriptExists.mockResolvedValueOnce({
+                exists: true,
+                path: '/test/output/2026/2/14-meeting.pkl',
+            });
+            const result = await resolveTranscriptPath(
+                'protokoll://transcript/2026/2/14-meeting?source=detail#tab'
+            );
+            expect(result).toBe('/test/output/2026/2/14-meeting.pkl');
+        });
+
+        it('should normalize legacy ../ prefix in transcript URIs', async () => {
+            mockTranscriptExists.mockResolvedValueOnce({
+                exists: true,
+                path: '/test/output/2026/2/14-meeting.pkl',
+            });
+            const result = await resolveTranscriptPath('protokoll://transcript/../2026/2/14-meeting');
+            expect(result).toBe('/test/output/2026/2/14-meeting.pkl');
+        });
+
         it('should throw when transcriptPath is empty', async () => {
-            await expect(resolveTranscriptPath('')).rejects.toThrow('transcriptPath is required');
+            await expect(resolveTranscriptPath('')).rejects.toThrow('Transcript reference is required');
         });
 
         it('should throw when transcriptPath is not a string', async () => {
             await expect(resolveTranscriptPath(null as unknown as string)).rejects.toThrow(
-                'transcriptPath is required'
+                'Transcript reference is required'
             );
         });
 
@@ -546,6 +572,52 @@ describe('Shared Utilities', () => {
             });
             const result = await resolveTranscriptPath('2026\\2\\14-test');
             expect(result).toBe('/test/output/2026/2/14-test.pkl');
+        });
+
+        it('should throw for GCS-backed resolution in shared helper', async () => {
+            mockGetOutputStorage.mockReturnValueOnce({ name: 'gcs' });
+            await expect(resolveTranscriptPath('2026/2/14-test')).rejects.toThrow(
+                'does not support GCS-backed transcripts'
+            );
+        });
+
+        it('should resolve slug-only reference via recursive fallback when unique', async () => {
+            const root = await mkdtemp(join(tmpdir(), 'shared-resolve-'));
+            const nestedDir = join(root, '2026', '2');
+            const pklPath = join(nestedDir, 'unique-slug.pkl');
+            await mkdir(nestedDir, { recursive: true });
+            await writeFile(pklPath, 'test');
+
+            mockGetOutputDirectory.mockReturnValueOnce(root);
+            mockTranscriptExists.mockResolvedValueOnce({ exists: false, path: null });
+
+            try {
+                const result = await resolveTranscriptPath('unique-slug');
+                expect(result).toBe(pklPath);
+            } finally {
+                await rm(root, { recursive: true, force: true });
+            }
+        });
+
+        it('should throw on ambiguous slug-only fallback matches', async () => {
+            const root = await mkdtemp(join(tmpdir(), 'shared-resolve-'));
+            const aDir = join(root, '2026', '2');
+            const bDir = join(root, '2026', '3');
+            await mkdir(aDir, { recursive: true });
+            await mkdir(bDir, { recursive: true });
+            await writeFile(join(aDir, 'duplicate-slug.pkl'), 'a');
+            await writeFile(join(bDir, 'duplicate-slug.pkl'), 'b');
+
+            mockGetOutputDirectory.mockReturnValueOnce(root);
+            mockTranscriptExists.mockResolvedValueOnce({ exists: false, path: null });
+
+            try {
+                await expect(resolveTranscriptPath('duplicate-slug')).rejects.toThrow(
+                    'Ambiguous transcript reference'
+                );
+            } finally {
+                await rm(root, { recursive: true, force: true });
+            }
         });
     });
 });

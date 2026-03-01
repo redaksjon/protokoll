@@ -284,6 +284,62 @@ async function notifyEntityChanged(entityType: string, entityId: string): Promis
 }
 
 /**
+ * Send a notifications/resource_changed event to all sessions subscribed to the given resource URI.
+ */
+async function notifyResourceChanged(resourceUri: string): Promise<void> {
+    const notification = JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'notifications/resource_changed',
+        params: { uri: resourceUri },
+    });
+    const sseMessage = `event: notification\ndata: ${notification}\n\n`;
+
+    let notified = 0;
+    for (const [, session] of sessions) {
+        if (session.subscriptions.has(resourceUri)) {
+            for (const writer of session.sseWriters) {
+                try {
+                    await writer(sseMessage);
+                    notified++;
+                } catch {
+                    // Stale writer — will be cleaned up on SSE abort
+                }
+            }
+        }
+    }
+
+    rootLogger.info('resource.notification.sent', {
+        resourceUri,
+        notifiedWriters: notified,
+    });
+}
+
+function toTranscriptResourceUri(transcriptPath: string): string | null {
+    const trimmed = transcriptPath.trim();
+    if (!trimmed) {
+        return null;
+    }
+
+    if (trimmed.startsWith('protokoll://transcript/')) {
+        const normalized = trimmed
+            .replace(/^protokoll:\/\/transcript\/\.\.\//, 'protokoll://transcript/')
+            .replace(/\.pkl(\?.*)?$/i, '$1');
+        return normalized;
+    }
+
+    const normalizedPath = trimmed
+        .replace(/^\/+/, '')
+        .replace(/\\/g, '/')
+        .replace(/\.pkl$/i, '');
+
+    if (!normalizedPath) {
+        return null;
+    }
+
+    return `protokoll://transcript/${normalizedPath}`;
+}
+
+/**
  * Inspect a completed tool call and fire entity-change notifications for any
  * entity that was mutated.  Failures are swallowed so they never affect the
  * tool result returned to the caller.
@@ -333,6 +389,34 @@ async function sendEntityChangeNotifications(
     } catch (err) {
         rootLogger.error('entity.notification.error', {
             toolName,
+            error: err instanceof Error ? err.message : String(err),
+        });
+    }
+}
+
+/**
+ * Send transcript resource change notifications for tools that mutate transcript content.
+ */
+async function sendTranscriptChangeNotifications(
+    toolName: string,
+    args: Record<string, unknown> | undefined,
+): Promise<void> {
+    if (!args || toolName !== 'protokoll_enhance_transcript') {
+        return;
+    }
+
+    const transcriptPath = typeof args.transcriptPath === 'string' ? args.transcriptPath : '';
+    const transcriptUri = toTranscriptResourceUri(transcriptPath);
+    if (!transcriptUri) {
+        return;
+    }
+
+    try {
+        await notifyResourceChanged(transcriptUri);
+    } catch (err) {
+        rootLogger.error('transcript.notification.error', {
+            toolName,
+            transcriptUri,
             error: err instanceof Error ? err.message : String(err),
         });
     }
@@ -412,11 +496,25 @@ function createMcpServer(): Server {
                 });
             });
 
+            // Send transcript change notifications for transcript-mutating tools
+            sendTranscriptChangeNotifications(name, args).catch((err) => {
+                rootLogger.error('transcript.notification.dispatch_error', {
+                    toolName: name,
+                    error: err instanceof Error ? err.message : String(err),
+                });
+            });
+
             return {
                 content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
             };
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
+            requestLogger.error('tool.call.failed', {
+                toolName: name,
+                args: args ?? {},
+                error: message,
+                stack: error instanceof Error ? error.stack : undefined,
+            });
             return {
                 content: [{ type: 'text', text: `Error: ${message}` }],
                 isError: true,
@@ -831,11 +929,19 @@ app.post('/mcp', async (c) => {
     c.header('Mcp-Session-Id', session.sessionId);
 
     const isNotification = jsonRpcMessage.id === undefined || jsonRpcMessage.id === null;
+    const rpcToolName = jsonRpcMessage.method === 'tools/call'
+        && jsonRpcMessage.params
+        && typeof jsonRpcMessage.params === 'object'
+        && 'name' in jsonRpcMessage.params
+        && typeof (jsonRpcMessage.params as { name?: unknown }).name === 'string'
+        ? String((jsonRpcMessage.params as { name: string }).name)
+        : null;
     requestLogger.info('incoming', {
         method: 'POST',
         route: '/mcp',
         sessionId: session.sessionId,
         rpcMethod: jsonRpcMessage.method ?? null,
+        rpcToolName,
         rpcId: jsonRpcMessage.id ?? null,
         rpcType: isNotification ? 'notification' : 'request',
     });
@@ -873,6 +979,7 @@ app.post('/mcp', async (c) => {
             route: '/mcp',
             sessionId: session.sessionId,
             rpcMethod: jsonRpcMessage.method ?? null,
+            rpcToolName,
             rpcId: jsonRpcMessage.id ?? null,
             status: 202,
             elapsedMs: Date.now() - requestStartedAt,
@@ -898,6 +1005,7 @@ app.post('/mcp', async (c) => {
             route: '/mcp',
             sessionId: session.sessionId,
             rpcMethod: jsonRpcMessage.method,
+            rpcToolName,
             rpcId: jsonRpcMessage.id ?? null,
             status: 200,
             elapsedMs: Date.now() - requestStartedAt,
@@ -920,6 +1028,7 @@ app.post('/mcp', async (c) => {
             route: '/mcp',
             sessionId: session.sessionId,
             rpcMethod: jsonRpcMessage.method,
+            rpcToolName,
             rpcId: jsonRpcMessage.id ?? null,
             status: 200,
             elapsedMs: Date.now() - requestStartedAt,
@@ -942,6 +1051,7 @@ app.post('/mcp', async (c) => {
         route: '/mcp',
         sessionId: session.sessionId,
         rpcMethod: jsonRpcMessage.method ?? null,
+        rpcToolName,
         rpcId: jsonRpcMessage.id ?? null,
         status: response!.status,
         elapsedMs: Date.now() - requestStartedAt,

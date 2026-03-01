@@ -2,8 +2,8 @@
 /**
  * Shared types, constants, and utilities for MCP tools
  */
-import { stat } from 'node:fs/promises';
-import { resolve, relative, isAbsolute } from 'node:path';
+import { stat, readdir } from 'node:fs/promises';
+import { resolve, relative, isAbsolute, join } from 'node:path';
 import { Media, Util as Storage, Transcript } from '@redaksjon/protokoll-engine';
 import { getLogger } from '@/logging';
 
@@ -16,7 +16,17 @@ const ensurePklExtension = Transcript.ensurePklExtension;
  * Inlined to avoid import issues
  */
 function isUuidInput(input: string): boolean {
-    return /^[a-f0-9]{8}/.test(input);
+    const normalized = input.trim();
+    if (
+        normalized.includes('/') ||
+        normalized.includes('\\') ||
+        normalized.includes('.') ||
+        normalized.startsWith('protokoll://')
+    ) {
+        return false;
+    }
+    // Full UUID or UUID-style hex prefix without path separators.
+    return /^[a-f0-9]{8,}$/i.test(normalized);
 }
 
 /**
@@ -409,10 +419,18 @@ export async function resolveTranscriptPath(
     contextDirectory?: string
 ): Promise<string> {
     if (!uriOrPathOrUuid || typeof uriOrPathOrUuid !== 'string') {
-        throw new Error('transcriptPath is required and must be a non-empty string');
+        throw new Error('Transcript reference is required and must be a non-empty string');
     }
     
     const outputDirectory = await getConfiguredDirectory('outputDirectory', contextDirectory);
+    const ServerConfig = await import('../serverConfig');
+    const outputStorage = ServerConfig.getOutputStorage();
+    if (outputStorage.name === 'gcs') {
+        throw new Error(
+            'resolveTranscriptPath does not support GCS-backed transcripts. ' +
+            'Use storage-aware transcript resolution in the tool handler.'
+        );
+    }
     
     // Check if input is a UUID
     if (isUuidInput(uriOrPathOrUuid)) {
@@ -427,13 +445,14 @@ export async function resolveTranscriptPath(
     
     // Check if input is a Protokoll URI
     if (isProtokolUri(uriOrPathOrUuid)) {
-        const parsed = parseUri(uriOrPathOrUuid);
+        const sanitizedUri = uriOrPathOrUuid.split('#')[0].split('?')[0];
+        const parsed = parseUri(sanitizedUri);
         if (parsed.resourceType !== 'transcript') {
             throw new Error(`Invalid URI: expected transcript URI, got ${parsed.resourceType}`);
         }
         // Extract the transcript path from the URI (without extension)
         // Type assertion is safe because we checked resourceType === 'transcript'
-        relativePath = (parsed as any).transcriptPath;
+        relativePath = String((parsed as any).transcriptPath || '').replace(/^(\.\.\/)+/, '');
     } else {
         // Handle as a file path (relative or absolute)
         if (isAbsolute(uriOrPathOrUuid)) {
@@ -463,6 +482,39 @@ export async function resolveTranscriptPath(
     const pklPath = ensurePklExtension(resolvedPath);
     const existsResult = await transcriptExists(pklPath);
     if (!existsResult.exists || !existsResult.path) {
+        // Fallback for slug-only references (e.g. "meeting-with-bret-nuussen-ssp"):
+        // search recursively under outputDirectory for a matching filename.
+        if (!relativePath.includes('/')) {
+            const candidateFilename = ensurePklExtension(relativePath).split('/').pop() || ensurePklExtension(relativePath);
+            const matches: string[] = [];
+
+            const walk = async (dir: string): Promise<void> => {
+                const entries = await readdir(dir, { withFileTypes: true });
+                for (const entry of entries) {
+                    const entryPath = join(dir, entry.name);
+                    if (entry.isDirectory()) {
+                        await walk(entryPath);
+                        continue;
+                    }
+                    if (entry.isFile() && entry.name === candidateFilename) {
+                        matches.push(entryPath);
+                    }
+                }
+            };
+
+            await walk(outputDirectory);
+
+            if (matches.length === 1) {
+                return matches[0];
+            }
+            if (matches.length > 1) {
+                throw new Error(
+                    `Ambiguous transcript reference "${uriOrPathOrUuid}": ${matches.length} matches found. ` +
+                    'Use full transcript URI or relative path with date folders.'
+                );
+            }
+        }
+
         throw new Error(`Transcript not found: ${uriOrPathOrUuid}`);
     }
     

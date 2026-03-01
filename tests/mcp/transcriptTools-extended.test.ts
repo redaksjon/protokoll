@@ -17,6 +17,7 @@ import {
     handleSummarizeTranscript,
     handleDeleteTranscriptSummary,
     handleRejectCorrection,
+    handleCorrectToEntity,
     handleCreateNote,
 } from '../../src/mcp/tools/transcriptTools';
 import * as fs from 'node:fs/promises';
@@ -24,6 +25,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { PklTranscript } from '@redaksjon/protokoll-format';
 import * as ContextModule from '../../src/context';
+import * as ServerConfigModule from '../../src/mcp/serverConfig';
 
 // Mock serverConfig for validateNotRemoteMode and getContextDirectories
 vi.mock('../../src/mcp/serverConfig', () => ({
@@ -32,6 +34,8 @@ vi.mock('../../src/mcp/serverConfig', () => ({
     getInputDirectory: vi.fn().mockReturnValue('/test/input'),
     getOutputDirectory: vi.fn().mockReturnValue('/test/output'),
     getProcessedDirectory: vi.fn().mockReturnValue('/test/processed'),
+    getOutputStorage: vi.fn().mockReturnValue({ name: 'local' }),
+    getContext: vi.fn(),
 }));
 
 // Mock the shared module to control getConfiguredDirectory and resolveTranscriptPath
@@ -208,6 +212,10 @@ describe('transcriptTools - extended handlers', () => {
         await fs.mkdir(transcriptsDir, { recursive: true });
 
         vi.mocked(getConfiguredDirectory).mockResolvedValue(transcriptsDir);
+        vi.mocked(ServerConfigModule.getOutputStorage as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+            name: 'local',
+        });
+        vi.mocked(ServerConfigModule.getContext as unknown as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
 
         mockProcessFeedback.mockImplementation(async (_feedback: string, ctx: { changes: unknown[] }) => {
             ctx.changes = [];
@@ -241,6 +249,85 @@ describe('transcriptTools - extended handlers', () => {
             await expect(
                 handleReadTranscript({ transcriptPath: '2025/1/nonexistent.pkl' })
             ).rejects.toThrow('Transcript not found');
+        });
+
+        it('should reject UUID refs in GCS mode', async () => {
+            vi.mocked(ServerConfigModule.getOutputStorage as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+                name: 'gcs',
+                exists: async () => false,
+                listFiles: async () => [],
+                readFile: async () => Buffer.from(''),
+                writeFile: async () => undefined,
+            });
+
+            await expect(
+                handleReadTranscript({ transcriptPath: '123e4567-e89b-12d3-a456-426614174000' })
+            ).rejects.toThrow('UUID transcript references are not supported in GCS mode yet');
+        });
+
+        it('should not basename-fallback folder-qualified refs in GCS mode', async () => {
+            vi.mocked(ServerConfigModule.getOutputStorage as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+                name: 'gcs',
+                exists: async () => false,
+                listFiles: async () => ['2025/1/same-name.pkl'],
+                readFile: async () => Buffer.from(''),
+                writeFile: async () => undefined,
+            });
+
+            await expect(
+                handleReadTranscript({ transcriptPath: '2026/2/same-name.pkl' })
+            ).rejects.toThrow('Transcript not found');
+        });
+    });
+
+    describe('handleCorrectToEntity', () => {
+        it('should throw when server context is not initialized', async () => {
+            await expect(
+                handleCorrectToEntity({
+                    transcriptPath: '2025/2/test.pkl',
+                    selectedText: 'Old Name',
+                    entityType: 'person',
+                    entityName: 'New Name',
+                })
+            ).rejects.toThrow('Server context not initialized');
+        });
+
+        it('should create a new person entity and apply correction', async () => {
+            await createTestTranscript(transcriptsDir, '2025/2/correct-entity.pkl', {
+                title: 'Entity Correction',
+                content: 'Met with Jhon yesterday.',
+            });
+
+            const saved = new Map<string, any>();
+            const contextStub = {
+                saveEntity: vi.fn(async (entity: any) => {
+                    saved.set(entity.id, entity);
+                }),
+                getPerson: vi.fn((id: string) => saved.get(id)),
+                getProject: vi.fn(),
+                getTerm: vi.fn(),
+                getCompany: vi.fn(),
+            };
+
+            vi.mocked(ServerConfigModule.getContext as unknown as ReturnType<typeof vi.fn>).mockReturnValue(
+                contextStub as any
+            );
+
+            const result = await handleCorrectToEntity({
+                transcriptPath: '2025/2/correct-entity.pkl',
+                selectedText: 'Jhon',
+                entityType: 'person',
+                entityName: 'John',
+                firstName: 'John',
+                lastName: 'Doe',
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.entity.type).toBe('person');
+            expect(result.correction.original).toBe('Jhon');
+            expect(result.correction.replacement).toBe('John');
+            expect(result.isNewEntity).toBe(true);
+            expect(contextStub.saveEntity).toHaveBeenCalled();
         });
     });
 
