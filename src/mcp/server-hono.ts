@@ -29,6 +29,7 @@ import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
 import { bodyLimit } from 'hono/body-limit';
 import { join, extname, basename, dirname } from 'node:path';
+import { mkdir, readFile } from 'node:fs/promises';
 // eslint-disable-next-line import/extensions
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
@@ -54,6 +55,8 @@ import type { McpRoot } from './types';
 import { DEFAULT_CONFIG_FILE, createQuietLogger } from './configDiscovery';
 import { TranscriptionWorker } from './worker/transcription-worker';
 import { setWorkerInstance } from './tools/queueTools';
+import { configureEngineLoggingBridge } from './engineLogging';
+import { markTranscriptIndexDirtyForStorage } from './resources/transcriptIndexService';
 import { Transcript as TranscriptOps } from '@redaksjon/protokoll-engine';
 import { PklTranscript } from '@redaksjon/protokoll-format';
 
@@ -85,6 +88,9 @@ const uploadLogger = rootLogger.get('upload');
 
 /** Cached config loaded in main() — available to the session init handler. */
 let startupConfig: Record<string, unknown> = {};
+let startupContextDirectories: string[] | undefined;
+let serverConfigInitPromise: Promise<void> | null = null;
+let serverConfigInitKey: string | null = null;
 
 // Audio upload constants
 const DEFAULT_MAX_AUDIO_SIZE = 1024 * 1024 * 1024; // 1GB
@@ -101,6 +107,30 @@ function readNonEmptyString(value: unknown): string | undefined {
 
 function readEnvString(name: string): string | undefined {
     return readNonEmptyString(process.env[name]);
+}
+
+function summarizeToolArgs(args: unknown): Record<string, unknown> {
+    if (!args || typeof args !== 'object') {
+        return {};
+    }
+    const input = args as Record<string, unknown>;
+    const summary: Record<string, unknown> = {};
+
+    if (typeof input.transcriptPath === 'string') summary.transcriptPath = input.transcriptPath;
+    if (typeof input.uuid === 'string') summary.uuid = input.uuid;
+    if (typeof input.projectId === 'string') summary.projectId = input.projectId;
+    if (typeof input.contextDirectory === 'string') summary.contextDirectory = input.contextDirectory;
+    if (typeof input.model === 'string') summary.model = input.model;
+    if (typeof input.status === 'string') summary.status = input.status;
+
+    if (typeof input.originalText === 'string') {
+        summary.originalTextLength = input.originalText.length;
+    }
+    if (typeof input.content === 'string') {
+        summary.contentLength = input.content.length;
+    }
+
+    return summary;
 }
 
 function buildEnvStorageConfig(): Record<string, unknown> | undefined {
@@ -211,6 +241,32 @@ function parseCsvList(value: string): string[] {
 
 function parseListOrAppend(value: string, previous: string[] = []): string[] {
     return [...previous, ...parseCsvList(value)];
+}
+
+function buildRootsKey(roots: McpRoot[]): string {
+    return roots.map((root) => root.uri).join('|');
+}
+
+async function ensureServerConfigInitialized(initialRoots: McpRoot[]): Promise<void> {
+    const key = buildRootsKey(initialRoots);
+
+    if (ServerConfig.isInitialized() && serverConfigInitKey === key) {
+        return;
+    }
+
+    if (serverConfigInitPromise) {
+        await serverConfigInitPromise;
+        if (ServerConfig.isInitialized() && serverConfigInitKey === key) {
+            return;
+        }
+    }
+
+    serverConfigInitKey = key;
+    serverConfigInitPromise = ServerConfig.initializeServerConfig(initialRoots, 'remote')
+        .finally(() => {
+            serverConfigInitPromise = null;
+        });
+    await serverConfigInitPromise;
 }
 
 // CardiganTime integration for protokoll-mcp-http:
@@ -484,6 +540,11 @@ function createMcpServer(): Server {
     // Handle tool calls
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { name, arguments: args } = request.params;
+        const startedAt = Date.now();
+        requestLogger.info('tool.call.start', {
+            toolName: name,
+            args: summarizeToolArgs(args),
+        });
 
         try {
             const result = await handleToolCall(name, args);
@@ -511,14 +572,20 @@ function createMcpServer(): Server {
             const message = error instanceof Error ? error.message : String(error);
             requestLogger.error('tool.call.failed', {
                 toolName: name,
-                args: args ?? {},
+                args: summarizeToolArgs(args),
                 error: message,
                 stack: error instanceof Error ? error.stack : undefined,
+                elapsedMs: Date.now() - startedAt,
             });
             return {
                 content: [{ type: 'text', text: `Error: ${message}` }],
                 isError: true,
             };
+        } finally {
+            requestLogger.info('tool.call.complete', {
+                toolName: name,
+                elapsedMs: Date.now() - startedAt,
+            });
         }
     });
 
@@ -647,9 +714,13 @@ app.post('/audio/upload',
             const rawProject = body['project'];
             const title = (typeof rawTitle === 'string' && rawTitle.trim()) ? rawTitle.trim() : undefined;
             const project = (typeof rawProject === 'string' && rawProject.trim()) ? rawProject.trim() : undefined;
+
+            // PKL transcript creation uses a local sqlite-backed file path.
+            // Ensure the configured output directory exists even when audio bytes are stored in GCS.
+            await mkdir(outputDir, { recursive: true });
             
             // Create transcript PKL with uploaded status
-            const { uuid } = await createUploadTranscript({
+            const { uuid, filePath } = await createUploadTranscript({
                 audioFile: basename(uploadObjectPath), // Store just the filename
                 originalFilename: file.name,
                 audioHash: hash,
@@ -657,6 +728,15 @@ app.post('/audio/upload',
                 title,
                 project,
             });
+
+            // In GCS mode, persist the upload transcript record to shared storage
+            // so any worker instance can discover and process it.
+            if (outputStorage.name === 'gcs') {
+                const transcriptObjectPath = basename(filePath);
+                const transcriptBytes = await readFile(filePath);
+                await outputStorage.writeFile(transcriptObjectPath, transcriptBytes);
+                markTranscriptIndexDirtyForStorage(outputStorage, outputDir, transcriptObjectPath);
+            }
             
             uploadLogger.info('audio.upload.complete', {
                 originalFilename: file.name,
@@ -860,7 +940,7 @@ app.post('/mcp', async (c) => {
         process.env.WORKSPACE_ROOT = workspaceRoot;
 
         Roots.setRoots(initialRoots);
-        await ServerConfig.initializeServerConfig(initialRoots, 'remote');
+        await ensureServerConfigInitialized(initialRoots);
 
         // Get the full initialized config from ServerConfig
         const serverConfig = ServerConfig.getServerConfig();
@@ -899,6 +979,8 @@ app.post('/mcp', async (c) => {
                 contextPrefix: storageConfig.gcs.contextPrefix ?? null,
             });
         }
+
+        await ensureTranscriptionWorkerStarted();
 
         // Connect server to transport
         await newSession.server.connect(transport);
@@ -1148,6 +1230,7 @@ app.delete('/mcp', async (c) => {
 // ============================================================================
 
 let transcriptionWorker: TranscriptionWorker | null = null;
+let transcriptionWorkerStartPromise: Promise<void> | null = null;
 
 /**
  * Get the transcription worker instance (for MCP tools)
@@ -1156,11 +1239,52 @@ export function getTranscriptionWorker(): TranscriptionWorker | null {
     return transcriptionWorker;
 }
 
+async function ensureTranscriptionWorkerStarted(): Promise<void> {
+    if (transcriptionWorker?.isActive()) {
+        return;
+    }
+    if (transcriptionWorkerStartPromise) {
+        await transcriptionWorkerStartPromise;
+        return;
+    }
+
+    transcriptionWorkerStartPromise = (async () => {
+        const outputDir = ServerConfig.getOutputDirectory();
+        const uploadDirectory = join(outputDir, 'uploads');
+        const context = ServerConfig.getContext();
+        const contextDirs = context?.getContextDirs?.();
+        const explicitContextDirectories = Array.isArray(contextDirs) && contextDirs.length > 0
+            ? contextDirs
+            : startupContextDirectories;
+
+        transcriptionWorker = new TranscriptionWorker({
+            outputDirectory: outputDir,
+            contextDirectory: process.cwd(),
+            contextDirectories: explicitContextDirectories,
+            contextInstance: context ?? undefined,
+            uploadDirectory,
+            outputStorage: ServerConfig.getOutputStorage(),
+            scanInterval: 5000,
+            model: (startupConfig as any).model,
+            transcriptionModel: (startupConfig as any).transcriptionModel,
+        });
+
+        await transcriptionWorker.start();
+        setWorkerInstance(transcriptionWorker);
+    })().finally(() => {
+        transcriptionWorkerStartPromise = null;
+    });
+
+    await transcriptionWorkerStartPromise;
+}
+
 // ============================================================================
 // Server Startup
 // ============================================================================
 
 async function main() {
+    await configureEngineLoggingBridge();
+
     // ── CLI parsing ───────────────────────────────────────────────────────────
     const cardigantime = Cardigantime.create({
         defaults: {
@@ -1209,16 +1333,11 @@ async function main() {
     // These need a verbose logger so their output is actually visible.
     if (args.checkConfig || args.initConfig) {
         cardigantime.setLogger({
-            // eslint-disable-next-line no-console
-            debug: (msg, ...a) => console.log(`[debug] ${msg}`, ...a),
-            // eslint-disable-next-line no-console
-            info: (msg, ...a) => console.log(msg, ...a),
-            // eslint-disable-next-line no-console
-            warn: (msg, ...a) => console.warn(msg, ...a),
-            // eslint-disable-next-line no-console
-            error: (msg, ...a) => console.error(msg, ...a),
-            // eslint-disable-next-line no-console
-            verbose: (msg, ...a) => console.log(msg, ...a),
+            debug: (msg, ...a) => lifecycleLogger.debug('config.cli.debug', { message: msg, args: a }),
+            info: (msg, ...a) => lifecycleLogger.info('config.cli.info', { message: msg, args: a }),
+            warn: (msg, ...a) => lifecycleLogger.warning('config.cli.warn', { message: msg, args: a }),
+            error: (msg, ...a) => lifecycleLogger.error('config.cli.error', { message: msg, args: a }),
+            verbose: (msg, ...a) => lifecycleLogger.debug('config.cli.verbose', { message: msg, args: a }),
             silly: () => { /* intentionally empty */ },
         });
         if (args.checkConfig) {
@@ -1266,6 +1385,10 @@ async function main() {
 
     // Cache for session init handler (avoids reloading config on every new session)
     startupConfig = cardigantimeConfig as Record<string, unknown>;
+    const startupContextDirs = (cardigantimeConfig as any).contextDirectories;
+    startupContextDirectories = Array.isArray(startupContextDirs) && startupContextDirs.length > 0
+        ? startupContextDirs
+        : undefined;
 
     // ── Port / host resolution ────────────────────────────────────────────────
     // Priority: --port CLI > MCP_PORT env > PROTOKOLL_MCP_PORT env > PORT env > default 3000
@@ -1328,34 +1451,7 @@ async function main() {
         lines: describeRawStorageConfig(cardigantimeConfig as Record<string, unknown>),
     });
 
-    // Start background transcription worker
-    if (outputDir !== 'NOT SET') {
-        const uploadDirectory = join(outputDir, 'uploads');
-        
-        transcriptionWorker = new TranscriptionWorker({
-            outputDirectory: outputDir,
-            contextDirectory: process.cwd(),
-            // Pass the resolved contextDirectories from the config file so the pipeline
-            // uses the same entity store as the rest of the server (not guessed from CWD).
-            contextDirectories: Array.isArray(contextDirs) && contextDirs.length > 0
-                ? contextDirs
-                : undefined,
-            uploadDirectory,
-            outputStorage: ServerConfig.getOutputStorage(),
-            scanInterval: 5000, // 5 second scan interval
-            model: (cardigantimeConfig as any).model,
-            transcriptionModel: (cardigantimeConfig as any).transcriptionModel,
-        });
-        
-        await transcriptionWorker.start();
-        
-        // Make worker available to queue tools
-        setWorkerInstance(transcriptionWorker);
-    } else {
-        lifecycleLogger.info('worker.disabled', {
-            reason: 'output_directory_not_configured',
-        });
-    }
+    // Worker starts lazily once ServerConfig is initialized for the first session.
 
     // Graceful shutdown
     process.on('SIGTERM', async () => {

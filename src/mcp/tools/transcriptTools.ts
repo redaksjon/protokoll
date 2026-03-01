@@ -9,8 +9,11 @@ import { mkdir, mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import * as Context from '@/context';
+import Logging from '@fjell/logging';
 import { Agentic, Phases, Reasoning, Routing, Transcript } from '@redaksjon/protokoll-engine';
 import { DEFAULT_MODEL, MAX_CONTENT_LENGTH } from '@/constants';
+import { markTranscriptIndexDirtyForStorage, resolveTranscriptPathByFilename } from '../resources/transcriptIndexService';
+import { markContextEntityIndexDirty } from '../resources/entityIndexService';
 
 import { fileExists, getConfiguredDirectory, getContextDirectories, sanitizePath, validatePathWithinDirectory, validatePathWithinOutputDirectory, validateNotRemoteMode, resolveTranscriptPath } from './shared.js';
 import * as Metadata from '@redaksjon/protokoll-engine';
@@ -22,6 +25,8 @@ import {
     listTranscripts as listTranscriptsFromStorage,
     type TranscriptMetadata,
 } from '@redaksjon/protokoll-format';
+
+const logger = Logging.getLogger('@redaksjon/protokoll-mcp').get('transcript-tools');
 
 // ============================================================================
 // Helper Functions
@@ -96,7 +101,7 @@ function toStoragePathCandidates(transcriptPath: string): string[] {
 
 async function resolveStorageTranscriptPath(
     transcriptPath: string,
-    outputStorage: { exists(path: string): Promise<boolean>; listFiles(prefix: string, pattern?: string): Promise<string[]>; },
+    outputStorage: { exists(path: string): Promise<boolean>; name: string; cacheKey?: string; },
 ): Promise<string | null> {
     const candidates = toStoragePathCandidates(transcriptPath);
     for (const candidate of candidates) {
@@ -113,12 +118,17 @@ async function resolveStorageTranscriptPath(
         return null;
     }
 
-    // Fallback for slug-only references: locate by filename anywhere under output prefix.
     const basenameCandidates = new Set(
         candidates.map((candidate) => candidate.split('/').pop() || candidate)
     );
-    const storageFiles = await outputStorage.listFiles('', '.pkl');
-    const matches = storageFiles.filter((file) => basenameCandidates.has(file.split('/').pop() || file));
+
+    const ServerConfig = await import('../serverConfig');
+    const outputDirectory = ServerConfig.getOutputDirectory();
+    const matches = await resolveTranscriptPathByFilename(
+        outputStorage as any,
+        outputDirectory,
+        basenameCandidates,
+    );
     if (matches.length === 1) {
         return matches[0];
     }
@@ -190,6 +200,7 @@ async function openToolTranscript(
                 if (persistChanges) {
                     const updated = await readFile(pklPath);
                     await outputStorage.writeFile(storagePath, updated);
+                    markTranscriptIndexDirtyForStorage(outputStorage, outputDirectory, storagePath);
                 }
             } finally {
                 await rm(tmpRoot, { recursive: true, force: true });
@@ -1489,7 +1500,36 @@ export async function handleEditTranscript(args: {
                     changes.push('title updated');
                 }
                 if (args.projectId) {
-                    metadataUpdates.projectId = args.projectId;
+                    const contextDirectories = await getContextDirectories();
+                    const context = await Context.create({
+                        startingDir: args.contextDirectory || process.cwd(),
+                        contextDirectories,
+                    });
+                    const project = await context.getProject(args.projectId);
+                    if (!project) {
+                        throw new Error(`Project not found: ${args.projectId}`);
+                    }
+
+                    metadataUpdates.projectId = project.id;
+                    metadataUpdates.project = project.name;
+
+                    const existingEntities = transcript.metadata.entities || {
+                        people: [],
+                        projects: [],
+                        terms: [],
+                        companies: [],
+                    };
+                    metadataUpdates.entities = {
+                        people: existingEntities.people || [],
+                        projects: [{
+                            id: project.id,
+                            name: project.name,
+                            type: 'project',
+                        }],
+                        terms: existingEntities.terms || [],
+                        companies: existingEntities.companies || [],
+                    };
+
                     changes.push('project changed');
                 }
                 if (args.tagsToAdd || args.tagsToRemove) {
@@ -1599,8 +1639,11 @@ export async function handleEditTranscript(args: {
             if (previousStatus !== args.status) {
                 transcript.updateMetadata({ status: args.status as Metadata.TranscriptStatus });
                 statusChanged = true;
-                // eslint-disable-next-line no-console
-                console.log('✅ Status update completed successfully');
+                logger.info('transcript.status.update.complete', {
+                    transcriptPath: args.transcriptPath,
+                    previousStatus,
+                    nextStatus: args.status,
+                });
             }
         } finally {
             transcript.close();
@@ -2093,6 +2136,7 @@ export async function handleEnhanceTranscript(args: {
 }) {
     const access = await openToolTranscript(args.transcriptPath, args.contextDirectory);
     const pklPath = access.pklPath;
+    const requestId = randomUUID();
 
     const transcript = PklTranscript.open(pklPath, { readOnly: false });
 
@@ -2111,6 +2155,15 @@ export async function handleEnhanceTranscript(args: {
         const model = args.model || DEFAULT_MODEL;
         const startedAt = Date.now();
         let toolCallCount = 0;
+        logger.info('transcript.enhance.start', {
+            requestId,
+            transcriptPath: args.transcriptPath,
+            model,
+            sourceLength: sourceText.length,
+            hasExplicitOriginal: explicitOriginal.length > 0,
+            hasRawTranscript: rawOriginal.length > 0,
+            contextDirectory: args.contextDirectory ?? null,
+        });
 
         // Build context and routing similar to the standard pipeline.
         const contextDirectories = await getContextDirectories();
@@ -2180,6 +2233,14 @@ export async function handleEnhanceTranscript(args: {
             tempDir,
             transcript.metadata.id || 'manual-enhancement'
         );
+        logger.info('transcript.enhance.simple_replace.complete', {
+            requestId,
+            transcriptPath: args.transcriptPath,
+            replacements: simpleReplaceResult.stats.totalReplacements,
+            tier1Replacements: simpleReplaceResult.stats.tier1Replacements,
+            tier2Replacements: simpleReplaceResult.stats.tier2Replacements,
+            processingTimeMs: simpleReplaceResult.stats.processingTimeMs,
+        });
 
         if (simpleReplaceResult.stats.totalReplacements > 0) {
             transcript.enhancementLog.logStep(new Date(), 'simple-replace', 'phase_complete', {
@@ -2253,6 +2314,16 @@ export async function handleEnhanceTranscript(args: {
         const enhancedText = (agenticResult.enhancedText || '').trim() || sourceText;
         const enhancementSucceeded = enhancedText.length > 50 && enhancedText !== sourceText;
         const finalStatus = enhancementSucceeded ? 'enhanced' : (transcript.metadata.status || 'initial');
+        logger.info('transcript.enhance.agentic.complete', {
+            requestId,
+            transcriptPath: args.transcriptPath,
+            toolsUsed: agenticResult.toolsUsed,
+            iterations: agenticResult.iterations,
+            totalToolCalls: toolCallCount,
+            changed: enhancedText !== sourceText,
+            enhancedLength: enhancedText.length,
+            elapsedMs: Date.now() - startedAt,
+        });
 
         const referenced = agenticResult.state.referencedEntities;
         const entities = {
@@ -2310,6 +2381,15 @@ export async function handleEnhanceTranscript(args: {
             iterations: agenticResult.iterations,
             processingTimeMs: Date.now() - startedAt,
         });
+        logger.info('transcript.enhance.complete', {
+            requestId,
+            transcriptPath: args.transcriptPath,
+            status: finalStatus,
+            projectId: decidedProjectId || null,
+            totalToolCalls: toolCallCount,
+            changed: enhancedText !== sourceText,
+            processingTimeMs: Date.now() - startedAt,
+        });
 
         return {
             success: true,
@@ -2325,6 +2405,29 @@ export async function handleEnhanceTranscript(args: {
             enhancedLength: enhancedText.length,
             changed: enhancedText !== sourceText,
         };
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        transcript.enhancementLog.logStep(new Date(), 'enhance', 'enhancement_failed', {
+            transcriptPath: args.transcriptPath,
+            model: args.model || DEFAULT_MODEL,
+            error: message,
+        });
+        // Always emit a terminal completion event so clients waiting on
+        // enhancement_complete can reliably exit "in progress" state.
+        transcript.enhancementLog.logStep(new Date(), 'enhance', 'enhancement_complete', {
+            status: 'error',
+            failed: true,
+            transcriptPath: args.transcriptPath,
+            model: args.model || DEFAULT_MODEL,
+            error: message,
+        });
+        logger.error('transcript.enhance.failed', {
+            requestId,
+            transcriptPath: args.transcriptPath,
+            error: message,
+            stack: error instanceof Error ? error.stack : undefined,
+        });
+        throw error;
     } finally {
         if (tempDir) {
             await rm(tempDir, { recursive: true, force: true });
@@ -2433,6 +2536,7 @@ export async function handleCreateNote(args: {
 
             const created = await readFile(tmpPklPath);
             await outputStorage.writeFile(relativePath, created);
+            markTranscriptIndexDirtyForStorage(outputStorage, outputDirectory, relativePath);
         } finally {
             await rm(tmpRoot, { recursive: true, force: true });
         }
@@ -2697,6 +2801,7 @@ export async function handleCorrectToEntity(args: {
             }
         
             await context.saveEntity(newEntity);
+            markContextEntityIndexDirty(args.entityType);
             finalEntityId = id;
             finalEntityName = args.entityName;
             isNewEntity = true;
@@ -2733,6 +2838,7 @@ export async function handleCorrectToEntity(args: {
                         { ...existingEntity, sounds_like: [...soundsLike, args.selectedText] },
                         true
                     );
+                    markContextEntityIndexDirty(args.entityType);
                 }
             }
         }

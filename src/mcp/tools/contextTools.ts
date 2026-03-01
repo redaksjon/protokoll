@@ -6,6 +6,7 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { ContextInstance } from '@/context';
 import type { Entity, EntityType } from '@/context/types';
 import { formatEntity, createToolContext } from './shared';
+import { listContextEntitiesFromGcs } from '../resources/entityIndexService';
 import { 
     findPersonResilient, 
     findCompanyResilient, 
@@ -312,8 +313,34 @@ export async function handleListProjects(args: {
     search?: string;
 }) {
     const context = await getContextInstance(args.contextDirectory);
-
     let projects = context.getAllProjects();
+    if (projects.length === 0) {
+        const gcsProjects = await listContextEntitiesFromGcs('project');
+        projects = gcsProjects
+            .map((project) => ({
+                id: String(project.id || ''),
+                name: String(project.name || ''),
+                active: project.active !== false,
+                routing: typeof project.routing === 'object' && project.routing !== null
+                    ? project.routing as Record<string, unknown>
+                    : undefined,
+                classification: typeof project.classification === 'object' && project.classification !== null
+                    ? project.classification as Record<string, unknown>
+                    : undefined,
+            }))
+            .filter((project) => project.id.length > 0 && project.name.length > 0)
+            .map((project) => ({
+                ...project,
+                routing: {
+                    destination: project.routing?.destination as string | undefined,
+                    structure: project.routing?.structure as string | undefined,
+                },
+                classification: {
+                    context_type: project.classification?.context_type as string | undefined,
+                    explicit_phrases: project.classification?.explicit_phrases as string[] | undefined,
+                },
+            })) as any[];
+    }
     if (!args.includeInactive) {
         projects = projects.filter(p => p.active !== false);
     }
@@ -358,8 +385,19 @@ export async function handleListPeople(args: {
     search?: string;
 }) {
     const context = await getContextInstance(args.contextDirectory);
-
     let people = context.getAllPeople();
+    if (people.length === 0) {
+        const gcsPeople = await listContextEntitiesFromGcs('person');
+        people = gcsPeople
+            .map((person) => ({
+                id: String(person.id || ''),
+                name: String(person.name || ''),
+                company: typeof person.company === 'string' ? person.company : undefined,
+                role: typeof person.role === 'string' ? person.role : undefined,
+                sounds_like: Array.isArray(person.sounds_like) ? person.sounds_like as string[] : undefined,
+            }))
+            .filter((person) => person.id.length > 0 && person.name.length > 0) as any[];
+    }
 
     // Apply search filter
     if (args.search) {
@@ -400,8 +438,19 @@ export async function handleListTerms(args: {
     search?: string;
 }) {
     const context = await getContextInstance(args.contextDirectory);
-
     let terms = context.getAllTerms();
+    if (terms.length === 0) {
+        const gcsTerms = await listContextEntitiesFromGcs('term');
+        terms = gcsTerms
+            .map((term) => ({
+                id: String(term.id || ''),
+                name: String(term.name || ''),
+                expansion: typeof term.expansion === 'string' ? term.expansion : undefined,
+                domain: typeof term.domain === 'string' ? term.domain : undefined,
+                sounds_like: Array.isArray(term.sounds_like) ? term.sounds_like as string[] : undefined,
+            }))
+            .filter((term) => term.id.length > 0 && term.name.length > 0) as any[];
+    }
 
     // Apply search filter
     if (args.search) {
@@ -442,8 +491,19 @@ export async function handleListCompanies(args: {
     search?: string;
 }) {
     const context = await getContextInstance(args.contextDirectory);
-
     let companies = context.getAllCompanies();
+    if (companies.length === 0) {
+        const gcsCompanies = await listContextEntitiesFromGcs('company');
+        companies = gcsCompanies
+            .map((company) => ({
+                id: String(company.id || ''),
+                name: String(company.name || ''),
+                fullName: typeof company.fullName === 'string' ? company.fullName : undefined,
+                industry: typeof company.industry === 'string' ? company.industry : undefined,
+                sounds_like: Array.isArray(company.sounds_like) ? company.sounds_like as string[] : undefined,
+            }))
+            .filter((company) => company.id.length > 0 && company.name.length > 0) as any[];
+    }
 
     // Apply search filter
     if (args.search) {

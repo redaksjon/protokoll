@@ -1,11 +1,21 @@
 import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
+export interface StorageFileMetadata {
+    path: string;
+    size: number;
+    updatedAt: string | null;
+    etag?: string;
+    generation?: string;
+}
+
 export interface FileStorageProvider {
     readonly name: 'filesystem' | 'gcs';
+    readonly cacheKey?: string;
     readFile(path: string): Promise<Buffer>;
     writeFile(path: string, data: Buffer | string): Promise<void>;
     listFiles(prefix: string, pattern?: string): Promise<string[]>;
+    listFilesWithMetadata(prefix: string, pattern?: string): Promise<StorageFileMetadata[]>;
     deleteFile(path: string): Promise<void>;
     exists(path: string): Promise<boolean>;
     mkdir(path: string): Promise<void>;
@@ -29,8 +39,11 @@ async function walkFilesRecursive(directory: string): Promise<string[]> {
 
 export class FilesystemStorageProvider implements FileStorageProvider {
     readonly name = 'filesystem' as const;
+    readonly cacheKey: string;
 
-    constructor(private readonly baseDirectory: string) {}
+    constructor(private readonly baseDirectory: string) {
+        this.cacheKey = `fs:${resolve(baseDirectory)}`;
+    }
 
     private resolvePath(pathValue: string): string {
         if (isAbsolute(pathValue)) {
@@ -54,13 +67,36 @@ export class FilesystemStorageProvider implements FileStorageProvider {
     }
 
     async listFiles(prefix: string, pattern?: string): Promise<string[]> {
+        const withMetadata = await this.listFilesWithMetadata(prefix, pattern);
+        return withMetadata.map((entry) => entry.path);
+    }
+
+    async listFilesWithMetadata(prefix: string, pattern?: string): Promise<StorageFileMetadata[]> {
         const prefixPath = this.resolvePath(prefix || '.');
-        const allFiles = await walkFilesRecursive(prefixPath);
-        const relativeFiles = allFiles.map((filePath) => this.toRelativePath(filePath));
-        if (!pattern) {
-            return relativeFiles;
+        let allFiles: string[] = [];
+        try {
+            allFiles = await walkFilesRecursive(prefixPath);
+        } catch (error) {
+            const code = (error as NodeJS.ErrnoException).code;
+            if (code === 'ENOENT') {
+                return [];
+            }
+            throw error;
         }
-        return relativeFiles.filter((filePath) => filePath.includes(pattern));
+        const entries = await Promise.all(
+            allFiles.map(async (filePath) => {
+                const fileStat = await stat(filePath);
+                return {
+                    path: this.toRelativePath(filePath),
+                    size: fileStat.size,
+                    updatedAt: fileStat.mtime ? fileStat.mtime.toISOString() : null,
+                } satisfies StorageFileMetadata;
+            })
+        );
+        if (!pattern) {
+            return entries;
+        }
+        return entries.filter((entry) => entry.path.includes(pattern));
     }
 
     async deleteFile(pathValue: string): Promise<void> {

@@ -1,7 +1,7 @@
 import { Storage } from '@google-cloud/storage';
 import Logging from '@fjell/logging';
 import { parseGcsUri } from './gcsUri';
-import type { FileStorageProvider } from './fileProviders';
+import type { FileStorageProvider, StorageFileMetadata } from './fileProviders';
 
 const logger = Logging.getLogger('@redaksjon/protokoll-mcp').get('gcs-storage');
 
@@ -23,12 +23,15 @@ function joinObjectPath(basePrefix: string, objectPath: string): string {
 
 export class GcsStorageProvider implements FileStorageProvider {
     readonly name = 'gcs' as const;
+    readonly cacheKey: string;
 
     constructor(
         private readonly storage: Storage,
         private readonly bucketName: string,
         private readonly basePrefix: string,
-    ) {}
+    ) {
+        this.cacheKey = `gcs:${this.bucketName}/${this.basePrefix.replace(/^\/+|\/+$/g, '')}`;
+    }
 
     private objectPath(pathValue: string): string {
         return joinObjectPath(this.basePrefix, pathValue);
@@ -74,6 +77,11 @@ export class GcsStorageProvider implements FileStorageProvider {
     }
 
     async listFiles(prefix: string, pattern?: string): Promise<string[]> {
+        const withMetadata = await this.listFilesWithMetadata(prefix, pattern);
+        return withMetadata.map((entry) => entry.path);
+    }
+
+    async listFilesWithMetadata(prefix: string, pattern?: string): Promise<StorageFileMetadata[]> {
         const startedAt = Date.now();
         const fullPrefix = this.objectPath(prefix);
         logger.debug('gcs.list.start', {
@@ -85,29 +93,50 @@ export class GcsStorageProvider implements FileStorageProvider {
         });
         const [files] = await this.storage.bucket(this.bucketName).getFiles({ prefix: fullPrefix });
         const normalizedBase = this.basePrefix.replace(/^\/+|\/+$/g, '');
-        const relativePaths = files
-            .map((fileRef) => fileRef.name)
-            .filter((fileName) => !fileName.endsWith('/'))
-            .map((fileName) => {
+        const relativeEntries = files
+            .map((fileRef) => ({
+                fileName: fileRef.name,
+                metadata: fileRef.metadata || {},
+            }))
+            .filter(({ fileName }) => !fileName.endsWith('/'))
+            .map(({ fileName, metadata }) => {
                 if (!normalizedBase) {
-                    return fileName;
+                    return {
+                        path: fileName,
+                        size: Number(metadata.size || 0),
+                        updatedAt: (metadata.updated as string | undefined) || null,
+                        etag: metadata.etag as string | undefined,
+                        generation: metadata.generation as string | undefined,
+                    } satisfies StorageFileMetadata;
                 }
                 const prefixWithSlash = `${normalizedBase}/`;
                 if (fileName.startsWith(prefixWithSlash)) {
-                    return fileName.slice(prefixWithSlash.length);
+                    return {
+                        path: fileName.slice(prefixWithSlash.length),
+                        size: Number(metadata.size || 0),
+                        updatedAt: (metadata.updated as string | undefined) || null,
+                        etag: metadata.etag as string | undefined,
+                        generation: metadata.generation as string | undefined,
+                    } satisfies StorageFileMetadata;
                 }
-                return fileName;
+                return {
+                    path: fileName,
+                    size: Number(metadata.size || 0),
+                    updatedAt: (metadata.updated as string | undefined) || null,
+                    etag: metadata.etag as string | undefined,
+                    generation: metadata.generation as string | undefined,
+                } satisfies StorageFileMetadata;
             });
         if (!pattern) {
             logger.info('gcs.list.complete', {
                 bucket: this.bucketName,
                 fullPrefix,
-                matchedCount: relativePaths.length,
+                matchedCount: relativeEntries.length,
                 elapsedMs: Date.now() - startedAt,
             });
-            return relativePaths;
+            return relativeEntries;
         }
-        const filtered = relativePaths.filter((pathValue) => pathValue.includes(pattern));
+        const filtered = relativeEntries.filter((entry) => entry.path.includes(pattern));
         logger.info('gcs.list.complete', {
             bucket: this.bucketName,
             fullPrefix,

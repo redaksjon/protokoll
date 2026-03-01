@@ -31,6 +31,7 @@ import {
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { realpath } from 'node:fs/promises';
+import Logging from '@fjell/logging';
 import * as Resources from './resources';
 import * as Prompts from './prompts';
 import { tools, handleToolCall } from './tools';
@@ -39,12 +40,16 @@ import * as Roots from './roots';
 import type { McpRoot } from './types';
 import { initializeWorkingDirectoryFromArgsAndConfig } from './configDiscovery';
 import { initializeWeightModel } from './services/weightModel';
+import { configureEngineLoggingBridge } from './engineLogging';
+const logger = Logging.getLogger('@redaksjon/protokoll-mcp').get('server');
 
 // ============================================================================
 // Server Setup
 // ============================================================================
 
 async function main() {
+    await configureEngineLoggingBridge();
+
     // Allow running `protokoll-mcp` directly from any subdirectory.
     // We discover `protokoll-config.yaml` (or explicit --config) and set WORKSPACE_ROOT accordingly.
     await initializeWorkingDirectoryFromArgsAndConfig();
@@ -155,11 +160,9 @@ async function main() {
     await ServerConfig.initializeServerConfig(initialRoots);
 
     // Initialize weight model
-    // eslint-disable-next-line no-console
-    console.log('[MCP Server] Initializing weight model...');
+    logger.info('weight_model.initialize.start', { workspaceRoot });
     await initializeWeightModel(workspaceRoot);
-    // eslint-disable-next-line no-console
-    console.log('[MCP Server] Weight model initialization complete');
+    logger.info('weight_model.initialize.complete', { workspaceRoot });
 
     // Keep the process alive - MCP servers should run indefinitely
     // The StdioServerTransport will handle stdin/stdout until the connection closes
@@ -189,8 +192,10 @@ async function checkIsMainModule(): Promise<boolean> {
 checkIsMainModule().then((isMain) => {
     if (isMain) {
         main().catch((error) => {
-            // eslint-disable-next-line no-console
-            console.error(error);
+            logger.error('server.fatal_error', {
+                error: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined,
+            });
             process.exit(1);
         });
     }

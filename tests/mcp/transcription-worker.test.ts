@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
     fsUnlink: vi.fn(),
     fsRm: vi.fn(),
     fsWriteFile: vi.fn(),
+    fsReadFile: vi.fn(),
     glob: vi.fn(),
     enhancementLogStep: vi.fn(),
     setRawTranscript: vi.fn(),
@@ -30,11 +31,13 @@ vi.mock('node:fs/promises', () => ({
         unlink: mocks.fsUnlink,
         rm: mocks.fsRm,
         writeFile: mocks.fsWriteFile,
+        readFile: mocks.fsReadFile,
     },
     stat: mocks.fsStat,
     unlink: mocks.fsUnlink,
     rm: mocks.fsRm,
     writeFile: mocks.fsWriteFile,
+    readFile: mocks.fsReadFile,
 }));
 
 vi.mock('glob', () => ({
@@ -108,6 +111,7 @@ describe('TranscriptionWorker', () => {
         mocks.fsUnlink.mockResolvedValue(undefined);
         mocks.fsRm.mockResolvedValue(undefined);
         mocks.fsWriteFile.mockResolvedValue(undefined);
+        mocks.fsReadFile.mockResolvedValue(Buffer.from('updated-pkl'));
         mocks.glob.mockResolvedValue([]);
         mocks.findUploadedTranscripts.mockResolvedValue([]);
         mocks.markTranscriptAsTranscribing.mockResolvedValue(undefined);

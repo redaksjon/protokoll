@@ -6,16 +6,21 @@
  * the existing Pipeline infrastructure.
  */
 
-import { join, isAbsolute } from 'node:path';
+import { join, isAbsolute, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import * as fs from 'node:fs/promises';
 import { glob } from 'glob';
+import Logging from '@fjell/logging';
 import { Pipeline, Transcript as TranscriptOps, Weighting } from '@redaksjon/protokoll-engine';
 import { PklTranscript } from '@redaksjon/protokoll-format';
 import type { TranscriptMetadata } from '@redaksjon/protokoll-format';
+import type { ContextInstance } from '@redaksjon/context';
 import type { FileStorageProvider } from '../storage/fileProviders';
+import type { StorageFileMetadata } from '../storage/fileProviders';
+import { markTranscriptIndexDirtyForStorage } from '../resources/transcriptIndexService';
 
 const { findUploadedTranscripts, markTranscriptAsTranscribing, markTranscriptAsFailed } = TranscriptOps;
+const logger = Logging.getLogger('@redaksjon/protokoll-mcp').get('transcription-worker');
 
 const WEIGHT_MODEL_FILENAME = '.protokoll-weight-model.json';
 
@@ -27,6 +32,8 @@ export interface WorkerConfig {
     contextDirectory?: string;     // Starting directory for context discovery (fallback)
     /** Explicit context directories from protokoll-config.yaml (preferred over discovery) */
     contextDirectories?: string[]; // e.g. ['~/.protokoll/projects']
+    /** Pre-loaded context instance (required for GCS-backed context) */
+    contextInstance?: ContextInstance;
     uploadDirectory: string;       // Where uploaded audio files are stored
     outputStorage?: FileStorageProvider; // Optional storage provider for uploads in non-filesystem backends
     scanInterval?: number;         // Milliseconds between queue scans (default: 5000)
@@ -43,6 +50,42 @@ interface UploadedTranscript {
     metadata: TranscriptMetadata;
 }
 
+function deriveWeightModelCounts(model: Weighting.WeightModel): { transcriptCount: number; entityCount: number } {
+    const snapshots = Object.values(model.transcriptSnapshots || {});
+    const transcriptCount = snapshots.length;
+    const entityCount = snapshots.reduce((total, snapshot) => {
+        const ids = Array.isArray(snapshot?.entityIds) ? snapshot.entityIds : [];
+        return total + ids.length;
+    }, 0);
+    return { transcriptCount, entityCount };
+}
+
+function syncWeightModelMetadata(model: Weighting.WeightModel): {
+    transcriptCount: number;
+    entityCount: number;
+    changed: boolean;
+} {
+    const { transcriptCount, entityCount } = deriveWeightModelCounts(model);
+    const changed = model.metadata.transcriptCount !== transcriptCount
+        || model.metadata.entityCount !== entityCount;
+    if (changed) {
+        model.metadata.transcriptCount = transcriptCount;
+        model.metadata.entityCount = entityCount;
+    }
+    return { transcriptCount, entityCount, changed };
+}
+
+function toStorageCandidatePath(outputDirectory: string, filePath: string): string {
+    if (!filePath) {
+        return filePath;
+    }
+    if (isAbsolute(filePath)) {
+        const rel = relative(outputDirectory, filePath).replace(/\\/g, '/');
+        return rel.startsWith('../') ? filePath : rel;
+    }
+    return filePath.replace(/^\/+/, '').replace(/\\/g, '/');
+}
+
 async function materializeUploadedAudio(
     outputStorage: FileStorageProvider,
     uploadPath: string,
@@ -55,6 +98,88 @@ async function materializeUploadedAudio(
     const contents = await outputStorage.readFile(uploadPath);
     await fs.writeFile(tempPath, contents);
     return tempPath;
+}
+
+async function materializeTranscriptFromStorage(
+    outputStorage: FileStorageProvider,
+    transcriptPath: string,
+): Promise<string> {
+    const fileName = transcriptPath.split('/').pop() || 'transcript.pkl';
+    const tempPath = join(
+        tmpdir(),
+        `protokoll-worker-pkl-${Date.now()}-${Math.random().toString(36).slice(2)}-${fileName}`,
+    );
+    const contents = await outputStorage.readFile(transcriptPath);
+    await fs.writeFile(tempPath, contents);
+    return tempPath;
+}
+
+async function syncTranscriptToStorage(
+    outputStorage: FileStorageProvider,
+    transcriptPath: string,
+    localPath: string,
+): Promise<void> {
+    const updated = await fs.readFile(localPath);
+    await outputStorage.writeFile(transcriptPath, updated);
+}
+
+function isQueueCandidatePath(pathValue: string): boolean {
+    const normalized = pathValue.replace(/^\/+/, '').replace(/\\/g, '/');
+    if (!normalized.toLowerCase().endsWith('.pkl')) {
+        return false;
+    }
+    if (normalized.startsWith('uploads/') || normalized.includes('/uploads/')) {
+        return false;
+    }
+    if (normalized.startsWith('.intermediate/') || normalized.includes('/.intermediate/')) {
+        return false;
+    }
+    return true;
+}
+
+/**
+ * Upload placeholder transcripts use a root-level `*-upload.pkl` naming convention.
+ * Restricting GCS queue scans to these files avoids repeatedly reading every PKL object.
+ */
+function isUploadPlaceholderPath(pathValue: string): boolean {
+    const normalized = pathValue.replace(/^\/+/, '').replace(/\\/g, '/').toLowerCase();
+    if (!normalized.endsWith('-upload.pkl')) {
+        return false;
+    }
+    // Upload placeholders are created at the output root, not inside date/project folders.
+    return !normalized.includes('/');
+}
+
+function metadataVersionKey(metadata: { generation?: string; updatedAt?: string | null; size?: number; etag?: string }): string {
+    return [
+        metadata.generation || '',
+        metadata.updatedAt || '',
+        String(metadata.size || 0),
+        metadata.etag || '',
+    ].join('|');
+}
+
+function normalizeStoragePath(pathValue: string): string {
+    return pathValue.replace(/^\/+/, '').replace(/\\/g, '/');
+}
+
+async function listFilesWithMetadataCompat(
+    provider: FileStorageProvider,
+    prefix: string,
+    pattern?: string,
+): Promise<StorageFileMetadata[]> {
+    const withMetadata = (provider as {
+        listFilesWithMetadata?: (prefix: string, pattern?: string) => Promise<StorageFileMetadata[]>;
+    }).listFilesWithMetadata;
+    if (typeof withMetadata === 'function') {
+        return withMetadata.call(provider, prefix, pattern);
+    }
+    const listed = await provider.listFiles(prefix, pattern);
+    return listed.map((pathValue) => ({
+        path: pathValue,
+        size: 1,
+        updatedAt: null,
+    }));
 }
 
 /**
@@ -86,6 +211,7 @@ export class TranscriptionWorker {
     private weightModelProvider: Weighting.WeightModelProvider | null = null;
     private weightModelBuilder: Weighting.WeightModelBuilder | null = null;
     private weightModelPath: string | null = null;
+    private readonly uploadStatusCache = new Map<string, { version: string; status: string | null }>();
 
     constructor(config: WorkerConfig) {
         this.config = config;
@@ -103,8 +229,12 @@ export class TranscriptionWorker {
             return;
         }
 
-        // eslint-disable-next-line no-console
-        console.log('🚀 Starting transcription worker...');
+        logger.info('worker.starting', {
+            outputDirectory: this.config.outputDirectory,
+            uploadDirectory: this.config.uploadDirectory,
+            model: this.config.model || 'gpt-5-mini',
+            transcriptionModel: this.config.transcriptionModel || 'whisper-1',
+        });
 
         // Initialize weight model for entity co-occurrence tracking and LLM prepositioning
         this.weightModelPath = join(this.config.outputDirectory, WEIGHT_MODEL_FILENAME);
@@ -117,9 +247,19 @@ export class TranscriptionWorker {
 
         const existingModel = await Weighting.WeightModelBuilder.loadFromFile(this.weightModelPath);
         if (existingModel) {
+            const normalized = syncWeightModelMetadata(existingModel);
+            if (normalized.changed) {
+                await this.weightModelBuilder.writeToFile(existingModel, this.weightModelPath);
+                logger.info('worker.weight_model.metadata_repaired', {
+                    transcriptCount: normalized.transcriptCount,
+                    entityCount: normalized.entityCount,
+                });
+            }
             this.weightModelProvider.loadModel(existingModel);
-            // eslint-disable-next-line no-console
-            console.log(`📊 Weight model loaded: ${existingModel.metadata.transcriptCount} transcripts, ${existingModel.metadata.entityCount} entities`);
+            logger.info('worker.weight_model.loaded', {
+                transcriptCount: normalized.transcriptCount,
+                entityCount: normalized.entityCount,
+            });
         } else {
             // No existing model — do an initial build from all transcripts in the output dir
             try {
@@ -127,15 +267,15 @@ export class TranscriptionWorker {
                 if (builtModel.metadata.transcriptCount > 0) {
                     this.weightModelProvider.loadModel(builtModel);
                     await this.weightModelBuilder.writeToFile(builtModel, this.weightModelPath);
-                    // eslint-disable-next-line no-console
-                    console.log(`📊 Weight model built: ${builtModel.metadata.transcriptCount} transcripts, ${builtModel.metadata.entityCount} entities`);
+                    logger.info('worker.weight_model.built', {
+                        transcriptCount: builtModel.metadata.transcriptCount,
+                        entityCount: builtModel.metadata.entityCount,
+                    });
                 } else {
-                    // eslint-disable-next-line no-console
-                    console.log('📊 Weight model: no existing transcripts with entities — starting fresh');
+                    logger.info('worker.weight_model.empty_start');
                 }
             } catch {
-                // eslint-disable-next-line no-console
-                console.warn('⚠️  Weight model build failed — starting without prepositioning');
+                logger.warning('worker.weight_model.build_failed');
             }
         }
 
@@ -153,6 +293,7 @@ export class TranscriptionWorker {
             selfReflection: false,
             debug: false,
             silent: true,
+            contextInstance: this.config.contextInstance,
             contextDirectory: this.config.contextDirectory,
             contextDirectories: this.config.contextDirectories,
             outputDirectory: this.config.outputDirectory,
@@ -167,10 +308,10 @@ export class TranscriptionWorker {
                 const model = weightModelProvider.getModel();
                 if (!model) return;
                 weightModelBuilder.updateTranscript(model, transcriptUuid, entityIds, projectId);
+                syncWeightModelMetadata(model);
                 // Save asynchronously — never block processing on disk I/O
                 weightModelBuilder.writeToFile(model, weightModelPath).catch(() => {
-                    // eslint-disable-next-line no-console
-                    console.warn('⚠️  Failed to save weight model after update');
+                    logger.warning('worker.weight_model.save_failed');
                 });
             },
         });
@@ -181,8 +322,7 @@ export class TranscriptionWorker {
         // Start processing loop
         this.processingPromise = this.processQueue();
         
-        // eslint-disable-next-line no-console
-        console.log('✅ Transcription worker started');
+        logger.info('worker.started');
     }
 
     /**
@@ -193,8 +333,7 @@ export class TranscriptionWorker {
             return;
         }
 
-        // eslint-disable-next-line no-console
-        console.log('🛑 Stopping transcription worker...');
+        logger.info('worker.stopping');
         
         this.isRunning = false;
         
@@ -203,8 +342,7 @@ export class TranscriptionWorker {
             await this.processingPromise;
         }
         
-        // eslint-disable-next-line no-console
-        console.log('✅ Transcription worker stopped');
+        logger.info('worker.stopped');
     }
 
     /**
@@ -213,7 +351,31 @@ export class TranscriptionWorker {
     private async processQueue(): Promise<void> {
         while (this.isRunning) {
             try {
-                const uploaded = await findUploadedTranscripts([this.config.outputDirectory]);
+                const outputStorage = this.config.outputStorage;
+                // In GCS mode, queue source of truth is object storage; skip local filesystem scans.
+                const localUploaded = outputStorage?.name === 'gcs'
+                    ? []
+                    : await findUploadedTranscripts([this.config.outputDirectory]).catch(() => []);
+                const storageUploaded = outputStorage?.name === 'gcs'
+                    ? await this.findUploadedTranscriptsFromStorage(outputStorage).catch(() => [])
+                    : [];
+                const mergedByUuid = new Map<string, UploadedTranscript>();
+                for (const item of [...localUploaded, ...storageUploaded]) {
+                    if (!mergedByUuid.has(item.uuid)) {
+                        mergedByUuid.set(item.uuid, item);
+                    }
+                }
+                const uploaded = Array.from(mergedByUuid.values()).sort((a, b) => {
+                    const aTime = a.metadata.date?.getTime() || 0;
+                    const bTime = b.metadata.date?.getTime() || 0;
+                    return aTime - bTime;
+                });
+
+                logger.debug('worker.queue.scan.complete', {
+                    localUploaded: localUploaded.length,
+                    storageUploaded: storageUploaded.length,
+                    mergedUploaded: uploaded.length,
+                });
                 
                 if (uploaded.length > 0) {
                     await this.processNextTranscript(uploaded[0]);
@@ -222,12 +384,96 @@ export class TranscriptionWorker {
                     await new Promise(resolve => setTimeout(resolve, this.config.scanInterval || 5000));
                 }
             } catch (error) {
-                // eslint-disable-next-line no-console
-                console.error('Error in transcription worker:', error);
+                logger.error('worker.loop.error', {
+                    error: error instanceof Error ? error.message : String(error),
+                    stack: error instanceof Error ? error.stack : undefined,
+                });
                 // Wait before retrying
                 await new Promise(resolve => setTimeout(resolve, 10000));
             }
         }
+    }
+
+    private async findUploadedTranscriptsFromStorage(outputStorage: FileStorageProvider): Promise<UploadedTranscript[]> {
+        const files = await listFilesWithMetadataCompat(outputStorage, '', '-upload.pkl');
+        const candidates = files
+            .map((metadata) => ({ ...metadata, path: normalizeStoragePath(metadata.path) }))
+            .filter((metadata) => isQueueCandidatePath(metadata.path))
+            .filter((metadata) => isUploadPlaceholderPath(metadata.path));
+        const uploaded: UploadedTranscript[] = [];
+        const seenPaths = new Set<string>();
+
+        for (const metadata of candidates) {
+            const storagePath = metadata.path;
+            seenPaths.add(storagePath);
+            const version = metadataVersionKey(metadata);
+            const cached = this.uploadStatusCache.get(storagePath);
+            if (cached && cached.version === version && cached.status !== 'uploaded') {
+                continue;
+            }
+            let tempPath: string | null = null;
+            try {
+                tempPath = await materializeTranscriptFromStorage(outputStorage, storagePath);
+                const transcript = PklTranscript.open(tempPath, { readOnly: true });
+                const transcriptMetadata = transcript.metadata;
+                transcript.close();
+                const status = transcriptMetadata.status || null;
+                this.uploadStatusCache.set(storagePath, { version, status });
+
+                if (status === 'uploaded') {
+                    uploaded.push({
+                        uuid: transcriptMetadata.id,
+                        filePath: storagePath,
+                        metadata: transcriptMetadata,
+                    });
+                }
+            } catch {
+                // Ignore unreadable PKL files; transcript index logs these elsewhere.
+            } finally {
+                if (tempPath) {
+                    await fs.rm(tempPath, { force: true });
+                }
+            }
+        }
+
+        for (const pathValue of Array.from(this.uploadStatusCache.keys())) {
+            if (!seenPaths.has(pathValue)) {
+                this.uploadStatusCache.delete(pathValue);
+            }
+        }
+
+        return uploaded.sort((a, b) => {
+            const aTime = a.metadata.date?.getTime() || 0;
+            const bTime = b.metadata.date?.getTime() || 0;
+            return aTime - bTime;
+        });
+    }
+
+    private async resolveNonConflictingStoragePath(
+        outputStorage: FileStorageProvider,
+        desiredPath: string,
+        transcriptUuid: string,
+    ): Promise<string> {
+        const normalized = normalizeStoragePath(desiredPath);
+        if (!(await outputStorage.exists(normalized))) {
+            return normalized;
+        }
+
+        const withoutExt = normalized.replace(/\.pkl$/i, '');
+        const suffix = transcriptUuid.slice(0, 8);
+        const firstCandidate = `${withoutExt}-${suffix}.pkl`;
+        if (!(await outputStorage.exists(firstCandidate))) {
+            return firstCandidate;
+        }
+
+        for (let attempt = 2; attempt <= 100; attempt++) {
+            const candidate = `${withoutExt}-${suffix}-${attempt}.pkl`;
+            if (!(await outputStorage.exists(candidate))) {
+                return candidate;
+            }
+        }
+
+        throw new Error(`Unable to allocate non-conflicting transcript path for ${normalized}`);
     }
 
     /**
@@ -236,27 +482,48 @@ export class TranscriptionWorker {
     private async processNextTranscript(item: UploadedTranscript): Promise<void> {
         this.stats.currentTask = `Processing ${item.uuid}`;
         let localTempAudioPath: string | null = null;
+        let localTempTranscriptPath: string | null = null;
+        const outputStorage = this.config.outputStorage;
+        const isGcsOutput = outputStorage?.name === 'gcs';
+        let workingTranscriptPath = item.filePath;
+        let transcriptStoragePath = toStorageCandidatePath(this.config.outputDirectory, item.filePath);
+        const originalTranscriptStoragePath = transcriptStoragePath;
         
-        // eslint-disable-next-line no-console
-        console.log(`\n📝 Processing transcript: ${item.uuid}`);
-        // eslint-disable-next-line no-console
-        console.log(`   Audio file: ${item.metadata.audioFile}`);
-        
-        // Open PKL early so we can write incremental enhancement log entries
-        // during pipeline execution, giving real-time visibility into tool calls.
-        const transcript = PklTranscript.open(item.filePath);
+        logger.info('worker.transcript.start', {
+            uuid: item.uuid,
+            audioFile: item.metadata.audioFile || null,
+            filePath: item.filePath,
+            storagePath: transcriptStoragePath,
+        });
 
         try {
+            const shouldMaterializeFromStorage = isGcsOutput
+                && outputStorage
+                && !isAbsolute(item.filePath);
+            if (shouldMaterializeFromStorage && outputStorage) {
+                localTempTranscriptPath = await materializeTranscriptFromStorage(outputStorage, transcriptStoragePath);
+                workingTranscriptPath = localTempTranscriptPath;
+            }
+
+            // Open PKL early so we can write incremental enhancement log entries
+            // during pipeline execution, giving real-time visibility into tool calls.
+            const transcript = PklTranscript.open(workingTranscriptPath);
+
             // Mark as transcribing
-            await markTranscriptAsTranscribing(item.filePath);
+            await markTranscriptAsTranscribing(workingTranscriptPath);
+            if (isGcsOutput && outputStorage) {
+                await syncTranscriptToStorage(outputStorage, transcriptStoragePath, workingTranscriptPath);
+            }
+            markTranscriptIndexDirtyForStorage(
+                outputStorage,
+                this.config.outputDirectory,
+                transcriptStoragePath,
+            );
             
             // Get audio file path (metadata.audioFile is basename for HTTP uploads, or absolute path from other clients)
             let audioFilePath = item.metadata.audioFile && isAbsolute(item.metadata.audioFile)
                 ? item.metadata.audioFile
                 : join(this.config.uploadDirectory, item.metadata.audioFile || '');
-
-            const outputStorage = this.config.outputStorage;
-            const isGcsOutput = outputStorage?.name === 'gcs';
 
             // In gcs mode, uploaded audio is stored in object storage and must be materialized locally for pipeline processing.
             if (isGcsOutput && item.metadata.audioFile && !isAbsolute(item.metadata.audioFile)) {
@@ -338,8 +605,11 @@ export class TranscriptionWorker {
                 },
                 onToolCallStart: (tool, input) => {
                     toolCallCount++;
-                    // eslint-disable-next-line no-console
-                    console.log(`   🔧 Tool call #${toolCallCount}: ${tool}`);
+                    logger.info('worker.enhance.tool_start', {
+                        uuid: item.uuid,
+                        tool,
+                        callIndex: toolCallCount,
+                    });
                     try {
                         transcript.enhancementLog.logStep(new Date(), 'enhance', 'tool_start', {
                             callIndex: toolCallCount,
@@ -351,8 +621,12 @@ export class TranscriptionWorker {
                     }
                 },
                 onToolCallComplete: (entry) => {
-                    // eslint-disable-next-line no-console
-                    console.log(`   ✓ Tool ${entry.tool} (${entry.durationMs}ms, ${entry.success ? 'ok' : 'failed'})`);
+                    logger.info('worker.enhance.tool_complete', {
+                        uuid: item.uuid,
+                        tool: entry.tool,
+                        durationMs: entry.durationMs,
+                        success: entry.success,
+                    });
                     try {
                         transcript.enhancementLog.logStep(entry.timestamp, 'enhance', 'tool_complete', {
                             tool: entry.tool,
@@ -367,10 +641,9 @@ export class TranscriptionWorker {
                 },
             });
             
-            // Clean up the PKL file the pipeline creates at the routed output path.
-            // The worker updates the original upload PKL instead, so the pipeline's
-            // output would be a duplicate.
-            if (result.outputPath && result.outputPath !== item.filePath) {
+            // Clean up the local routed PKL the pipeline created. In GCS mode we persist
+            // from the working transcript temp file and optionally promote to routed path.
+            if (result.outputPath && result.outputPath !== workingTranscriptPath) {
                 try {
                     await fs.unlink(result.outputPath);
                 } catch {
@@ -413,9 +686,52 @@ export class TranscriptionWorker {
                 projectId: result.routedProject || undefined,
                 confidence: result.routingConfidence,
                 entities: result.entities,
+                errorDetails: undefined,
             });
             
             transcript.close();
+
+            if (isGcsOutput && outputStorage) {
+                let persistedToRoutedPath = false;
+                if (result.outputPath && result.outputPath !== workingTranscriptPath) {
+                    const desiredRoutedPath = toStorageCandidatePath(this.config.outputDirectory, result.outputPath);
+                    const normalizedDesired = normalizeStoragePath(desiredRoutedPath);
+                    if (
+                        normalizedDesired
+                        && normalizedDesired !== transcriptStoragePath
+                        && !isUploadPlaceholderPath(normalizedDesired)
+                    ) {
+                        try {
+                            const finalStoragePath = await this.resolveNonConflictingStoragePath(
+                                outputStorage,
+                                normalizedDesired,
+                                item.uuid,
+                            );
+                            await syncTranscriptToStorage(outputStorage, finalStoragePath, workingTranscriptPath);
+                            await outputStorage.deleteFile(transcriptStoragePath);
+                            this.uploadStatusCache.delete(transcriptStoragePath);
+                            transcriptStoragePath = finalStoragePath;
+                            persistedToRoutedPath = true;
+                            logger.info('worker.transcript.promoted', {
+                                uuid: item.uuid,
+                                fromPath: toStorageCandidatePath(this.config.outputDirectory, item.filePath),
+                                toPath: finalStoragePath,
+                            });
+                        } catch (error) {
+                            logger.warning('worker.transcript.promote_failed', {
+                                uuid: item.uuid,
+                                fromPath: toStorageCandidatePath(this.config.outputDirectory, item.filePath),
+                                toPath: normalizedDesired,
+                                error: error instanceof Error ? error.message : String(error),
+                            });
+                        }
+                    }
+                }
+
+                if (!persistedToRoutedPath) {
+                    await syncTranscriptToStorage(outputStorage, transcriptStoragePath, workingTranscriptPath);
+                }
+            }
             
             // Update stats
             this.stats.totalProcessed++;
@@ -423,25 +739,56 @@ export class TranscriptionWorker {
             this.stats.lastProcessedUuid = item.uuid;
             this.stats.currentTask = undefined;
             
-            // eslint-disable-next-line no-console
-            console.log(`✅ Completed: ${item.uuid} (status: ${finalStatus}, ${toolCallCount} tool calls)`);
+            logger.info('worker.transcript.complete', {
+                uuid: item.uuid,
+                status: finalStatus,
+                totalToolCalls: toolCallCount,
+                storagePath: transcriptStoragePath,
+            });
+            markTranscriptIndexDirtyForStorage(
+                outputStorage,
+                this.config.outputDirectory,
+                transcriptStoragePath,
+            );
+            if (transcriptStoragePath !== originalTranscriptStoragePath) {
+                markTranscriptIndexDirtyForStorage(
+                    outputStorage,
+                    this.config.outputDirectory,
+                    originalTranscriptStoragePath,
+                );
+            }
 
         } catch (error) {
-            // Attempt to close the transcript before marking as failed
-            try { transcript.close(); } catch { /* already closed */ }
-
             // Mark as error with details
             const errorMessage = error instanceof Error ? error.message : String(error);
             
-            // eslint-disable-next-line no-console
-            console.error(`❌ Failed to process ${item.uuid}:`, errorMessage);
+            logger.error('worker.transcript.failed', {
+                uuid: item.uuid,
+                error: errorMessage,
+                stack: error instanceof Error ? error.stack : undefined,
+            });
             
-            await markTranscriptAsFailed(item.filePath, errorMessage);
+            try {
+                await markTranscriptAsFailed(workingTranscriptPath, errorMessage);
+                if (isGcsOutput && outputStorage) {
+                    await syncTranscriptToStorage(outputStorage, transcriptStoragePath, workingTranscriptPath);
+                }
+            } catch {
+                // If we cannot persist failure status, keep original error context in logs.
+            }
+            markTranscriptIndexDirtyForStorage(
+                outputStorage,
+                this.config.outputDirectory,
+                transcriptStoragePath,
+            );
             
             this.stats.currentTask = undefined;
         } finally {
             if (localTempAudioPath) {
                 await fs.rm(localTempAudioPath, { force: true });
+            }
+            if (localTempTranscriptPath) {
+                await fs.rm(localTempTranscriptPath, { force: true });
             }
         }
     }
