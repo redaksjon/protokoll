@@ -23,6 +23,7 @@ vi.mock('../../src/mcp/serverConfig', () => ({
     getInputDirectory: vi.fn().mockReturnValue('/test/input'),
     getOutputDirectory: vi.fn().mockReturnValue('/test/output'),
     getProcessedDirectory: vi.fn().mockReturnValue('/test/processed'),
+    getOutputStorage: vi.fn().mockReturnValue({ name: 'local' }),
 }));
 
 // Mock Context for handleCreateNote project resolution (line 1060)

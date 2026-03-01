@@ -24,6 +24,26 @@ import { parseGcsUri } from './storage/gcsUri';
 
 const DEFAULT_CONFIG_FILE = 'protokoll-config.yaml';
 const logger = Logging.getLogger('@redaksjon/protokoll-mcp').get('server-config');
+const cardigantimeLogger = {
+    debug: (message: string, ...args: unknown[]) => {
+        logger.debug('config.discovery.debug', { message, args });
+    },
+    info: (message: string, ...args: unknown[]) => {
+        logger.info('config.discovery.info', { message, args });
+    },
+    warn: (message: string, ...args: unknown[]) => {
+        logger.warning('config.discovery.warn', { message, args });
+    },
+    error: (message: string, ...args: unknown[]) => {
+        logger.error('config.discovery.error', { message, args });
+    },
+    verbose: (message: string, ...args: unknown[]) => {
+        logger.debug('config.discovery.verbose', { message, args });
+    },
+    silly: () => {
+        // intentionally suppressed
+    },
+};
 const cardigantime = Cardigantime.create({
     defaults: {
         configDirectory: '.',
@@ -40,6 +60,7 @@ const cardigantime = Cardigantime.create({
     },
     configShape: {},
     features: ['config', 'hierarchical'],
+    logger: cardigantimeLogger,
 });
 
 async function readConfigFromDirectory(directory: string): Promise<Record<string, unknown>> {

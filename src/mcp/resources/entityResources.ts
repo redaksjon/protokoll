@@ -12,9 +12,11 @@ import * as ServerConfig from '../serverConfig';
 import { createToolContext } from '../tools/shared';
 import * as yaml from 'js-yaml';
 import { resolve, isAbsolute } from 'node:path';
-import { createGcsStorageProvider } from '../storage/gcsProvider';
+import Logging from '@fjell/logging';
+import { findContextEntityInGcs, listContextEntitiesFromGcs } from './entityIndexService';
 
 type EntityType = 'person' | 'project' | 'term' | 'company' | 'ignored';
+const logger = Logging.getLogger('@redaksjon/protokoll-mcp').get('entity-resources');
 
 const ENTITY_DIRECTORY: Record<EntityType, string> = {
     person: 'people',
@@ -23,80 +25,6 @@ const ENTITY_DIRECTORY: Record<EntityType, string> = {
     company: 'companies',
     ignored: 'ignored',
 };
-
-function buildContextGcsUri(): { uri: string; projectId?: string; credentialsFile?: string } | null {
-    const storageConfig = ServerConfig.getStorageConfig();
-    if (storageConfig.backend !== 'gcs' || !storageConfig.gcs) {
-        return null;
-    }
-
-    const gcs = storageConfig.gcs;
-    const contextUri = gcs.contextUri
-        || (gcs.contextBucket
-            ? `gs://${gcs.contextBucket}/${(gcs.contextPrefix || '').replace(/^\/+|\/+$/g, '')}`
-            : undefined);
-    if (!contextUri) {
-        return null;
-    }
-
-    return {
-        uri: contextUri,
-        projectId: gcs.projectId,
-        credentialsFile: gcs.credentialsFile,
-    };
-}
-
-async function loadEntitiesFromGcs(entityType: EntityType): Promise<Array<Record<string, unknown>>> {
-    const contextGcs = buildContextGcsUri();
-    if (!contextGcs) {
-        return [];
-    }
-
-    const provider = createGcsStorageProvider(contextGcs.uri, contextGcs.credentialsFile, contextGcs.projectId);
-    const directory = ENTITY_DIRECTORY[entityType];
-    const files = await provider.listFiles(`${directory}/`);
-    const yamlFiles = files.filter((pathValue) => pathValue.endsWith('.yaml') || pathValue.endsWith('.yml'));
-    const entities: Array<Record<string, unknown>> = [];
-
-    for (const filePath of yamlFiles) {
-        try {
-            const raw = await provider.readFile(filePath);
-            const parsed = yaml.load(raw.toString('utf8'));
-            if (parsed && typeof parsed === 'object') {
-                entities.push(parsed as Record<string, unknown>);
-            }
-        } catch {
-            // Ignore unreadable YAML entries so one bad file does not block all entities.
-        }
-    }
-
-    return entities;
-}
-
-async function findEntityInGcs(entityType: EntityType, entityId: string): Promise<Record<string, unknown> | null> {
-    const entities = await loadEntitiesFromGcs(entityType);
-    const normalized = entityId.trim().toLowerCase();
-    const prefix = normalized.match(/^([a-f0-9]{8})/)?.[1];
-
-    for (const entity of entities) {
-        const id = typeof entity.id === 'string' ? entity.id : '';
-        const slug = typeof entity.slug === 'string' ? entity.slug : '';
-        const idLower = id.toLowerCase();
-        const slugLower = slug.toLowerCase();
-
-        if (idLower === normalized || slugLower === normalized) {
-            return entity;
-        }
-        if (normalized && (idLower.startsWith(normalized) || normalized.startsWith(idLower))) {
-            return entity;
-        }
-        if (prefix && idLower.startsWith(prefix)) {
-            return entity;
-        }
-    }
-
-    return null;
-}
 
 /**
  * Read a single entity resource.
@@ -111,7 +39,7 @@ export async function readEntityResource(
     if ((entityType as EntityType) in ENTITY_DIRECTORY && ServerConfig.isInitialized()) {
         const storageConfig = ServerConfig.getStorageConfig();
         if (storageConfig.backend === 'gcs') {
-            const gcsEntity = await findEntityInGcs(entityType as EntityType, entityId);
+            const gcsEntity = await findContextEntityInGcs(entityType as EntityType, entityId);
             if (gcsEntity) {
                 const yamlContent = yaml.dump(gcsEntity);
                 return {
@@ -124,14 +52,20 @@ export async function readEntityResource(
     }
 
     const effectiveDir = contextDirectory || ServerConfig.getWorkspaceRoot() || process.cwd();
-    // eslint-disable-next-line no-console
-    console.log(`   [entity] Looking up ${entityType}/${entityId} (context from ${effectiveDir})`);
+    logger.info('entity.read.lookup', {
+        entityType,
+        entityId,
+        effectiveDir,
+    });
     const context = await createToolContext(contextDirectory);
 
     if (!context.hasContext()) {
         const searchDir = contextDirectory || process.cwd();
-        // eslint-disable-next-line no-console
-        console.log(`   [entity] ❌ No Protokoll context found in ${searchDir}`);
+        logger.warning('entity.read.missing_context', {
+            entityType,
+            entityId,
+            searchDir,
+        });
         throw new Error(`No Protokoll context found. Expected .protokoll/ or context dirs in ${searchDir}`);
     }
 
@@ -165,13 +99,18 @@ export async function readEntityResource(
                         : entityType === 'company' ? context.getAllCompanies().map(c => c.id)
                             : entityType === 'ignored' ? context.getAllIgnored().map(i => i.id)
                                 : [];
-        // eslint-disable-next-line no-console
-        console.log(`   [entity] ❌ ${entityType} "${entityId}" not found. Available ${entityType} IDs: ${allIds.join(', ') || '(none)'}`);
+        logger.warning('entity.read.not_found', {
+            entityType,
+            entityId,
+            availableCount: allIds.length,
+        });
         throw new Error(`${entityType} "${entityId}" not found`);
     }
 
-    // eslint-disable-next-line no-console
-    console.log(`   [entity] ✅ Found ${entityType}`);
+    logger.info('entity.read.found', {
+        entityType,
+        entityId,
+    });
 
     // Convert to YAML for readability
     const yamlContent = yaml.dump(entity);
@@ -193,7 +132,7 @@ export async function readEntitiesListResource(
     if ((entityType as EntityType) in ENTITY_DIRECTORY && ServerConfig.isInitialized()) {
         const storageConfig = ServerConfig.getStorageConfig();
         if (storageConfig.backend === 'gcs') {
-            const entitiesFromGcs = await loadEntitiesFromGcs(entityType as EntityType);
+            const entitiesFromGcs = await listContextEntitiesFromGcs(entityType as EntityType);
             const entities = entitiesFromGcs.map((entity) => {
                 const id = String(entity.id || '');
                 const name = String(entity.name || '');

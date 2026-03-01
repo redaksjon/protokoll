@@ -10,6 +10,7 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { PklTranscript } from '@redaksjon/protokoll-format';
 import type { TranscriptMetadata } from '@redaksjon/protokoll-format';
 import { Transcript } from '@redaksjon/protokoll-engine';
+import Logging from '@fjell/logging';
 
 const { 
     findUploadedTranscripts,
@@ -24,6 +25,7 @@ import type { TranscriptionWorker } from '../worker/transcription-worker';
 
 // Worker instance will be set by server
 let workerInstance: TranscriptionWorker | null = null;
+const logger = Logging.getLogger('@redaksjon/protokoll-mcp').get('queue-tools');
 
 export function setWorkerInstance(worker: TranscriptionWorker | null): void {
     workerInstance = worker;
@@ -186,8 +188,10 @@ async function findRecentTranscripts(
                 await transcript.close();
             } catch (error) {
                 // Skip files that can't be opened
-                // eslint-disable-next-line no-console
-                console.warn(`Failed to open transcript ${file}:`, error);
+                logger.warning('queue.recent.skip_unreadable_transcript', {
+                    file,
+                    error: error instanceof Error ? error.message : String(error),
+                });
             }
         }
     }

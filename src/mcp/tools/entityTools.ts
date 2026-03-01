@@ -15,6 +15,7 @@ import {
 } from '@redaksjon/protokoll-engine';
  
 import { formatEntity, slugify, mergeArray, createToolContext } from './shared.js';
+import { markContextEntityIndexDirty } from '../resources/entityIndexService';
 
 /**
  * Check if a string is a valid UUID
@@ -22,6 +23,27 @@ import { formatEntity, slugify, mergeArray, createToolContext } from './shared.j
 function isValidUUID(str: string): boolean {
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     return uuidRegex.test(str);
+}
+
+async function assertContextAvailableForEntityEdit(context: { hasContext(): boolean }): Promise<void> {
+    if (context.hasContext()) {
+        return;
+    }
+
+    const ServerConfig = await import('../serverConfig');
+    if (ServerConfig.getStorageConfig().backend === 'gcs') {
+        return;
+    }
+
+    throw new Error('No .protokoll directory found. Initialize context first.');
+}
+
+async function markEntityIndexDirtyIfGcs(entityType?: 'person' | 'project' | 'term' | 'company' | 'ignored'): Promise<void> {
+    const ServerConfig = await import('../serverConfig');
+    if (ServerConfig.getStorageConfig().backend !== 'gcs') {
+        return;
+    }
+    markContextEntityIndexDirty(entityType);
 }
 
 // ============================================================================
@@ -742,6 +764,7 @@ export async function handleAddPerson(args: {
     };
 
     await context.saveEntity(person);
+    await markEntityIndexDirtyIfGcs('person');
 
     return {
         success: true,
@@ -764,10 +787,7 @@ export async function handleEditPerson(args: {
     contextDirectory?: string;
 }) {
     const context = await createToolContext(args.contextDirectory);
-
-    if (!context.hasContext()) {
-        throw new Error('No .protokoll directory found. Initialize context first.');
-    }
+    await assertContextAvailableForEntityEdit(context);
 
     const existingPerson = findPersonResilient(context, args.id);
 
@@ -798,6 +818,7 @@ export async function handleEditPerson(args: {
     }
 
     await context.saveEntity(updatedPerson, true);
+    await markEntityIndexDirtyIfGcs('person');
 
     // Build summary of changes
     const changes: string[] = [];
@@ -918,6 +939,7 @@ export async function handleAddProject(args: {
     };
 
     await context.saveEntity(project);
+    await markEntityIndexDirtyIfGcs('project');
 
     return {
         success: true,
@@ -967,10 +989,7 @@ export async function handleEditProject(args: {
     contextDirectory?: string;
 }) {
     const context = await createToolContext(args.contextDirectory);
-
-    if (!context.hasContext()) {
-        throw new Error('No .protokoll directory found. Initialize context first.');
-    }
+    await assertContextAvailableForEntityEdit(context);
 
     const existingProject = findProjectResilient(context, args.id);
 
@@ -1134,6 +1153,7 @@ export async function handleEditProject(args: {
     }
 
     await context.saveEntity(updatedProject, true);
+    await markEntityIndexDirtyIfGcs('project');
 
     // Build summary of changes
     const changes: string[] = [];
@@ -1274,6 +1294,7 @@ export async function handleAddTerm(args: {
     };
 
     await context.saveEntity(term);
+    await markEntityIndexDirtyIfGcs('term');
 
     return {
         success: true,
@@ -1300,12 +1321,9 @@ export async function handleEditTerm(args: {
     contextDirectory?: string;
 }) {
     const context = await createToolContext(args.contextDirectory);
+    await assertContextAvailableForEntityEdit(context);
 
-    if (!context.hasContext()) {
-        throw new Error('No .protokoll directory found. Initialize context first.');
-    }
-
-    const existingTerm = context.getTerm(args.id);
+    const existingTerm = findTermResilient(context, args.id) || context.getTerm(args.id);
     if (!existingTerm) {
         throw new Error(`Term "${args.id}" not found`);
     }
@@ -1361,6 +1379,7 @@ export async function handleEditTerm(args: {
     }
 
     await context.saveEntity(updatedTerm, true);
+    await markEntityIndexDirtyIfGcs('term');
 
     // Build summary of changes
     const changes: string[] = [];
@@ -1526,6 +1545,7 @@ export async function handleMergeTerms(args: {
     // Save merged term and delete source
     await context.saveEntity(mergedTerm);
     await context.deleteEntity(sourceTerm);
+    await markEntityIndexDirtyIfGcs('term');
 
     return {
         success: true,
@@ -1569,6 +1589,7 @@ export async function handleAddCompany(args: {
     };
 
     await context.saveEntity(company);
+    await markEntityIndexDirtyIfGcs('company');
 
     return {
         success: true,
@@ -1588,10 +1609,7 @@ export async function handleEditCompany(args: {
     contextDirectory?: string;
 }) {
     const context = await createToolContext(args.contextDirectory);
-
-    if (!context.hasContext()) {
-        throw new Error('No .protokoll directory found. Initialize context first.');
-    }
+    await assertContextAvailableForEntityEdit(context);
 
     const existingCompany = findCompanyResilient(context, args.id);
 
@@ -1619,6 +1637,7 @@ export async function handleEditCompany(args: {
     }
 
     await context.saveEntity(updatedCompany, true);
+    await markEntityIndexDirtyIfGcs('company');
 
     // Build summary of changes
     const changes: string[] = [];
@@ -1662,6 +1681,9 @@ export async function handleDeleteEntity(args: { entityType: string; entityId: s
     }
 
     const deleted = await context.deleteEntity(entity);
+    if (deleted) {
+        await markEntityIndexDirtyIfGcs(args.entityType as 'person' | 'project' | 'term' | 'company' | 'ignored');
+    }
 
     if (!deleted) {
         throw new Error(`Failed to delete ${args.entityType} "${args.entityId}"`);

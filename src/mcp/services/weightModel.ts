@@ -7,12 +7,14 @@
  */
 
 import { Weighting } from '@redaksjon/protokoll-engine';
+import Logging from '@fjell/logging';
 
 type WeightModelBuilder = Weighting.WeightModelBuilder;
 type WeightModelProvider = Weighting.WeightModelProvider;
 type WeightModel = Weighting.WeightModel;
 type WeightModelConfig = Weighting.WeightModelConfig;
 import * as path from 'node:path';
+const logger = Logging.getLogger('@redaksjon/protokoll-mcp').get('weight-model');
 
 /**
  * Weight model service state
@@ -60,18 +62,24 @@ export async function initializeWeightModel(workspaceRoot: string): Promise<Weig
     const builder = new Weighting.WeightModelBuilder(config);
     
     try {
-        // eslint-disable-next-line no-console
-        console.log('[Weight Model] Building entity affinity graph from recent transcripts...');
+        logger.info('weight_model.build.start', {
+            transcriptDirectory,
+            outputPath,
+            maxTranscripts: config.maxTranscripts,
+            minCooccurrenceCount: config.minCooccurrenceCount,
+        });
         const startTime = Date.now();
         
         const model = await builder.buildAndWrite(transcriptDirectory);
         const provider = new Weighting.WeightModelProvider(model);
         
         const duration = Date.now() - startTime;
-        // eslint-disable-next-line no-console
-        console.log(`[Weight Model] Built in ${duration}ms: ${model.metadata.transcriptCount} transcripts, ${model.metadata.entityCount} entities`);
-        // eslint-disable-next-line no-console
-        console.log(`[Weight Model] Written to: ${outputPath}`);
+        logger.info('weight_model.build.complete', {
+            elapsedMs: duration,
+            transcriptCount: model.metadata.transcriptCount,
+            entityCount: model.metadata.entityCount,
+            outputPath,
+        });
         
         weightModelService = { 
             provider, 
@@ -83,8 +91,9 @@ export async function initializeWeightModel(workspaceRoot: string): Promise<Weig
         
         return weightModelService;
     } catch (error) {
-        // eslint-disable-next-line no-console
-        console.warn('[Weight Model] Failed to build, using empty model:', error);
+        logger.warning('weight_model.build.failed', {
+            error: error instanceof Error ? error.message : String(error),
+        });
         
         // Create empty provider - purely additive behavior
         const provider = new Weighting.WeightModelProvider(null);
@@ -143,11 +152,14 @@ export function scheduleWeightModelWrite(delay: number = 2000): void {
                     weightModelService.model,
                     weightModelService.outputPath
                 );
-                // eslint-disable-next-line no-console
-                console.log('[Weight Model] Updated model written to disk');
+                logger.info('weight_model.write.complete', {
+                    outputPath: weightModelService.outputPath,
+                });
             } catch (error) {
-                // eslint-disable-next-line no-console
-                console.warn('[Weight Model] Failed to write after incremental update:', error);
+                logger.warning('weight_model.write.failed', {
+                    outputPath: weightModelService.outputPath,
+                    error: error instanceof Error ? error.message : String(error),
+                });
             }
         }
     }, delay);

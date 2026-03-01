@@ -9,8 +9,10 @@
 import * as Cardigantime from '@utilarium/cardigantime';
 import type { Logger } from '@utilarium/cardigantime';
 import { resolve, dirname, basename } from 'node:path';
+import Logging from '@fjell/logging';
 
 export const DEFAULT_CONFIG_FILE = 'protokoll-config.yaml';
+const logger = Logging.getLogger('@redaksjon/protokoll-mcp').get('config-discovery');
 
 /**
  * Check if debug mode is enabled via environment or will be via config
@@ -28,26 +30,26 @@ export function createQuietLogger(): Logger {
     
     const noop = () => { /* intentionally empty */ };
     
-    const debugLog = debugEnabled 
-        ? (message: string, ...args: unknown[]) => {
-            // Format the message more cleanly
-            // eslint-disable-next-line no-console
-            console.error(`[config] ${message}`, ...args);
-        }
-        : noop;
-    
     return {
         debug: noop, // Suppress verbose debug messages
         info: noop,  // Suppress info messages during discovery
         warn: (message: string, ...args: unknown[]) => {
             // eslint-disable-next-line no-console
-            console.error(`[config:warn] ${message}`, ...args);
+            console.error(`[config:warn] ${message}`);
+            logger.warning('cardigantime.warn', { message, args });
         },
         error: (message: string, ...args: unknown[]) => {
             // eslint-disable-next-line no-console
-            console.error(`[config:error] ${message}`, ...args);
+            console.error(`[config:error] ${message}`);
+            logger.error('cardigantime.error', { message, args });
         },
-        verbose: debugLog,
+        verbose: debugEnabled
+            ? (message: string, ...args: unknown[]) => {
+                // eslint-disable-next-line no-console
+                console.error(`[config] ${message}`);
+                logger.debug('cardigantime.debug', { message, args });
+            }
+            : noop,
         silly: noop,
     };
 }

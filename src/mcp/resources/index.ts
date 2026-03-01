@@ -16,6 +16,7 @@ import type {
 } from '../types';
 import { parseUri } from '../uri';
 import * as ServerConfig from '../serverConfig';
+import Logging from '@fjell/logging';
 
 // Re-export all resource modules
 export * from './definitions';
@@ -32,6 +33,7 @@ import { readTranscriptResource, readTranscriptsListResource } from './transcrip
 import { readEntityResource, readEntitiesListResource } from './entityResources';
 import { readAudioInboundResource, readAudioProcessedResource } from './audioResources';
 import { readConfigResource } from './configResource';
+const logger = Logging.getLogger('@redaksjon/protokoll-mcp').get('resources');
 
 // ============================================================================
 // Main Handler Functions
@@ -59,11 +61,12 @@ export async function handleListResources(contextDirectory?: string): Promise<{
 export async function handleReadResource(uri: string): Promise<McpResourceContents> {
     const parsed = parseUri(uri);
 
-    // Debug: log entity read attempts
     if (parsed.resourceType === 'entity') {
         const entityUri = parsed as EntityUri;
-        // eslint-disable-next-line no-console
-        console.log(`\n🔍 [resources/read] Loading entity: type=${entityUri.entityType} id=${entityUri.entityId}`);
+        logger.info('resource.read.entity.request', {
+            entityType: entityUri.entityType,
+            entityId: entityUri.entityId,
+        });
     }
 
     switch (parsed.resourceType) {

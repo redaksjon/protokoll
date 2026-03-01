@@ -13,6 +13,7 @@ import { vi } from 'vitest';
 import { PklTranscript } from '@redaksjon/protokoll-format';
 import { readTranscriptsListResource } from '../../src/mcp/resources/transcriptResources';
 import * as ServerConfig from '../../src/mcp/serverConfig';
+import { FilesystemStorageProvider } from '../../src/mcp/storage/fileProviders';
 
 describe('Transcripts list integration (projectId filter)', () => {
   let tempDir: string;
@@ -20,6 +21,9 @@ describe('Transcripts list integration (projectId filter)', () => {
   beforeEach(async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'transcripts-list-integration-'));
     vi.spyOn(ServerConfig, 'getOutputDirectory').mockReturnValue(tempDir);
+    vi.spyOn(ServerConfig, 'getOutputStorage').mockReturnValue(
+      new FilesystemStorageProvider(tempDir) as any
+    );
 
     // Create fixture transcripts
     const t1 = PklTranscript.create(path.join(tempDir, '2026-01-01-meeting.pkl'), {

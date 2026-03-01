@@ -15,8 +15,10 @@ import { PklTranscript } from '@redaksjon/protokoll-format';
 import * as ServerConfig from '../serverConfig';
 import { sanitizePath } from '../tools/shared';
 import type { FileStorageProvider } from '../storage/fileProviders';
+import { listTranscriptsViaIndex } from './transcriptIndexService';
 
-const { listTranscripts, resolveTranscriptPath, readTranscriptContent, stripTranscriptExtension } = Transcript;
+const { resolveTranscriptPath, readTranscriptContent, stripTranscriptExtension } = Transcript;
+const { listTranscripts } = Transcript;
 const logger = Logging.getLogger('@redaksjon/protokoll-mcp').get('transcript-resources');
 
 function parseStoredSummaries(raw: string): Array<{
@@ -304,35 +306,6 @@ async function readTranscriptResourceFromStorage(
     });
 }
 
-function normalizeDateOnly(value: string | undefined): string | undefined {
-    if (!value) {
-        return undefined;
-    }
-    const trimmed = value.trim();
-    if (!trimmed) {
-        return undefined;
-    }
-    return trimmed.includes('T') ? trimmed.slice(0, 10) : trimmed;
-}
-
-function asOptionalString(value: unknown): string | undefined {
-    return typeof value === 'string' ? value : undefined;
-}
-
-function passesDateFilter(date: string | undefined, startDate?: string, endDate?: string): boolean {
-    const normalized = normalizeDateOnly(date);
-    if (!normalized) {
-        return !startDate && !endDate;
-    }
-    if (startDate && normalized < startDate) {
-        return false;
-    }
-    if (endDate && normalized > endDate) {
-        return false;
-    }
-    return true;
-}
-
 async function listTranscriptsFromStorage(options: {
     outputStorage: FileStorageProvider;
     outputDirectory: string;
@@ -344,19 +317,11 @@ async function listTranscriptsFromStorage(options: {
     offset: number;
 }) {
     const startedAt = Date.now();
-    const {
-        outputStorage,
-        outputDirectory,
-        startDate,
-        endDate,
-        projectId,
-        projectName,
-        limit,
-        offset,
-    } = options;
+    const { outputStorage, outputDirectory, startDate, endDate, projectId, projectName, limit, offset } = options;
 
-    logger.info('transcripts.gcs.list.start', {
+    logger.info('transcripts.storage.list.start', {
         directory: outputDirectory,
+        storageBackend: outputStorage.name,
         limit,
         offset,
         startDate: startDate ?? null,
@@ -365,125 +330,37 @@ async function listTranscriptsFromStorage(options: {
         projectName: projectName ?? null,
     });
 
-    const listStartedAt = Date.now();
-    const allFiles = await outputStorage.listFiles('');
-    logger.info('transcripts.gcs.list.objects_loaded', {
-        totalObjects: allFiles.length,
-        elapsedMs: Date.now() - listStartedAt,
-    });
-
-    const transcriptCandidates = allFiles.filter((pathValue) => {
-        const normalized = pathValue.replace(/\\/g, '/').toLowerCase();
-        return normalized.endsWith('.pkl')
-            && !normalized.startsWith('uploads/')
-            && !normalized.startsWith('.intermediate/')
-            && !normalized.includes('/uploads/')
-            && !normalized.includes('/.intermediate/');
-    });
-
-    logger.info('transcripts.gcs.list.transcript_candidates', {
-        candidates: transcriptCandidates.length,
-        ignoredObjects: allFiles.length - transcriptCandidates.length,
-    });
-
-    let processedCandidates = 0;
-    const hydrateStartedAt = Date.now();
-    const hydrated = await Promise.all(
-        transcriptCandidates.map(async (pathValue) => {
-            try {
-                const buffer = await outputStorage.readFile(pathValue);
-                const hydratedEntry = await withTempPklFile(buffer, async (tempPath) => {
-                    const { content, metadata, title } = await readTranscriptContent(tempPath);
-                    const pklTranscript = PklTranscript.open(tempPath, { readOnly: true });
-                    let hasRawTranscript = false;
-                    try {
-                        hasRawTranscript = Boolean(pklTranscript.hasRawTranscript);
-                    } finally {
-                        pklTranscript.close();
-                    }
-
-                    const metadataProjectId = asOptionalString(metadata.projectId);
-                    const metadataProject = asOptionalString(metadata.project);
-                    if (projectId) {
-                        const projectMatches = metadataProjectId === projectId
-                            || (projectName ? metadataProject === projectName : metadataProject === projectId);
-                        if (!projectMatches) {
-                            return null;
-                        }
-                    }
-
-                    const transcriptDate = normalizeDateOnly(asOptionalString(metadata.date));
-                    if (!passesDateFilter(transcriptDate, startDate, endDate)) {
-                        return null;
-                    }
-
-                    const safePath = await sanitizePath(pathValue, outputDirectory);
-                    return {
-                        path: safePath,
-                        filename: basename(pathValue),
-                        date: transcriptDate || '1970-01-01',
-                        time: asOptionalString(metadata.time),
-                        title: title || stripTranscriptExtension(basename(pathValue)),
-                        status: asOptionalString(metadata.status),
-                        openTasksCount: Array.isArray(metadata.tasks)
-                            ? metadata.tasks.filter((task) => {
-                                if (!task || typeof task !== 'object') {
-                                    return true;
-                                }
-                                return (task as { status?: unknown }).status !== 'completed';
-                            }).length
-                            : 0,
-                        contentSize: content.length,
-                        entities: metadata.entities,
-                        hasRawTranscript,
-                    };
-                });
-                return hydratedEntry;
-            } catch {
-                return null;
-            } finally {
-                processedCandidates++;
-                if (processedCandidates % 25 === 0 || processedCandidates === transcriptCandidates.length) {
-                    logger.info('transcripts.gcs.list.progress', {
-                        processed: processedCandidates,
-                        total: transcriptCandidates.length,
-                        elapsedMs: Date.now() - hydrateStartedAt,
-                    });
-                }
-            }
-        }),
-    );
-
-    const filtered = hydrated
-        .filter((item): item is NonNullable<typeof item> => item !== null)
-        .sort((a, b) => {
-            const dateCompare = b.date.localeCompare(a.date);
-            if (dateCompare !== 0) {
-                return dateCompare;
-            }
-            const timeCompare = (b.time || '').localeCompare(a.time || '');
-            if (timeCompare !== 0) {
-                return timeCompare;
-            }
-            return b.filename.localeCompare(a.filename);
+    const hasListSupport = typeof (outputStorage as { listFiles?: unknown }).listFiles === 'function'
+        || typeof (outputStorage as { listFilesWithMetadata?: unknown }).listFilesWithMetadata === 'function';
+    if (!hasListSupport) {
+        return listTranscripts({
+            directory: outputDirectory,
+            startDate,
+            endDate,
+            limit,
+            offset,
+            projectId,
         });
+    }
 
-    const page = filtered.slice(offset, offset + limit);
-    logger.info('transcripts.gcs.list.complete', {
-        totalCandidates: transcriptCandidates.length,
-        totalAfterFilters: filtered.length,
-        returned: page.length,
-        hasMore: offset + limit < filtered.length,
-        elapsedMs: Date.now() - startedAt,
-    });
-
-    return {
-        transcripts: page,
-        total: filtered.length,
-        hasMore: offset + limit < filtered.length,
+    const result = await listTranscriptsViaIndex({
+        outputStorage,
+        outputDirectory,
+        startDate,
+        endDate,
+        projectId,
+        projectName,
         limit,
         offset,
-    };
+    });
+    logger.info('transcripts.storage.list.complete', {
+        storageBackend: outputStorage.name,
+        totalAfterFilters: result.total,
+        returned: result.transcripts.length,
+        hasMore: result.hasMore,
+        elapsedMs: Date.now() - startedAt,
+    });
+    return result;
 }
 
 /**
@@ -521,53 +398,36 @@ export async function readTranscriptsListResource(options: {
         }
     }
 
-    // Log request parameters
-    // eslint-disable-next-line no-console
-    console.log(`📋 Reading transcripts list:`);
-    // eslint-disable-next-line no-console
-    console.log(`   Directory: ${directory}${options.directory ? '' : ' (from config)'}`);
-    if (projectId) {
-        // eslint-disable-next-line no-console
-        console.log(`   Project filter: ${projectId}`);
-    }
-    if (startDate || endDate) {
-        // eslint-disable-next-line no-console
-        console.log(`   Date range: ${startDate || 'any'} to ${endDate || 'any'}`);
-    }
-    // eslint-disable-next-line no-console
-    console.log(`   Limit: ${limit}, Offset: ${offset}`);
+    logger.info('transcripts.list.request', {
+        directory,
+        directorySource: options.directory ? 'request' : 'config',
+        projectId: projectId ?? null,
+        startDate: startDate ?? null,
+        endDate: endDate ?? null,
+        limit,
+        offset,
+        storageBackend: outputStorage.name,
+    });
 
-    const result = outputStorage.name === 'gcs'
-        ? await listTranscriptsFromStorage({
-            outputStorage,
-            outputDirectory,
-            startDate,
-            endDate,
-            projectId,
-            projectName,
-            limit,
-            offset,
-        })
-        : await listTranscripts({
-            directory,
-            limit,
-            offset,
-            sortBy: 'date',
-            startDate,
-            endDate,
-            projectId,
-            project: projectName,
-        });
+    const result = await listTranscriptsFromStorage({
+        outputStorage,
+        outputDirectory,
+        startDate,
+        endDate,
+        projectId,
+        projectName,
+        limit,
+        offset,
+    });
 
-    // Log results
-    // eslint-disable-next-line no-console
-    console.log(`✅ Transcripts list response:`);
-    // eslint-disable-next-line no-console
-    console.log(`   Total found: ${result.total}`);
-    // eslint-disable-next-line no-console
-    console.log(`   Returned: ${result.transcripts.length} (limit: ${limit}, offset: ${offset})`);
-    // eslint-disable-next-line no-console
-    console.log(`   Has more: ${result.hasMore}`);
+    logger.info('transcripts.list.response', {
+        directory,
+        total: result.total,
+        returned: result.transcripts.length,
+        hasMore: result.hasMore,
+        limit,
+        offset,
+    });
 
     // Convert to resource format with URIs
     // Convert absolute paths to relative paths (relative to outputDirectory)

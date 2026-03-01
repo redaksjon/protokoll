@@ -5,12 +5,15 @@
  
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { resolve, dirname } from 'node:path';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import * as Context from '@/context';
+import Logging from '@fjell/logging';
 import { Agentic, Phases, Reasoning, Routing, Transcript } from '@redaksjon/protokoll-engine';
 import { DEFAULT_MODEL, MAX_CONTENT_LENGTH } from '@/constants';
+import { markTranscriptIndexDirtyForStorage, resolveTranscriptPathByFilename } from '../resources/transcriptIndexService';
+import { markContextEntityIndexDirty } from '../resources/entityIndexService';
 
 import { fileExists, getConfiguredDirectory, getContextDirectories, sanitizePath, validatePathWithinDirectory, validatePathWithinOutputDirectory, validateNotRemoteMode, resolveTranscriptPath } from './shared.js';
 import * as Metadata from '@redaksjon/protokoll-engine';
@@ -22,6 +25,8 @@ import {
     listTranscripts as listTranscriptsFromStorage,
     type TranscriptMetadata,
 } from '@redaksjon/protokoll-format';
+
+const logger = Logging.getLogger('@redaksjon/protokoll-mcp').get('transcript-tools');
 
 // ============================================================================
 // Helper Functions
@@ -56,6 +61,152 @@ interface StoredSummary {
     styleLabel: string;
     content: string;
     generatedAt: string;
+}
+
+function toStoragePathCandidates(transcriptPath: string): string[] {
+    const normalizedInput = transcriptPath.trim();
+    if (!normalizedInput) {
+        return [];
+    }
+
+    let normalized = normalizedInput;
+    if (normalized.startsWith('protokoll://transcript/')) {
+        const rawPath = normalized
+            .replace('protokoll://transcript/', '')
+            .split('?')[0]
+            .split('#')[0] || '';
+        try {
+            normalized = decodeURIComponent(rawPath);
+        } catch {
+            // Fall back to the undecoded path for malformed or partially encoded URIs.
+            normalized = rawPath;
+        }
+    }
+
+    normalized = normalized
+        .replace(/^\/+/, '')
+        .replace(/\\/g, '/')
+        .replace(/^(\.\.\/)+/, '');
+    if (!normalized) {
+        return [];
+    }
+
+    const withoutExt = normalized.replace(/\.pkl$/i, '');
+    const candidates = new Set<string>([
+        withoutExt,
+        `${withoutExt}.pkl`,
+    ]);
+    return Array.from(candidates);
+}
+
+async function resolveStorageTranscriptPath(
+    transcriptPath: string,
+    outputStorage: { exists(path: string): Promise<boolean>; name: string; cacheKey?: string; },
+): Promise<string | null> {
+    const candidates = toStoragePathCandidates(transcriptPath);
+    for (const candidate of candidates) {
+        if (await outputStorage.exists(candidate)) {
+            return candidate;
+        }
+    }
+
+    const normalizedRef = transcriptPath.startsWith('protokoll://transcript/')
+        ? transcriptPath.replace('protokoll://transcript/', '').split('?')[0].split('#')[0]
+        : transcriptPath;
+    const isBasenameOnly = !normalizedRef.replace(/^\/+/, '').replace(/\\/g, '/').includes('/');
+    if (!isBasenameOnly) {
+        return null;
+    }
+
+    const basenameCandidates = new Set(
+        candidates.map((candidate) => candidate.split('/').pop() || candidate)
+    );
+
+    const ServerConfig = await import('../serverConfig');
+    const outputDirectory = ServerConfig.getOutputDirectory();
+    const matches = await resolveTranscriptPathByFilename(
+        outputStorage as any,
+        outputDirectory,
+        basenameCandidates,
+    );
+    if (matches.length === 1) {
+        return matches[0];
+    }
+    if (matches.length > 1) {
+        throw new Error(
+            `Ambiguous transcript reference "${transcriptPath}": ${matches.length} matches found. ` +
+            'Use full transcript URI or relative path with date folders.'
+        );
+    }
+    return null;
+}
+
+export const transcriptResolutionTestHelpers = {
+    toStoragePathCandidates,
+    resolveStorageTranscriptPath,
+};
+
+interface ToolTranscriptAccess {
+    pklPath: string;
+    outputDirectory: string;
+    storagePath?: string;
+    isGcs: boolean;
+    finalize: (persistChanges: boolean) => Promise<void>;
+}
+
+async function openToolTranscript(
+    transcriptPath: string,
+    contextDirectory: string | undefined,
+): Promise<ToolTranscriptAccess> {
+    const ServerConfig = await import('../serverConfig');
+    const outputStorage = ServerConfig.getOutputStorage();
+    const outputDirectory = await getConfiguredDirectory('outputDirectory', contextDirectory);
+
+    if (outputStorage.name !== 'gcs') {
+        const absolutePath = await resolveTranscriptPath(transcriptPath, contextDirectory);
+        const pklPath = ensurePklExtension(absolutePath);
+        return {
+            pklPath,
+            outputDirectory,
+            isGcs: false,
+            finalize: async () => {},
+        };
+    }
+
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(transcriptPath.trim())) {
+        throw new Error(
+            'UUID transcript references are not supported in GCS mode yet. ' +
+            'Use a transcript URI (protokoll://transcript/...) or relative path.'
+        );
+    }
+
+    const storagePath = await resolveStorageTranscriptPath(transcriptPath, outputStorage);
+    if (!storagePath) {
+        throw new Error(`Transcript not found: ${transcriptPath}`);
+    }
+
+    const tmpRoot = await mkdtemp(`${tmpdir()}/protokoll-mcp-transcript-`);
+    const pklPath = resolve(tmpRoot, 'transcript.pkl');
+    const source = await outputStorage.readFile(storagePath);
+    await writeFile(pklPath, source);
+
+    return {
+        pklPath,
+        outputDirectory,
+        storagePath,
+        isGcs: true,
+        finalize: async (persistChanges: boolean) => {
+            try {
+                if (persistChanges) {
+                    const updated = await readFile(pklPath);
+                    await outputStorage.writeFile(storagePath, updated);
+                    markTranscriptIndexDirtyForStorage(outputStorage, outputDirectory, storagePath);
+                }
+            } finally {
+                await rm(tmpRoot, { recursive: true, force: true });
+            }
+        },
+    };
 }
 
 function parseStoredSummaries(raw: string): StoredSummary[] {
@@ -623,6 +774,14 @@ export const updateTranscriptContentTool: Tool = {
                     'Should contain ONLY the body text (content after the --- delimiter). ' +
                     'If the full transcript is provided, the tool will extract only the content section automatically.',
             },
+            contentTarget: {
+                type: 'string',
+                enum: ['enhanced', 'original'],
+                description:
+                    'Which content stream to update. ' +
+                    '"enhanced" updates transcript content (default). ' +
+                    '"original" updates raw transcript text only and never modifies enhanced content.',
+            },
             contextDirectory: {
                 type: 'string',
                 description: 'Optional: Path to the .protokoll context directory',
@@ -799,7 +958,10 @@ export const correctToEntityTool: Tool = {
         properties: {
             transcriptPath: {
                 type: 'string',
-                description: 'Path to transcript file',
+                description:
+                    'Transcript URI (preferred) or relative path from output directory. ' +
+                    'URI format: "protokoll://transcript/2026/2/12-1606-meeting" (no file extension). ' +
+                    'Path format: "2026/2/12-1606-meeting" or "2026/2/12-1606-meeting.pkl"',
             },
             selectedText: {
                 type: 'string',
@@ -833,6 +995,10 @@ export const correctToEntityTool: Tool = {
             projectId: {
                 type: 'string',
                 description: 'Associated project ID (person entities only)',
+            },
+            contextDirectory: {
+                type: 'string',
+                description: 'Optional: Path to the .protokoll context directory',
             },
         },
         required: ['transcriptPath', 'selectedText', 'entityType'],
@@ -875,25 +1041,29 @@ export async function handleReadTranscript(args: {
     transcriptPath: string;
     contextDirectory?: string;
 }) {
-    // Find the transcript (returns absolute path for file operations)
-    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
+    const access = await openToolTranscript(args.transcriptPath, args.contextDirectory);
+    let summaries: StoredSummary[] = [];
+    let transcriptData: Awaited<ReturnType<typeof readTranscriptFromStorage>>;
+    try {
+        // Use protokoll-format storage API directly - returns structured JSON
+        transcriptData = await readTranscriptFromStorage(access.pklPath);
 
-    // Use protokoll-format storage API directly - returns structured JSON
-    const transcriptData = await readTranscriptFromStorage(absolutePath);
+        const transcriptHandle = PklTranscript.open(access.pklPath, { readOnly: true });
+        try {
+            const historyArtifact = transcriptHandle.getArtifact('summary_history');
+            const rawHistory = historyArtifact?.data?.toString('utf8') || '[]';
+            summaries = parseStoredSummaries(rawHistory);
+        } finally {
+            transcriptHandle.close();
+        }
+    } finally {
+        await access.finalize(false);
+    }
 
     // Convert to relative path for response
-    const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
-    const relativePath = await sanitizePath(absolutePath, outputDirectory);
-
-    const transcriptHandle = PklTranscript.open(absolutePath, { readOnly: true });
-    let summaries: StoredSummary[] = [];
-    try {
-        const historyArtifact = transcriptHandle.getArtifact('summary_history');
-        const rawHistory = historyArtifact?.data?.toString('utf8') || '[]';
-        summaries = parseStoredSummaries(rawHistory);
-    } finally {
-        transcriptHandle.close();
-    }
+    const relativePath = access.storagePath
+        ? await sanitizePath(access.storagePath, access.outputDirectory)
+        : await sanitizePath(access.pklPath, access.outputDirectory);
 
     // Return complete structured JSON for client display
     // Clients should NOT need to parse this - all data is ready to display
@@ -933,12 +1103,15 @@ export async function handleListTranscripts(args: {
     entityType?: 'person' | 'project' | 'term' | 'company';
     contextDirectory?: string;
 }) {
+    const ServerConfig = await import('../serverConfig');
+    const outputStorage = ServerConfig.getOutputStorage();
+
     // Get directory from args or config
     const directory = args.directory 
         ? resolve(args.directory)
         : await getConfiguredDirectory('outputDirectory', args.contextDirectory);
 
-    if (!await fileExists(directory)) {
+    if (outputStorage.name !== 'gcs' && !await fileExists(directory)) {
         throw new Error(`Directory not found: ${directory}`);
     }
 
@@ -998,8 +1171,13 @@ export async function handleIdentifyTasksFromTranscript(args: {
     includeTagSuggestions?: boolean;
     contextDirectory?: string;
 }) {
-    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
-    const transcriptData = await readTranscriptFromStorage(absolutePath);
+    const access = await openToolTranscript(args.transcriptPath, args.contextDirectory);
+    let transcriptData: Awaited<ReturnType<typeof readTranscriptFromStorage>>;
+    try {
+        transcriptData = await readTranscriptFromStorage(access.pklPath);
+    } finally {
+        await access.finalize(false);
+    }
 
     const content = transcriptData.content?.trim() || '';
     if (!content) {
@@ -1084,156 +1262,163 @@ export async function handleSummarizeTranscript(args: {
         model: args.model || DEFAULT_MODEL,
     });
 
-    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
-    logSummary('Resolved transcript path', {
-        transcriptPath: args.transcriptPath,
-        absolutePath,
-    });
-
-    const transcriptData = await readTranscriptFromStorage(absolutePath);
-
-    const transcriptContent = (transcriptData.content || '').trim();
-    if (!transcriptContent) {
-        logSummary('Transcript content empty, cannot summarize', {
+    const access = await openToolTranscript(args.transcriptPath, args.contextDirectory);
+    const absolutePath = access.pklPath;
+    let persistSummaryHistory = false;
+    try {
+        logSummary('Resolved transcript path', {
             transcriptPath: args.transcriptPath,
             absolutePath,
         });
-        throw new Error('Transcript content is empty; cannot generate summary.');
-    }
 
-    const audience = (args.audience || '').trim() || 'General audience';
+        const transcriptData = await readTranscriptFromStorage(absolutePath);
 
-    const stylePreset = (args.stylePreset || 'detailed').trim();
-    const selectedStyle = SUMMARY_STYLE_PRESETS[stylePreset] || SUMMARY_STYLE_PRESETS.detailed;
-    const guidance = (args.guidance || '').trim();
-    const model = args.model || DEFAULT_MODEL;
+        const transcriptContent = (transcriptData.content || '').trim();
+        if (!transcriptContent) {
+            logSummary('Transcript content empty, cannot summarize', {
+                transcriptPath: args.transcriptPath,
+                absolutePath,
+            });
+            throw new Error('Transcript content is empty; cannot generate summary.');
+        }
 
-    const transcriptTitle = transcriptData.metadata.title || 'Untitled transcript';
-    const transcriptDate = transcriptData.metadata.date instanceof Date
-        ? transcriptData.metadata.date.toISOString().slice(0, 10)
-        : 'unknown date';
-    const preferredTitle = (args.summaryTitle || '').trim();
+        const audience = (args.audience || '').trim() || 'General audience';
 
-    const boundedContent = transcriptContent.length > MAX_CONTENT_LENGTH
-        ? `${transcriptContent.slice(0, MAX_CONTENT_LENGTH)}\n\n[...transcript truncated for summarization input length...]`
-        : transcriptContent;
-    const truncated = transcriptContent.length > MAX_CONTENT_LENGTH;
-    logSummary('Prepared summary input', {
-        transcriptTitle,
-        transcriptDate,
-        transcriptLength: transcriptContent.length,
-        boundedLength: boundedContent.length,
-        truncated,
-        stylePreset,
-    });
+        const stylePreset = (args.stylePreset || 'detailed').trim();
+        const selectedStyle = SUMMARY_STYLE_PRESETS[stylePreset] || SUMMARY_STYLE_PRESETS.detailed;
+        const guidance = (args.guidance || '').trim();
+        const model = args.model || DEFAULT_MODEL;
 
-    const reasoning = Reasoning.create({
-        model,
-        reasoningLevel: 'medium',
-    });
+        const transcriptTitle = transcriptData.metadata.title || 'Untitled transcript';
+        const transcriptDate = transcriptData.metadata.date instanceof Date
+            ? transcriptData.metadata.date.toISOString().slice(0, 10)
+            : 'unknown date';
+        const preferredTitle = (args.summaryTitle || '').trim();
 
-    const prompt = [
-        'Create an audience-aware summary for the transcript below.',
-        '',
-        `Transcript title: ${transcriptTitle}`,
-        `Transcript date: ${transcriptDate}`,
-        `Audience: ${audience}`,
-        `Style preset: ${selectedStyle.label}`,
-        preferredTitle ? `Preferred summary title: ${preferredTitle}` : 'Preferred summary title: (generate one)',
-        '',
-        'Style instructions:',
-        selectedStyle.instructions,
-        '',
-        'Privacy and sensitivity guardrails:',
-        '- Treat transcript content as potentially sensitive by default.',
-        '- Exclude private internal reflections, personal judgments, or sensitive notes not appropriate for the audience.',
-        '- If unsure whether a detail is audience-appropriate, exclude it or generalize safely.',
-        '- Prefer factual and neutral language over speculative interpretation.',
-        '',
-        'Additional guidance:',
-        guidance || 'No extra guidance provided.',
-        '',
-        'Required output shape:',
-        '1) Title',
-        '2) Summary body matching the selected style preset',
-        '3) Optional "Redactions / Exclusions" section listing what was intentionally omitted for audience safety',
-        '',
-        'Transcript:',
-        boundedContent,
-    ].join('\n');
+        const boundedContent = transcriptContent.length > MAX_CONTENT_LENGTH
+            ? `${transcriptContent.slice(0, MAX_CONTENT_LENGTH)}\n\n[...transcript truncated for summarization input length...]`
+            : transcriptContent;
+        const truncated = transcriptContent.length > MAX_CONTENT_LENGTH;
+        logSummary('Prepared summary input', {
+            transcriptTitle,
+            transcriptDate,
+            transcriptLength: transcriptContent.length,
+            boundedLength: boundedContent.length,
+            truncated,
+            stylePreset,
+        });
 
-    const result = await reasoning.complete({
-        prompt,
-        systemPrompt: 'You are an expert meeting summarizer. Return markdown only.',
-    });
-    logSummary('Reasoning call completed', {
-        transcriptPath: args.transcriptPath,
-        model: result.model || model,
-        durationMs: result.duration ?? null,
-        finishReason: result.finishReason ?? null,
-    });
+        const reasoning = Reasoning.create({
+            model,
+            reasoningLevel: 'medium',
+        });
 
-    const summary = (result.content || '').trim();
-    if (!summary) {
-        logSummary('Empty summary response', {
+        const prompt = [
+            'Create an audience-aware summary for the transcript below.',
+            '',
+            `Transcript title: ${transcriptTitle}`,
+            `Transcript date: ${transcriptDate}`,
+            `Audience: ${audience}`,
+            `Style preset: ${selectedStyle.label}`,
+            preferredTitle ? `Preferred summary title: ${preferredTitle}` : 'Preferred summary title: (generate one)',
+            '',
+            'Style instructions:',
+            selectedStyle.instructions,
+            '',
+            'Privacy and sensitivity guardrails:',
+            '- Treat transcript content as potentially sensitive by default.',
+            '- Exclude private internal reflections, personal judgments, or sensitive notes not appropriate for the audience.',
+            '- If unsure whether a detail is audience-appropriate, exclude it or generalize safely.',
+            '- Prefer factual and neutral language over speculative interpretation.',
+            '',
+            'Additional guidance:',
+            guidance || 'No extra guidance provided.',
+            '',
+            'Required output shape:',
+            '1) Title',
+            '2) Summary body matching the selected style preset',
+            '3) Optional "Redactions / Exclusions" section listing what was intentionally omitted for audience safety',
+            '',
+            'Transcript:',
+            boundedContent,
+        ].join('\n');
+
+        const result = await reasoning.complete({
+            prompt,
+            systemPrompt: 'You are an expert meeting summarizer. Return markdown only.',
+        });
+        logSummary('Reasoning call completed', {
             transcriptPath: args.transcriptPath,
             model: result.model || model,
+            durationMs: result.duration ?? null,
+            finishReason: result.finishReason ?? null,
         });
-        throw new Error('No summary text generated.');
-    }
 
-    logSummary('Summary generated successfully', {
-        transcriptPath: args.transcriptPath,
-        summaryLength: summary.length,
-        elapsedMs: Date.now() - startedAt,
-    });
-
-    const generatedAt = new Date().toISOString();
-    const summaryId = `summary-${Date.now()}-${randomUUID().slice(0, 8)}`;
-    const stylePresetKey = SUMMARY_STYLE_PRESETS[stylePreset] ? stylePreset : 'detailed';
-    const storedSummary: StoredSummary = {
-        id: summaryId,
-        title: preferredTitle || `${transcriptTitle} Summary`,
-        audience,
-        guidance,
-        stylePreset: stylePresetKey,
-        styleLabel: selectedStyle.label,
-        content: summary,
-        generatedAt,
-    };
-    const transcriptHandle = PklTranscript.open(absolutePath, { readOnly: false });
-    try {
-        const existingHistory = transcriptHandle.getArtifact('summary_history');
-        const existingSummaries = parseStoredSummaries(existingHistory?.data?.toString('utf8') || '[]');
-        const nextSummaries = [storedSummary, ...existingSummaries.filter((entry) => entry.id !== summaryId)];
-
-        transcriptHandle.addArtifact(
-            'summary_history',
-            Buffer.from(JSON.stringify(nextSummaries), 'utf8'),
-            {
-                version: 1,
-                count: nextSummaries.length,
-                updatedAt: generatedAt,
+        const summary = (result.content || '').trim();
+        if (!summary) {
+            logSummary('Empty summary response', {
+                transcriptPath: args.transcriptPath,
                 model: result.model || model,
-            }
-        );
-    } finally {
-        transcriptHandle.close();
-    }
-    logSummary('Summary persisted to transcript artifact storage', {
-        transcriptPath: args.transcriptPath,
-        summaryId,
-        generatedAt,
-    });
+            });
+            throw new Error('No summary text generated.');
+        }
 
-    return {
-        summary,
-        audience,
-        stylePreset: stylePresetKey,
-        model: result.model || model,
-        summaryId,
-        generatedAt,
-    };
+        logSummary('Summary generated successfully', {
+            transcriptPath: args.transcriptPath,
+            summaryLength: summary.length,
+            elapsedMs: Date.now() - startedAt,
+        });
+
+        const generatedAt = new Date().toISOString();
+        const summaryId = `summary-${Date.now()}-${randomUUID().slice(0, 8)}`;
+        const stylePresetKey = SUMMARY_STYLE_PRESETS[stylePreset] ? stylePreset : 'detailed';
+        const storedSummary: StoredSummary = {
+            id: summaryId,
+            title: preferredTitle || `${transcriptTitle} Summary`,
+            audience,
+            guidance,
+            stylePreset: stylePresetKey,
+            styleLabel: selectedStyle.label,
+            content: summary,
+            generatedAt,
+        };
+        const transcriptHandle = PklTranscript.open(absolutePath, { readOnly: false });
+        try {
+            const existingHistory = transcriptHandle.getArtifact('summary_history');
+            const existingSummaries = parseStoredSummaries(existingHistory?.data?.toString('utf8') || '[]');
+            const nextSummaries = [storedSummary, ...existingSummaries.filter((entry) => entry.id !== summaryId)];
+
+            transcriptHandle.addArtifact(
+                'summary_history',
+                Buffer.from(JSON.stringify(nextSummaries), 'utf8'),
+                {
+                    version: 1,
+                    count: nextSummaries.length,
+                    updatedAt: generatedAt,
+                    model: result.model || model,
+                }
+            );
+        } finally {
+            transcriptHandle.close();
+        }
+        persistSummaryHistory = true;
+        logSummary('Summary persisted to transcript artifact storage', {
+            transcriptPath: args.transcriptPath,
+            summaryId,
+            generatedAt,
+        });
+
+        return {
+            summary,
+            audience,
+            stylePreset: stylePresetKey,
+            model: result.model || model,
+            summaryId,
+            generatedAt,
+        };
+    } finally {
+        await access.finalize(persistSummaryHistory);
+    }
 }
 
 export async function handleDeleteTranscriptSummary(args: {
@@ -1246,8 +1431,8 @@ export async function handleDeleteTranscriptSummary(args: {
         throw new Error('summaryId is required');
     }
 
-    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
-    const transcriptHandle = PklTranscript.open(absolutePath, { readOnly: false });
+    const access = await openToolTranscript(args.transcriptPath, args.contextDirectory);
+    const transcriptHandle = PklTranscript.open(access.pklPath, { readOnly: false });
     try {
         const historyArtifact = transcriptHandle.getArtifact('summary_history');
         const existingSummaries = parseStoredSummaries(historyArtifact?.data?.toString('utf8') || '[]');
@@ -1275,6 +1460,7 @@ export async function handleDeleteTranscriptSummary(args: {
         };
     } finally {
         transcriptHandle.close();
+        await access.finalize(true);
     }
 }
 
@@ -1293,6 +1479,109 @@ export async function handleEditTranscript(args: {
     // Get the output directory first to ensure consistent validation
     const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
     
+    const ServerConfig = await import('../serverConfig');
+    const outputStorage = ServerConfig.getOutputStorage();
+
+    if (outputStorage.name === 'gcs') {
+        const access = await openToolTranscript(args.transcriptPath, args.contextDirectory);
+        const resolvedStoragePath = access.storagePath || access.pklPath;
+        let persistChanges = false;
+
+        let statusChanged = false;
+        let previousStatus: string | undefined;
+        const changes: string[] = [];
+        try {
+            const transcript = PklTranscript.open(access.pklPath, { readOnly: false });
+            try {
+                const metadataUpdates: Partial<TranscriptMetadata> = {};
+
+                if (args.title) {
+                    metadataUpdates.title = args.title.trim();
+                    changes.push('title updated');
+                }
+                if (args.projectId) {
+                    const contextDirectories = await getContextDirectories();
+                    const context = await Context.create({
+                        startingDir: args.contextDirectory || process.cwd(),
+                        contextDirectories,
+                    });
+                    const project = await context.getProject(args.projectId);
+                    if (!project) {
+                        throw new Error(`Project not found: ${args.projectId}`);
+                    }
+
+                    metadataUpdates.projectId = project.id;
+                    metadataUpdates.project = project.name;
+
+                    const existingEntities = transcript.metadata.entities || {
+                        people: [],
+                        projects: [],
+                        terms: [],
+                        companies: [],
+                    };
+                    metadataUpdates.entities = {
+                        people: existingEntities.people || [],
+                        projects: [{
+                            id: project.id,
+                            name: project.name,
+                            type: 'project',
+                        }],
+                        terms: existingEntities.terms || [],
+                        companies: existingEntities.companies || [],
+                    };
+
+                    changes.push('project changed');
+                }
+                if (args.tagsToAdd || args.tagsToRemove) {
+                    const currentTags = transcript.metadata.tags || [];
+                    let nextTags = [...currentTags];
+                    if (args.tagsToAdd?.length) {
+                        for (const tag of args.tagsToAdd) {
+                            if (!nextTags.includes(tag)) {
+                                nextTags.push(tag);
+                            }
+                        }
+                        changes.push(`${args.tagsToAdd.length} tag(s) added`);
+                    }
+                    if (args.tagsToRemove?.length) {
+                        nextTags = nextTags.filter(tag => !args.tagsToRemove!.includes(tag));
+                        changes.push(`${args.tagsToRemove.length} tag(s) removed`);
+                    }
+                    metadataUpdates.tags = nextTags;
+                }
+
+                if (args.status) {
+                    previousStatus = transcript.metadata.status || 'reviewed';
+                    if (previousStatus !== args.status) {
+                        metadataUpdates.status = args.status as Metadata.TranscriptStatus;
+                        statusChanged = true;
+                        changes.push(`status: ${previousStatus} → ${args.status}`);
+                    } else {
+                        changes.push(`status unchanged (already ${args.status})`);
+                    }
+                }
+
+                if (Object.keys(metadataUpdates).length > 0) {
+                    transcript.updateMetadata(metadataUpdates);
+                }
+            } finally {
+                transcript.close();
+            }
+            persistChanges = true;
+
+            return {
+                success: true,
+                originalPath: await sanitizePath(resolvedStoragePath, outputDirectory),
+                outputPath: await sanitizePath(resolvedStoragePath, outputDirectory),
+                renamed: false,
+                statusChanged,
+                message: changes.length > 0 ? `Transcript updated: ${changes.join(', ')}` : 'No changes made',
+            };
+        } finally {
+            await access.finalize(persistChanges);
+        }
+    }
+
     // Find the transcript (returns absolute path for file operations)
     const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
 
@@ -1350,8 +1639,11 @@ export async function handleEditTranscript(args: {
             if (previousStatus !== args.status) {
                 transcript.updateMetadata({ status: args.status as Metadata.TranscriptStatus });
                 statusChanged = true;
-                // eslint-disable-next-line no-console
-                console.log('✅ Status update completed successfully');
+                logger.info('transcript.status.update.complete', {
+                    transcriptPath: args.transcriptPath,
+                    previousStatus,
+                    nextStatus: args.status,
+                });
             }
         } finally {
             transcript.close();
@@ -1390,17 +1682,40 @@ export async function handleChangeTranscriptDate(args: {
     const fsPromises = await import('node:fs/promises');
     const path = await import('node:path');
     
-    // Get the output directory
-    const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
-    
-    // Find the transcript (returns absolute path)
-    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
-    
     // Parse the new date
     const newDate = new Date(args.newDate);
     if (isNaN(newDate.getTime())) {
         throw new Error(`Invalid date format: ${args.newDate}. Use ISO 8601 format (e.g., "2026-01-15" or "2026-01-15T10:30:00Z")`);
     }
+
+    const access = await openToolTranscript(args.transcriptPath, args.contextDirectory);
+    if (access.isGcs) {
+        const transcript = PklTranscript.open(access.pklPath, { readOnly: false });
+        try {
+            transcript.updateMetadata({ date: newDate });
+        } finally {
+            transcript.close();
+            await access.finalize(true);
+        }
+
+        const relativePath = access.storagePath
+            ? await sanitizePath(access.storagePath, access.outputDirectory)
+            : await sanitizePath(access.pklPath, access.outputDirectory);
+
+        return {
+            success: true,
+            originalPath: relativePath,
+            outputPath: relativePath,
+            moved: false,
+            message: 'Transcript date updated (GCS mode keeps the same object path).',
+        };
+    }
+
+    // Get the output directory
+    const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
+    
+    // Local mode: use already-resolved PKL path
+    const absolutePath = access.pklPath;
     
     // Determine the new directory structure based on the date
     // Use YYYY/M structure (month-level organization, no zero-padding to match router convention)
@@ -1494,6 +1809,15 @@ export async function handleCombineTranscripts(args: {
 }) {
     // Validate that contextDirectory is not provided in remote mode
     await validateNotRemoteMode(args.contextDirectory);
+
+    const ServerConfig = await import('../serverConfig');
+    const outputStorage = ServerConfig.getOutputStorage();
+    if (outputStorage.name === 'gcs') {
+        throw new Error(
+            'Combining transcripts is not yet supported in GCS mode. ' +
+            'Please run this operation against a filesystem-backed workspace.'
+        );
+    }
     
     if (args.transcriptPaths.length < 2) {
         throw new Error('At least 2 transcript files are required');
@@ -1557,31 +1881,50 @@ export async function handleCombineTranscripts(args: {
 export async function handleUpdateTranscriptContent(args: {
     transcriptPath: string;
     content: string;
+    contentTarget?: 'enhanced' | 'original' | string;
     contextDirectory?: string;
 }) {
-    // Find the transcript (returns absolute path for file operations)
-    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
-
-    // Ensure we're working with a PKL file
-    const pklPath = ensurePklExtension(absolutePath);
-    
-    const transcript = PklTranscript.open(pklPath, { readOnly: false });
+    const updateRawTranscript = String(args.contentTarget || 'enhanced') === 'original';
+    const access = await openToolTranscript(args.transcriptPath, args.contextDirectory);
     try {
-        // Update the content - PklTranscript handles history tracking automatically
-        transcript.updateContent(args.content);
+        const transcript = PklTranscript.open(access.pklPath, { readOnly: false });
+        try {
+            if (updateRawTranscript) {
+                const raw = transcript.hasRawTranscript ? transcript.rawTranscript : undefined;
+                transcript.addArtifact(
+                    'raw_transcript',
+                    Buffer.from(args.content, 'utf8'),
+                    {
+                        model: raw?.model,
+                        duration: raw?.duration,
+                        transcribedAt: raw?.transcribedAt,
+                        updatedAt: new Date().toISOString(),
+                        updatedBy: 'protokoll_update_transcript_content',
+                    }
+                );
+            } else {
+                // Update the content - PklTranscript handles history tracking automatically
+                transcript.updateContent(args.content);
+            }
+        } finally {
+            transcript.close();
+        }
+
+        const relativePath = access.storagePath
+            ? await sanitizePath(access.storagePath, access.outputDirectory)
+            : await sanitizePath(access.pklPath, access.outputDirectory);
+
+        return {
+            success: true,
+            filePath: relativePath,
+            updatedTarget: updateRawTranscript ? 'original' : 'enhanced',
+            message: updateRawTranscript
+                ? 'Original transcript text updated successfully'
+                : 'Transcript content updated successfully',
+        };
     } finally {
-        transcript.close();
+        await access.finalize(true);
     }
-
-    // Convert to relative path for response
-    const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
-    const relativePath = await sanitizePath(pklPath, outputDirectory);
-
-    return {
-        success: true,
-        filePath: relativePath,
-        message: 'Transcript content updated successfully',
-    };
 }
 
 export async function handleUpdateTranscriptEntityReferences(args: {
@@ -1594,112 +1937,117 @@ export async function handleUpdateTranscriptEntityReferences(args: {
     };
     contextDirectory?: string;
 }) {
-    // Find the transcript (returns absolute path for file operations)
-    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
+    const access = await openToolTranscript(args.transcriptPath, args.contextDirectory);
+    const absolutePath = access.pklPath;
+    try {
 
-    // Validate and sanitize entity IDs
-    const validateEntityId = (id: string, name: string, type: string): string => {
-        if (!id || typeof id !== 'string') {
-            throw new Error(`Invalid entity ID for ${type} "${name}": ID must be a non-empty string`);
-        }
+        // Validate and sanitize entity IDs
+        const validateEntityId = (id: string, name: string, type: string): string => {
+            if (!id || typeof id !== 'string') {
+                throw new Error(`Invalid entity ID for ${type} "${name}": ID must be a non-empty string`);
+            }
         
-        // Check for common JSON parsing errors
-        if (id.includes('},') || id.includes('{') || id.includes('}') || id.includes(',')) {
-            throw new Error(
-                `Invalid entity ID "${id}" for ${type} "${name}". ` +
+            // Check for common JSON parsing errors
+            if (id.includes('},') || id.includes('{') || id.includes('}') || id.includes(',')) {
+                throw new Error(
+                    `Invalid entity ID "${id}" for ${type} "${name}". ` +
                 `Entity IDs should be UUIDs or slugified identifiers (e.g., "a1b2c3d4-...", "jack-smith"), ` +
                 `not JSON syntax. Please provide a valid ID.`
-            );
-        }
+                );
+            }
         
-        // Accept UUID format
-        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-        if (uuidRegex.test(id)) {
-            return id.trim();
-        }
+            // Accept UUID format
+            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            if (uuidRegex.test(id)) {
+                return id.trim();
+            }
         
-        // Accept slug format for backward compatibility
-        const slugRegex = /^[a-z0-9_-]+$/i;
-        if (slugRegex.test(id)) {
-            return id.trim();
-        }
+            // Accept slug format for backward compatibility
+            const slugRegex = /^[a-z0-9_-]+$/i;
+            if (slugRegex.test(id)) {
+                return id.trim();
+            }
         
-        throw new Error(
-            `Invalid entity ID "${id}" for ${type} "${name}". ` +
+            throw new Error(
+                `Invalid entity ID "${id}" for ${type} "${name}". ` +
             `Entity IDs should be UUIDs or slugified identifiers (letters, numbers, hyphens, underscores).`
-        );
-    };
+            );
+        };
 
-    // Convert incoming entities to EntityReference format with validation
-    const entityReferences: Metadata.EntityReference[] = [];
+        // Convert incoming entities to EntityReference format with validation
+        const entityReferences: Metadata.EntityReference[] = [];
     
-    if (args.entities.people) {
-        entityReferences.push(...args.entities.people.map(e => ({
-            id: validateEntityId(e.id, e.name, 'person'),
-            name: e.name.trim(),
-            type: 'person' as const,
-        })));
-    }
+        if (args.entities.people) {
+            entityReferences.push(...args.entities.people.map(e => ({
+                id: validateEntityId(e.id, e.name, 'person'),
+                name: e.name.trim(),
+                type: 'person' as const,
+            })));
+        }
     
-    if (args.entities.projects) {
-        entityReferences.push(...args.entities.projects.map(e => ({
-            id: validateEntityId(e.id, e.name, 'project'),
-            name: e.name.trim(),
-            type: 'project' as const,
-        })));
-    }
+        if (args.entities.projects) {
+            entityReferences.push(...args.entities.projects.map(e => ({
+                id: validateEntityId(e.id, e.name, 'project'),
+                name: e.name.trim(),
+                type: 'project' as const,
+            })));
+        }
     
-    if (args.entities.terms) {
-        entityReferences.push(...args.entities.terms.map(e => ({
-            id: validateEntityId(e.id, e.name, 'term'),
-            name: e.name.trim(),
-            type: 'term' as const,
-        })));
-    }
+        if (args.entities.terms) {
+            entityReferences.push(...args.entities.terms.map(e => ({
+                id: validateEntityId(e.id, e.name, 'term'),
+                name: e.name.trim(),
+                type: 'term' as const,
+            })));
+        }
     
-    if (args.entities.companies) {
-        entityReferences.push(...args.entities.companies.map(e => ({
-            id: validateEntityId(e.id, e.name, 'company'),
-            name: e.name.trim(),
-            type: 'company' as const,
-        })));
-    }
+        if (args.entities.companies) {
+            entityReferences.push(...args.entities.companies.map(e => ({
+                id: validateEntityId(e.id, e.name, 'company'),
+                name: e.name.trim(),
+                type: 'company' as const,
+            })));
+        }
 
-    // Group by type
-    const entities: NonNullable<Metadata.TranscriptMetadata['entities']> = {
-        people: entityReferences.filter(e => e.type === 'person'),
-        projects: entityReferences.filter(e => e.type === 'project'),
-        terms: entityReferences.filter(e => e.type === 'term'),
-        companies: entityReferences.filter(e => e.type === 'company'),
-    };
+        // Group by type
+        const entities: NonNullable<Metadata.TranscriptMetadata['entities']> = {
+            people: entityReferences.filter(e => e.type === 'person'),
+            projects: entityReferences.filter(e => e.type === 'project'),
+            terms: entityReferences.filter(e => e.type === 'term'),
+            companies: entityReferences.filter(e => e.type === 'company'),
+        };
 
-    // Ensure we're working with a PKL file
-    const pklPath = ensurePklExtension(absolutePath);
+        // Ensure we're working with a PKL file
+        const pklPath = ensurePklExtension(absolutePath);
     
-    const transcript = PklTranscript.open(pklPath, { readOnly: false });
-    const transcriptUuid = transcript.metadata.id;
-    const projectId = transcript.metadata.project;
-    try {
+        const transcript = PklTranscript.open(pklPath, { readOnly: false });
+        const transcriptUuid = transcript.metadata.id;
+        const projectId = transcript.metadata.project;
+        try {
         // Update entities in metadata
-        transcript.updateMetadata({ entities });
+            transcript.updateMetadata({ entities });
+        } finally {
+            transcript.close();
+        }
+
+        // Update weight model incrementally
+        const { updateTranscriptInWeightModel } = await import('../services/weightModel');
+        const allEntityIds = entityReferences.map(e => e.id);
+        updateTranscriptInWeightModel(transcriptUuid, allEntityIds, projectId);
+
+        // Convert to relative path for response
+        const relativePath = access.storagePath
+            ? await sanitizePath(access.storagePath, access.outputDirectory)
+            : await sanitizePath(pklPath, access.outputDirectory);
+
+        return {
+            success: true,
+            filePath: relativePath,
+            message: 'Transcript entity references updated successfully',
+        };
     } finally {
-        transcript.close();
+        await access.finalize(true);
     }
-
-    // Update weight model incrementally
-    const { updateTranscriptInWeightModel } = await import('../services/weightModel');
-    const allEntityIds = entityReferences.map(e => e.id);
-    updateTranscriptInWeightModel(transcriptUuid, allEntityIds, projectId);
-
-    // Convert to relative path for response
-    const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
-    const relativePath = await sanitizePath(pklPath, outputDirectory);
-
-    return {
-        success: true,
-        filePath: relativePath,
-        message: 'Transcript entity references updated successfully',
-    };
 }
 
 export async function handleProvideFeedback(args: {
@@ -1708,8 +2056,8 @@ export async function handleProvideFeedback(args: {
     model?: string;
     contextDirectory?: string;
 }) {
-    // Find the transcript (returns absolute path for file operations)
-    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
+    const access = await openToolTranscript(args.transcriptPath, args.contextDirectory);
+    const absolutePath = access.pklPath;
 
     // Ensure we're working with a PKL file
     const pklPath = ensurePklExtension(absolutePath);
@@ -1776,6 +2124,7 @@ export async function handleProvideFeedback(args: {
         };
     } finally {
         transcript.close();
+        await access.finalize(true);
     }
 }
 
@@ -1785,8 +2134,10 @@ export async function handleEnhanceTranscript(args: {
     model?: string;
     contextDirectory?: string;
 }) {
-    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
-    const pklPath = ensurePklExtension(absolutePath);
+    const access = await openToolTranscript(args.transcriptPath, args.contextDirectory);
+    const pklPath = access.pklPath;
+    const requestId = randomUUID();
+
     const transcript = PklTranscript.open(pklPath, { readOnly: false });
 
     let tempDir: string | null = null;
@@ -1804,6 +2155,15 @@ export async function handleEnhanceTranscript(args: {
         const model = args.model || DEFAULT_MODEL;
         const startedAt = Date.now();
         let toolCallCount = 0;
+        logger.info('transcript.enhance.start', {
+            requestId,
+            transcriptPath: args.transcriptPath,
+            model,
+            sourceLength: sourceText.length,
+            hasExplicitOriginal: explicitOriginal.length > 0,
+            hasRawTranscript: rawOriginal.length > 0,
+            contextDirectory: args.contextDirectory ?? null,
+        });
 
         // Build context and routing similar to the standard pipeline.
         const contextDirectories = await getContextDirectories();
@@ -1873,6 +2233,14 @@ export async function handleEnhanceTranscript(args: {
             tempDir,
             transcript.metadata.id || 'manual-enhancement'
         );
+        logger.info('transcript.enhance.simple_replace.complete', {
+            requestId,
+            transcriptPath: args.transcriptPath,
+            replacements: simpleReplaceResult.stats.totalReplacements,
+            tier1Replacements: simpleReplaceResult.stats.tier1Replacements,
+            tier2Replacements: simpleReplaceResult.stats.tier2Replacements,
+            processingTimeMs: simpleReplaceResult.stats.processingTimeMs,
+        });
 
         if (simpleReplaceResult.stats.totalReplacements > 0) {
             transcript.enhancementLog.logStep(new Date(), 'simple-replace', 'phase_complete', {
@@ -1946,6 +2314,16 @@ export async function handleEnhanceTranscript(args: {
         const enhancedText = (agenticResult.enhancedText || '').trim() || sourceText;
         const enhancementSucceeded = enhancedText.length > 50 && enhancedText !== sourceText;
         const finalStatus = enhancementSucceeded ? 'enhanced' : (transcript.metadata.status || 'initial');
+        logger.info('transcript.enhance.agentic.complete', {
+            requestId,
+            transcriptPath: args.transcriptPath,
+            toolsUsed: agenticResult.toolsUsed,
+            iterations: agenticResult.iterations,
+            totalToolCalls: toolCallCount,
+            changed: enhancedText !== sourceText,
+            enhancedLength: enhancedText.length,
+            elapsedMs: Date.now() - startedAt,
+        });
 
         const referenced = agenticResult.state.referencedEntities;
         const entities = {
@@ -2003,6 +2381,15 @@ export async function handleEnhanceTranscript(args: {
             iterations: agenticResult.iterations,
             processingTimeMs: Date.now() - startedAt,
         });
+        logger.info('transcript.enhance.complete', {
+            requestId,
+            transcriptPath: args.transcriptPath,
+            status: finalStatus,
+            projectId: decidedProjectId || null,
+            totalToolCalls: toolCallCount,
+            changed: enhancedText !== sourceText,
+            processingTimeMs: Date.now() - startedAt,
+        });
 
         return {
             success: true,
@@ -2018,11 +2405,35 @@ export async function handleEnhanceTranscript(args: {
             enhancedLength: enhancedText.length,
             changed: enhancedText !== sourceText,
         };
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        transcript.enhancementLog.logStep(new Date(), 'enhance', 'enhancement_failed', {
+            transcriptPath: args.transcriptPath,
+            model: args.model || DEFAULT_MODEL,
+            error: message,
+        });
+        // Always emit a terminal completion event so clients waiting on
+        // enhancement_complete can reliably exit "in progress" state.
+        transcript.enhancementLog.logStep(new Date(), 'enhance', 'enhancement_complete', {
+            status: 'error',
+            failed: true,
+            transcriptPath: args.transcriptPath,
+            model: args.model || DEFAULT_MODEL,
+            error: message,
+        });
+        logger.error('transcript.enhance.failed', {
+            requestId,
+            transcriptPath: args.transcriptPath,
+            error: message,
+            stack: error instanceof Error ? error.stack : undefined,
+        });
+        throw error;
     } finally {
         if (tempDir) {
             await rm(tempDir, { recursive: true, force: true });
         }
         transcript.close();
+        await access.finalize(true);
     }
 }
 
@@ -2034,6 +2445,9 @@ export async function handleCreateNote(args: {
     date?: string;
     contextDirectory?: string;
 }) {
+    const ServerConfig = await import('../serverConfig');
+    const outputStorage = ServerConfig.getOutputStorage();
+
     // Get the output directory
     const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
     
@@ -2059,7 +2473,9 @@ export async function handleCreateNote(args: {
     const absolutePath = resolve(outputDirectory, relativePath);
     
     // Validate that the path stays within the output directory
-    validatePathWithinDirectory(absolutePath, outputDirectory);
+    if (outputStorage.name !== 'gcs') {
+        validatePathWithinDirectory(absolutePath, outputDirectory);
+    }
     
     // Build metadata
     let projectName: string | undefined;
@@ -2105,6 +2521,34 @@ export async function handleCreateNote(args: {
         status: 'reviewed' as const, // Default status for new notes
     };
     
+    if (outputStorage.name === 'gcs') {
+        const tmpRoot = await mkdtemp(`${tmpdir()}/protokoll-mcp-note-`);
+        const tmpPklPath = resolve(tmpRoot, filename);
+        try {
+            const transcript = PklTranscript.create(tmpPklPath, pklMetadata);
+            try {
+                if (args.content) {
+                    transcript.updateContent(args.content);
+                }
+            } finally {
+                transcript.close();
+            }
+
+            const created = await readFile(tmpPklPath);
+            await outputStorage.writeFile(relativePath, created);
+            markTranscriptIndexDirtyForStorage(outputStorage, outputDirectory, relativePath);
+        } finally {
+            await rm(tmpRoot, { recursive: true, force: true });
+        }
+
+        return {
+            success: true,
+            filePath: await sanitizePath(relativePath, outputDirectory),
+            filename: filename,
+            message: `Note "${args.title}" created successfully`,
+        };
+    }
+    
     // Create directory if it doesn't exist
     await mkdir(dirname(absolutePath), { recursive: true });
     
@@ -2136,41 +2580,41 @@ export async function handleGetEnhancementLog(args: {
     offset?: number;
     contextDirectory?: string;
 }) {
-    // Find the transcript (returns absolute path for file operations)
-    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
-
-    // Open the transcript in read-only mode
-    const transcript = PklTranscript.open(absolutePath, { readOnly: true });
-    
+    const access = await openToolTranscript(args.transcriptPath, args.contextDirectory);
     try {
-        // Get enhancement log with optional phase filter
-        const allEntries = transcript.getEnhancementLog(args.phase ? { phase: args.phase } : undefined);
-        
-        // Apply pagination
-        const limit = args.limit ?? 100;
-        const offset = args.offset ?? 0;
-        const total = allEntries.length;
-        const entries = allEntries.slice(offset, offset + limit);
-        
-        // Convert entries to serializable format
-        const serializedEntries = entries.map((entry: any) => ({
-            id: entry.id,
-            timestamp: entry.timestamp.toISOString(),
-            phase: entry.phase,
-            action: entry.action,
-            details: entry.details,
-            entities: entry.entities,
-        }));
-        
-        return {
-            entries: serializedEntries,
-            total,
-            limit,
-            offset,
-            hasMore: offset + limit < total,
-        };
+        const transcript = PklTranscript.open(access.pklPath, { readOnly: true });
+        try {
+            // Get enhancement log with optional phase filter
+            const allEntries = transcript.getEnhancementLog(args.phase ? { phase: args.phase } : undefined);
+
+            // Apply pagination
+            const limit = args.limit ?? 100;
+            const offset = args.offset ?? 0;
+            const total = allEntries.length;
+            const entries = allEntries.slice(offset, offset + limit);
+
+            // Convert entries to serializable format
+            const serializedEntries = entries.map((entry: any) => ({
+                id: entry.id,
+                timestamp: entry.timestamp.toISOString(),
+                phase: entry.phase,
+                action: entry.action,
+                details: entry.details,
+                entities: entry.entities,
+            }));
+
+            return {
+                entries: serializedEntries,
+                total,
+                limit,
+                offset,
+                hasMore: offset + limit < total,
+            };
+        } finally {
+            transcript.close();
+        }
     } finally {
-        transcript.close();
+        await access.finalize(false);
     }
 }
 
@@ -2212,8 +2656,8 @@ export async function handleRejectCorrection(args: {
         throw new Error('correctionEntryId must be a positive integer');
     }
 
-    const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
-    const transcript = PklTranscript.open(absolutePath, { readOnly: false });
+    const access = await openToolTranscript(args.transcriptPath, args.contextDirectory);
+    const transcript = PklTranscript.open(access.pklPath, { readOnly: false });
 
     try {
         const allEntries = transcript.getEnhancementLog();
@@ -2290,6 +2734,7 @@ export async function handleRejectCorrection(args: {
         };
     } finally {
         transcript.close();
+        await access.finalize(true);
     }
 }
 
@@ -2303,6 +2748,7 @@ export async function handleCorrectToEntity(args: {
     lastName?: string;
     description?: string;
     projectId?: string;
+    contextDirectory?: string;
 }) {
     const { randomUUID } = await import('node:crypto');
     const { slugify } = await import('./shared.js');
@@ -2313,125 +2759,128 @@ export async function handleCorrectToEntity(args: {
         throw new Error('Server context not initialized. Check server configuration.');
     }
     
-    const absolutePath = await resolveTranscriptPath(args.transcriptPath);
-    const pklPath = ensurePklExtension(absolutePath);
-    
-    let finalEntityId: string;
-    let finalEntityName: string;
-    let isNewEntity = false;
-    
-    // Step 1: Create or look up entity using the server's pre-initialized context
-    if (args.entityName) {
-        const id = randomUUID();
-        const slug = slugify(args.entityName);
-        
-        const entityBase = {
-            id,
-            slug,
-            name: args.entityName,
-        };
-        
-        let newEntity: any;
-        switch (args.entityType) {
-            case 'person':
-                newEntity = {
-                    ...entityBase,
-                    type: 'person' as const,
-                    ...(args.firstName && { firstName: args.firstName }),
-                    ...(args.lastName && { lastName: args.lastName }),
-                    ...(args.description && { context: args.description }),
-                };
-                break;
-            case 'project':
-                newEntity = { ...entityBase, type: 'project' as const };
-                break;
-            case 'term':
-                newEntity = { ...entityBase, type: 'term' as const };
-                break;
-            case 'company':
-                newEntity = { ...entityBase, type: 'company' as const };
-                break;
-        }
-        
-        await context.saveEntity(newEntity);
-        finalEntityId = id;
-        finalEntityName = args.entityName;
-        isNewEntity = true;
-    } else if (args.entityId) {
-        finalEntityId = args.entityId;
-        const { findPersonResilient, findProjectResilient, findTermResilient, findCompanyResilient } = await import('@redaksjon/protokoll-engine');
-        let entity: any;
-        switch (args.entityType) {
-            case 'person': entity = findPersonResilient(context, finalEntityId); break;
-            case 'project': entity = findProjectResilient(context, finalEntityId); break;
-            case 'term': entity = findTermResilient(context, finalEntityId); break;
-            case 'company': entity = findCompanyResilient(context, finalEntityId); break;
-        }
-        finalEntityName = entity.name;
-    } else {
-        throw new Error('Either entityId or entityName must be provided');
-    }
-    
-    // Step 2: Update sounds_like on the entity (before opening transcript to avoid interleaving)
-    if (args.selectedText.toLowerCase() !== finalEntityName.toLowerCase()) {
-        const existingEntity = (() => {
-            switch (args.entityType) {
-                case 'person': return context.getPerson(finalEntityId);
-                case 'project': return context.getProject(finalEntityId);
-                case 'term': return context.getTerm(finalEntityId);
-                case 'company': return context.getCompany(finalEntityId);
-            }
-        })();
-        
-        if (existingEntity) {
-            const soundsLike = (existingEntity as any).sounds_like || [];
-            if (!soundsLike.includes(args.selectedText)) {
-                await context.saveEntity(
-                    { ...existingEntity, sounds_like: [...soundsLike, args.selectedText] },
-                    true
-                );
-            }
-        }
-    }
-    
-    // Step 3: All transcript operations in one block with guaranteed close
-    const transcript = PklTranscript.open(pklPath, { readOnly: false });
-    let transcriptId: string;
-    let transcriptProject: string | undefined;
-    let allEntityIds: string[];
+    const access = await openToolTranscript(args.transcriptPath, args.contextDirectory);
+    const pklPath = access.pklPath;
     
     try {
-        // Replace text in content
-        const originalContent = transcript.content;
-        const corrections = new Map([[args.selectedText, finalEntityName]]);
-        const correctedContent = applyCorrections(originalContent, corrections);
-        transcript.updateContent(correctedContent);
+        let finalEntityId: string;
+        let finalEntityName: string;
+        let isNewEntity = false;
+    
+        // Step 1: Create or look up entity using the server's pre-initialized context
+        if (args.entityName) {
+            const id = randomUUID();
+            const slug = slugify(args.entityName);
         
-        // Build a fresh entities object (same pattern as handleUpdateTranscriptEntityReferences)
-        const existing = transcript.metadata.entities;
-        const newEntityRef: Metadata.EntityReference = { id: finalEntityId, name: finalEntityName, type: args.entityType };
+            const entityBase = {
+                id,
+                slug,
+                name: args.entityName,
+            };
         
-        const addIfMissing = (arr: Metadata.EntityReference[] | undefined, ref: Metadata.EntityReference): Metadata.EntityReference[] => {
-            const list = arr ? [...arr] : [];
-            if (!list.some(e => e.id === ref.id)) {
-                list.push(ref);
+            let newEntity: any;
+            switch (args.entityType) {
+                case 'person':
+                    newEntity = {
+                        ...entityBase,
+                        type: 'person' as const,
+                        ...(args.firstName && { firstName: args.firstName }),
+                        ...(args.lastName && { lastName: args.lastName }),
+                        ...(args.description && { context: args.description }),
+                    };
+                    break;
+                case 'project':
+                    newEntity = { ...entityBase, type: 'project' as const };
+                    break;
+                case 'term':
+                    newEntity = { ...entityBase, type: 'term' as const };
+                    break;
+                case 'company':
+                    newEntity = { ...entityBase, type: 'company' as const };
+                    break;
             }
-            return list;
-        };
         
-        const updatedEntities = {
-            people: args.entityType === 'person' ? addIfMissing(existing?.people, newEntityRef) : [...(existing?.people || [])],
-            projects: args.entityType === 'project' ? addIfMissing(existing?.projects, newEntityRef) : [...(existing?.projects || [])],
-            terms: args.entityType === 'term' ? addIfMissing(existing?.terms, newEntityRef) : [...(existing?.terms || [])],
-            companies: args.entityType === 'company' ? addIfMissing(existing?.companies, newEntityRef) : [...(existing?.companies || [])],
-        };
+            await context.saveEntity(newEntity);
+            markContextEntityIndexDirty(args.entityType);
+            finalEntityId = id;
+            finalEntityName = args.entityName;
+            isNewEntity = true;
+        } else if (args.entityId) {
+            finalEntityId = args.entityId;
+            const { findPersonResilient, findProjectResilient, findTermResilient, findCompanyResilient } = await import('@redaksjon/protokoll-engine');
+            let entity: any;
+            switch (args.entityType) {
+                case 'person': entity = findPersonResilient(context, finalEntityId); break;
+                case 'project': entity = findProjectResilient(context, finalEntityId); break;
+                case 'term': entity = findTermResilient(context, finalEntityId); break;
+                case 'company': entity = findCompanyResilient(context, finalEntityId); break;
+            }
+            finalEntityName = entity.name;
+        } else {
+            throw new Error('Either entityId or entityName must be provided');
+        }
+    
+        // Step 2: Update sounds_like on the entity (before opening transcript to avoid interleaving)
+        if (args.selectedText.toLowerCase() !== finalEntityName.toLowerCase()) {
+            const existingEntity = (() => {
+                switch (args.entityType) {
+                    case 'person': return context.getPerson(finalEntityId);
+                    case 'project': return context.getProject(finalEntityId);
+                    case 'term': return context.getTerm(finalEntityId);
+                    case 'company': return context.getCompany(finalEntityId);
+                }
+            })();
         
-        transcript.updateMetadata({ entities: updatedEntities });
-        
-        // Log to enhancement_log
+            if (existingEntity) {
+                const soundsLike = (existingEntity as any).sounds_like || [];
+                if (!soundsLike.includes(args.selectedText)) {
+                    await context.saveEntity(
+                        { ...existingEntity, sounds_like: [...soundsLike, args.selectedText] },
+                        true
+                    );
+                    markContextEntityIndexDirty(args.entityType);
+                }
+            }
+        }
+    
+        // Step 3: All transcript operations in one block with guaranteed close
+        const transcript = PklTranscript.open(pklPath, { readOnly: false });
+        let transcriptId: string;
+        let transcriptProject: string | undefined;
+        let allEntityIds: string[];
+    
         try {
-            transcript.enhancementLog.logStep(
-                new Date(),
+        // Replace text in content
+            const originalContent = transcript.content;
+            const corrections = new Map([[args.selectedText, finalEntityName]]);
+            const correctedContent = applyCorrections(originalContent, corrections);
+            transcript.updateContent(correctedContent);
+        
+            // Build a fresh entities object (same pattern as handleUpdateTranscriptEntityReferences)
+            const existing = transcript.metadata.entities;
+            const newEntityRef: Metadata.EntityReference = { id: finalEntityId, name: finalEntityName, type: args.entityType };
+        
+            const addIfMissing = (arr: Metadata.EntityReference[] | undefined, ref: Metadata.EntityReference): Metadata.EntityReference[] => {
+                const list = arr ? [...arr] : [];
+                if (!list.some(e => e.id === ref.id)) {
+                    list.push(ref);
+                }
+                return list;
+            };
+        
+            const updatedEntities = {
+                people: args.entityType === 'person' ? addIfMissing(existing?.people, newEntityRef) : [...(existing?.people || [])],
+                projects: args.entityType === 'project' ? addIfMissing(existing?.projects, newEntityRef) : [...(existing?.projects || [])],
+                terms: args.entityType === 'term' ? addIfMissing(existing?.terms, newEntityRef) : [...(existing?.terms || [])],
+                companies: args.entityType === 'company' ? addIfMissing(existing?.companies, newEntityRef) : [...(existing?.companies || [])],
+            };
+        
+            transcript.updateMetadata({ entities: updatedEntities });
+        
+            // Log to enhancement_log
+            try {
+                transcript.enhancementLog.logStep(
+                    new Date(),
                 'user-correction' as any,
                 'correction_applied',
                 {
@@ -2442,37 +2891,40 @@ export async function handleCorrectToEntity(args: {
                     isNewEntity
                 },
                 [{ id: finalEntityId, name: finalEntityName, type: args.entityType }]
-            );
-        } catch {
+                );
+            } catch {
             // Enhancement log is not critical
-        }
+            }
         
-        // Capture metadata before closing
-        transcriptId = transcript.metadata.id;
-        transcriptProject = transcript.metadata.project;
-        allEntityIds = [
-            ...updatedEntities.people.map(e => e.id),
-            ...updatedEntities.projects.map(e => e.id),
-            ...updatedEntities.terms.map(e => e.id),
-            ...updatedEntities.companies.map(e => e.id),
-        ];
-    } finally {
-        transcript.close();
-    }
+            // Capture metadata before closing
+            transcriptId = transcript.metadata.id;
+            transcriptProject = transcript.metadata.project;
+            allEntityIds = [
+                ...updatedEntities.people.map(e => e.id),
+                ...updatedEntities.projects.map(e => e.id),
+                ...updatedEntities.terms.map(e => e.id),
+                ...updatedEntities.companies.map(e => e.id),
+            ];
+        } finally {
+            transcript.close();
+        }
     
-    // Step 4: Trigger weight model update (best-effort, after transcript is closed)
-    try {
-        const { updateTranscriptInWeightModel } = await import('../services/weightModel');
-        updateTranscriptInWeightModel(transcriptId, allEntityIds, transcriptProject);
-    } catch {
+        // Step 4: Trigger weight model update (best-effort, after transcript is closed)
+        try {
+            const { updateTranscriptInWeightModel } = await import('../services/weightModel');
+            updateTranscriptInWeightModel(transcriptId, allEntityIds, transcriptProject);
+        } catch {
         // Weight model update is best-effort
-    }
+        }
     
-    return {
-        success: true,
-        message: `Corrected "${args.selectedText}" to "${finalEntityName}"`,
-        correction: { original: args.selectedText, replacement: finalEntityName },
-        entity: { id: finalEntityId, name: finalEntityName, type: args.entityType },
-        isNewEntity
-    };
+        return {
+            success: true,
+            message: `Corrected "${args.selectedText}" to "${finalEntityName}"`,
+            correction: { original: args.selectedText, replacement: finalEntityName },
+            entity: { id: finalEntityId, name: finalEntityName, type: args.entityType },
+            isNewEntity
+        };
+    } finally {
+        await access.finalize(true);
+    }
 }

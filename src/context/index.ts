@@ -81,10 +81,13 @@ export const create = async (options: CreateOptions = {}): Promise<ProtokollCont
     const baseInstance = await createContext(options as BaseCreateOptions);
 
     const resolveEntityByIdentifier = <T extends { id: string; slug?: string }>(
-        identifier: string,
+        identifier: string | null | undefined,
         directLookup: (id: string) => T | undefined,
         listAll: () => T[],
     ): T | undefined => {
+        if (typeof identifier !== 'string') {
+            return undefined;
+        }
         const normalized = identifier.trim();
         if (!normalized) {
             return undefined;
