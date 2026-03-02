@@ -173,6 +173,93 @@ describe('TranscriptionWorker', () => {
         await worker.stop();
     });
 
+    it('loads and repairs weight model from gcs visibility snapshot fallback', async () => {
+        const modelFromSnapshot = {
+            transcriptSnapshots: {
+                't-1': { entityIds: ['person-1', 'project-1'] },
+            },
+            metadata: {
+                transcriptCount: 0,
+                entityCount: 0,
+                builtAt: '2026-01-01T00:00:00.000Z',
+                lastUpdatedAt: '2026-01-01T00:00:00.000Z',
+                version: '1.0.0',
+            },
+            cooccurrence: {},
+            byProject: {},
+        };
+        const outputStorage = {
+            name: 'gcs',
+            readFile: vi.fn().mockResolvedValue(Buffer.from(JSON.stringify(modelFromSnapshot))),
+            writeFile: vi.fn().mockResolvedValue(undefined),
+            listFiles: vi.fn(),
+            deleteFile: vi.fn(),
+            exists: vi
+                .fn()
+                .mockImplementation(async (pathValue: string) =>
+                    pathValue === '.protokoll/weight-model.snapshot.json'
+                ),
+            mkdir: vi.fn(),
+        };
+        const worker = new TranscriptionWorker({
+            outputDirectory: '/tmp/out',
+            uploadDirectory: '/tmp/uploads',
+            outputStorage: outputStorage as any,
+            scanInterval: 1,
+        });
+        vi.spyOn(worker as any, 'processQueue').mockResolvedValue(undefined);
+
+        await worker.start();
+
+        expect(outputStorage.exists).toHaveBeenCalledWith('.protokoll-weight-model.json');
+        expect(outputStorage.exists).toHaveBeenCalledWith('.protokoll/weight-model.snapshot.json');
+        expect(outputStorage.readFile).toHaveBeenCalledWith('.protokoll/weight-model.snapshot.json');
+        expect(outputStorage.writeFile).toHaveBeenCalledWith(
+            '.protokoll-weight-model.json',
+            expect.any(String)
+        );
+        expect(outputStorage.writeFile).toHaveBeenCalledWith(
+            '.protokoll/weight-model.snapshot.json',
+            expect.any(String)
+        );
+        expect(mocks.providerLoadModel).toHaveBeenCalled();
+
+        await worker.stop();
+    });
+
+    it('loads an empty built model so incremental updates can work', async () => {
+        mocks.loadFromFile.mockResolvedValueOnce(null);
+        mocks.builderBuild.mockResolvedValueOnce({
+            transcriptSnapshots: {},
+            metadata: {
+                transcriptCount: 0,
+                entityCount: 0,
+                builtAt: '2026-01-01T00:00:00.000Z',
+                lastUpdatedAt: '2026-01-01T00:00:00.000Z',
+                version: '1.0.0',
+            },
+            cooccurrence: {},
+            byProject: {},
+        });
+
+        const worker = new TranscriptionWorker({
+            outputDirectory: '/tmp/out',
+            uploadDirectory: '/tmp/uploads',
+            scanInterval: 1,
+        });
+        const processQueueSpy = vi
+            .spyOn(worker as any, 'processQueue')
+            .mockResolvedValue(undefined);
+
+        await worker.start();
+
+        expect(mocks.providerLoadModel).toHaveBeenCalledTimes(1);
+        expect(mocks.builderWriteToFile).not.toHaveBeenCalled();
+        expect(processQueueSpy).toHaveBeenCalledTimes(1);
+
+        await worker.stop();
+    });
+
     it('processes transcript successfully and marks enhanced status', async () => {
         const worker = new TranscriptionWorker({
             outputDirectory: '/tmp/out',

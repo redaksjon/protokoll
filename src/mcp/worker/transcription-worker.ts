@@ -23,6 +23,8 @@ const { findUploadedTranscripts, markTranscriptAsTranscribing, markTranscriptAsF
 const logger = Logging.getLogger('@redaksjon/protokoll-mcp').get('transcription-worker');
 
 const WEIGHT_MODEL_FILENAME = '.protokoll-weight-model.json';
+const WEIGHT_MODEL_STORAGE_PATH = WEIGHT_MODEL_FILENAME;
+const WEIGHT_MODEL_VISIBILITY_PATH = '.protokoll/weight-model.snapshot.json';
 
 /**
  * Worker configuration
@@ -73,6 +75,87 @@ function syncWeightModelMetadata(model: Weighting.WeightModel): {
         model.metadata.entityCount = entityCount;
     }
     return { transcriptCount, entityCount, changed };
+}
+
+type TranscriptEntities = {
+    people?: Array<{ id?: string }>;
+    projects?: Array<{ id?: string }>;
+    terms?: Array<{ id?: string }>;
+    companies?: Array<{ id?: string }>;
+};
+
+function createEmptyWeightModel(): Weighting.WeightModel {
+    const now = new Date().toISOString();
+    return {
+        cooccurrence: {},
+        byProject: {},
+        transcriptSnapshots: {},
+        metadata: {
+            builtAt: now,
+            lastUpdatedAt: now,
+            transcriptCount: 0,
+            entityCount: 0,
+            version: '1.0.0',
+        },
+    };
+}
+
+function extractEntityIdsFromMetadata(metadata: TranscriptMetadata): string[] {
+    const entities = metadata.entities as TranscriptEntities | undefined;
+    if (!entities) {
+        return [];
+    }
+    const ids = [
+        ...(entities.people || []).map(entity => entity?.id),
+        ...(entities.projects || []).map(entity => entity?.id),
+        ...(entities.terms || []).map(entity => entity?.id),
+        ...(entities.companies || []).map(entity => entity?.id),
+    ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+    return Array.from(new Set(ids));
+}
+
+async function loadWeightModelFromStorage(
+    outputStorage: FileStorageProvider,
+): Promise<Weighting.WeightModel | null> {
+    const candidates = [WEIGHT_MODEL_STORAGE_PATH, WEIGHT_MODEL_VISIBILITY_PATH];
+    for (const pathValue of candidates) {
+        try {
+            if (!(await outputStorage.exists(pathValue))) {
+                continue;
+            }
+            const contents = await outputStorage.readFile(pathValue);
+            const model = JSON.parse(contents.toString('utf-8')) as Weighting.WeightModel;
+            logger.info('worker.weight_model.loaded_from_storage', { path: pathValue });
+            return model;
+        } catch {
+            // Try next candidate path.
+        }
+    }
+    return null;
+}
+
+async function writeWeightModel(
+    model: Weighting.WeightModel,
+    options: {
+        weightModelBuilder: Weighting.WeightModelBuilder;
+        weightModelPath: string;
+        outputStorage?: FileStorageProvider;
+    },
+): Promise<void> {
+    if (options.outputStorage?.name === 'gcs') {
+        const serialized = JSON.stringify(model, null, 2);
+        await options.outputStorage.writeFile(WEIGHT_MODEL_STORAGE_PATH, serialized);
+        try {
+            // Keep a human-visible snapshot in .protokoll for debugging and warm starts.
+            await options.outputStorage.writeFile(WEIGHT_MODEL_VISIBILITY_PATH, serialized);
+        } catch {
+            logger.warning('worker.weight_model.visibility_copy_failed', {
+                path: WEIGHT_MODEL_VISIBILITY_PATH,
+            });
+        }
+        return;
+    }
+    await options.weightModelBuilder.writeToFile(model, options.weightModelPath);
 }
 
 function toStorageCandidatePath(outputDirectory: string, filePath: string): string {
@@ -245,11 +328,18 @@ export class TranscriptionWorker {
         });
         this.weightModelProvider = new Weighting.WeightModelProvider();
 
-        const existingModel = await Weighting.WeightModelBuilder.loadFromFile(this.weightModelPath);
+        const storageBacked = this.config.outputStorage?.name === 'gcs' && !!this.config.outputStorage;
+        const existingModel = storageBacked
+            ? await loadWeightModelFromStorage(this.config.outputStorage!)
+            : await Weighting.WeightModelBuilder.loadFromFile(this.weightModelPath);
         if (existingModel) {
             const normalized = syncWeightModelMetadata(existingModel);
             if (normalized.changed) {
-                await this.weightModelBuilder.writeToFile(existingModel, this.weightModelPath);
+                await writeWeightModel(existingModel, {
+                    weightModelBuilder: this.weightModelBuilder,
+                    weightModelPath: this.weightModelPath,
+                    outputStorage: this.config.outputStorage,
+                });
                 logger.info('worker.weight_model.metadata_repaired', {
                     transcriptCount: normalized.transcriptCount,
                     entityCount: normalized.entityCount,
@@ -263,10 +353,16 @@ export class TranscriptionWorker {
         } else {
             // No existing model — do an initial build from all transcripts in the output dir
             try {
-                const builtModel = await this.weightModelBuilder.build(this.config.outputDirectory);
+                const builtModel = storageBacked
+                    ? await this.buildWeightModelFromStorage(this.config.outputStorage!)
+                    : await this.weightModelBuilder.build(this.config.outputDirectory);
+                this.weightModelProvider.loadModel(builtModel);
                 if (builtModel.metadata.transcriptCount > 0) {
-                    this.weightModelProvider.loadModel(builtModel);
-                    await this.weightModelBuilder.writeToFile(builtModel, this.weightModelPath);
+                    await writeWeightModel(builtModel, {
+                        weightModelBuilder: this.weightModelBuilder,
+                        weightModelPath: this.weightModelPath,
+                        outputStorage: this.config.outputStorage,
+                    });
                     logger.info('worker.weight_model.built', {
                         transcriptCount: builtModel.metadata.transcriptCount,
                         entityCount: builtModel.metadata.entityCount,
@@ -310,7 +406,11 @@ export class TranscriptionWorker {
                 weightModelBuilder.updateTranscript(model, transcriptUuid, entityIds, projectId);
                 syncWeightModelMetadata(model);
                 // Save asynchronously — never block processing on disk I/O
-                weightModelBuilder.writeToFile(model, weightModelPath).catch(() => {
+                writeWeightModel(model, {
+                    weightModelBuilder,
+                    weightModelPath,
+                    outputStorage: this.config.outputStorage,
+                }).catch(() => {
                     logger.warning('worker.weight_model.save_failed');
                 });
             },
@@ -392,6 +492,51 @@ export class TranscriptionWorker {
                 await new Promise(resolve => setTimeout(resolve, 10000));
             }
         }
+    }
+
+    private async buildWeightModelFromStorage(outputStorage: FileStorageProvider): Promise<Weighting.WeightModel> {
+        const model = createEmptyWeightModel();
+        const files = await listFilesWithMetadataCompat(outputStorage, '', '.pkl');
+        const candidates = files
+            .map((metadata) => ({ ...metadata, path: normalizeStoragePath(metadata.path) }))
+            .filter((metadata) => isQueueCandidatePath(metadata.path))
+            .filter((metadata) => !isUploadPlaceholderPath(metadata.path))
+            .sort((a, b) => {
+                const aTime = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+                const bTime = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+                return bTime - aTime;
+            })
+            .slice(0, 500);
+
+        for (const metadata of candidates) {
+            let tempPath: string | null = null;
+            try {
+                tempPath = await materializeTranscriptFromStorage(outputStorage, metadata.path);
+                const transcript = PklTranscript.open(tempPath, { readOnly: true });
+                const transcriptMetadata = transcript.metadata;
+                transcript.close();
+                const entityIds = extractEntityIdsFromMetadata(transcriptMetadata);
+                if (entityIds.length === 0 || !transcriptMetadata.id) {
+                    continue;
+                }
+                this.weightModelBuilder?.updateTranscript(
+                    model,
+                    transcriptMetadata.id,
+                    entityIds,
+                    transcriptMetadata.project || undefined,
+                );
+            } catch {
+                // Ignore unreadable/invalid transcript files in startup bootstrap.
+            } finally {
+                if (tempPath) {
+                    await fs.rm(tempPath, { force: true });
+                }
+            }
+        }
+
+        syncWeightModelMetadata(model);
+        model.metadata.lastUpdatedAt = new Date().toISOString();
+        return model;
     }
 
     private async findUploadedTranscriptsFromStorage(outputStorage: FileStorageProvider): Promise<UploadedTranscript[]> {
