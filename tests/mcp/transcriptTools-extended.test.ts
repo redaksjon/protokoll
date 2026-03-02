@@ -487,6 +487,31 @@ describe('transcriptTools - extended handlers', () => {
             expect(result.statusChanged).toBe(false);
             expect(result.message).toContain('status unchanged');
         });
+
+        it('should use serverContext dirs when getContextDirectories returns empty', async () => {
+            await createTestTranscript(transcriptsDir, '2025/2/test.pkl', {
+                title: 'Old Title',
+                content: 'Content',
+            });
+
+            const mockServerContext = {
+                hasContext: () => true,
+                getContextDirs: () => [] as string[],
+            };
+            vi.mocked(ServerConfigModule.getContext as unknown as ReturnType<typeof vi.fn>).mockReturnValue(
+                mockServerContext as any
+            );
+
+            try {
+                const result = await handleEditTranscript({
+                    transcriptPath: '2025/2/test.pkl',
+                    title: 'Updated Title',
+                });
+                expect(result.success).toBe(true);
+            } finally {
+                vi.mocked(ServerConfigModule.getContext as unknown as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
+            }
+        });
     });
 
     describe('handleCombineTranscripts', () => {
@@ -832,6 +857,87 @@ describe('transcriptTools - extended handlers', () => {
             ).rejects.toThrow('No source text available to enhance');
 
             contextCreateSpy.mockRestore();
+        });
+
+        it('should handle project not in context (GCS fallback path returns null)', async () => {
+            const pklPath = await createTestTranscript(transcriptsDir, '2025/2/enhance-no-project.pkl', {
+                title: 'Enhance No Project',
+                content: 'Content for enhancement that has enough length for the threshold check.',
+                status: 'initial',
+            });
+
+            const contextCreateSpy = vi.spyOn(ContextModule, 'create').mockResolvedValue({
+                getAllProjects: () => [],
+                getProject: () => undefined,
+                getPerson: () => undefined,
+                getTerm: () => undefined,
+                getCompany: () => undefined,
+            } as any);
+            mockRoutingCreate.mockReturnValue({
+                route: () => ({
+                    projectId: 'unknown-project',
+                    destination: { path: transcriptsDir, structure: 'month', filename_options: ['date'] },
+                    confidence: 0.8,
+                    signals: [],
+                    reasoning: 'test routing',
+                    alternateMatches: [],
+                }),
+                buildOutputPath: () => '',
+                addProject: () => {},
+                updateDefaultRoute: () => {},
+                getConfig: () => ({
+                    default: { path: transcriptsDir, structure: 'month', filename_options: ['date'] },
+                    projects: [],
+                    conflict_resolution: 'primary',
+                }),
+            } as any);
+            mockSimpleReplacePhaseCreate.mockReturnValue({
+                replace: vi.fn(async (text: string) => ({
+                    text,
+                    stats: { tier1Replacements: 0, tier2Replacements: 0, totalReplacements: 0, tier1MappingsConsidered: 0, tier2MappingsConsidered: 0, projectContext: null, classificationConfidence: 0, processingTimeMs: 5, appliedMappings: [] },
+                    replacementsMade: false,
+                })),
+            } as any);
+            mockReasoningCreate.mockReturnValue({} as any);
+            mockAgenticCreate.mockReturnValue({
+                process: vi.fn(async (text: string) => ({
+                    enhancedText: `${text}\n\nEnhanced content long enough to meet threshold requirements for enhancement.`,
+                    toolsUsed: ['route_note'],
+                    iterations: 1,
+                    totalTokens: 50,
+                    state: {
+                        referencedEntities: {
+                            people: new Set<string>(),
+                            projects: new Set<string>(['unknown-project']),
+                            terms: new Set<string>(),
+                            companies: new Set<string>(),
+                        },
+                        routeDecision: {
+                            projectId: 'unknown-project',
+                            destination: { path: transcriptsDir, structure: 'month' },
+                            confidence: 0.8,
+                            signals: [],
+                            reasoning: 'agentic route',
+                        },
+                    },
+                })),
+            } as any);
+
+            try {
+                const result = await handleEnhanceTranscript({
+                    transcriptPath: '2025/2/enhance-no-project.pkl',
+                    originalText: 'Content for enhancement that has enough length for the threshold check.',
+                });
+                expect(result.success).toBe(true);
+                expect(result.projectId).toBe('unknown-project');
+                expect(result.projectName).toBeNull();
+            } finally {
+                contextCreateSpy.mockRestore();
+                mockRoutingCreate.mockReset();
+                mockSimpleReplacePhaseCreate.mockReset();
+                mockReasoningCreate.mockReset();
+                mockAgenticCreate.mockReset();
+            }
         });
     });
 

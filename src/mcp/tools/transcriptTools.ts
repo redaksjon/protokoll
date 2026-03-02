@@ -13,7 +13,7 @@ import Logging from '@fjell/logging';
 import { Agentic, Phases, Reasoning, Routing, Transcript } from '@redaksjon/protokoll-engine';
 import { DEFAULT_MODEL, MAX_CONTENT_LENGTH } from '@/constants';
 import { markTranscriptIndexDirtyForStorage, resolveTranscriptPathByFilename } from '../resources/transcriptIndexService';
-import { markContextEntityIndexDirty } from '../resources/entityIndexService';
+import { markContextEntityIndexDirty, findContextEntityInGcs } from '../resources/entityIndexService';
 
 import { fileExists, getConfiguredDirectory, getContextDirectories, sanitizePath, validatePathWithinDirectory, validatePathWithinOutputDirectory, validateNotRemoteMode, resolveTranscriptPath } from './shared.js';
 import * as Metadata from '@redaksjon/protokoll-engine';
@@ -139,6 +139,21 @@ async function resolveStorageTranscriptPath(
         );
     }
     return null;
+}
+
+async function getProjectLookupContext(contextDirectory?: string) {
+    const ServerConfig = await import('../serverConfig');
+
+    const serverContext = ServerConfig.getContext();
+    if (serverContext?.hasContext()) {
+        return serverContext;
+    }
+
+    const contextDirectories = await getContextDirectories();
+    return Context.create({
+        startingDir: contextDirectory || process.cwd(),
+        contextDirectories,
+    });
 }
 
 export const transcriptResolutionTestHelpers = {
@@ -1481,6 +1496,7 @@ export async function handleEditTranscript(args: {
     
     const ServerConfig = await import('../serverConfig');
     const outputStorage = ServerConfig.getOutputStorage();
+    const serverContext = ServerConfig.getContext();
 
     if (outputStorage.name === 'gcs') {
         const access = await openToolTranscript(args.transcriptPath, args.contextDirectory);
@@ -1500,18 +1516,25 @@ export async function handleEditTranscript(args: {
                     changes.push('title updated');
                 }
                 if (args.projectId) {
-                    const contextDirectories = await getContextDirectories();
-                    const context = await Context.create({
-                        startingDir: args.contextDirectory || process.cwd(),
-                        contextDirectories,
-                    });
+                    const context = await getProjectLookupContext(args.contextDirectory);
                     const project = await context.getProject(args.projectId);
-                    if (!project) {
-                        throw new Error(`Project not found: ${args.projectId}`);
+                    let resolvedId: string;
+                    let resolvedName: string;
+                    if (project) {
+                        resolvedId = project.id;
+                        resolvedName = project.name;
+                    } else {
+                        const gcsEntity = await findContextEntityInGcs('project', args.projectId);
+                        if (gcsEntity && typeof gcsEntity.id === 'string' && typeof gcsEntity.name === 'string') {
+                            resolvedId = gcsEntity.id;
+                            resolvedName = gcsEntity.name;
+                        } else {
+                            throw new Error(`Project not found: ${args.projectId}`);
+                        }
                     }
 
-                    metadataUpdates.projectId = project.id;
-                    metadataUpdates.project = project.name;
+                    metadataUpdates.projectId = resolvedId;
+                    metadataUpdates.project = resolvedName;
 
                     const existingEntities = transcript.metadata.entities || {
                         people: [],
@@ -1522,8 +1545,8 @@ export async function handleEditTranscript(args: {
                     metadataUpdates.entities = {
                         people: existingEntities.people || [],
                         projects: [{
-                            id: project.id,
-                            name: project.name,
+                            id: resolvedId,
+                            name: resolvedName,
                             type: 'project',
                         }],
                         terms: existingEntities.terms || [],
@@ -1603,9 +1626,15 @@ export async function handleEditTranscript(args: {
     // Handle title/project/tags changes via existing editTranscript function
     // The editTranscript function handles PKL files directly
     if (args.title || args.projectId || args.tagsToAdd || args.tagsToRemove) {
-        // Get context directories from server config (from protokoll-config.yaml)
-        const contextDirectories = await getContextDirectories();
-        
+        // Resolve context directories from the running server context (preferred)
+        // or fall back to protokoll-config.yaml. The engine's editTranscript creates
+        // a fresh Context.create() — it needs explicit contextDirectories so it can
+        // find entities without walking up from the transcript's deep output path.
+        let contextDirectories = await getContextDirectories();
+        if ((!contextDirectories || contextDirectories.length === 0) && serverContext?.hasContext()) {
+            contextDirectories = serverContext.getContextDirs();
+        }
+
         const result = await Transcript.editTranscript(absolutePath, {
             title: args.title,
             projectId: args.projectId,
@@ -2342,6 +2371,11 @@ export async function handleEnhanceTranscript(args: {
             const project = context.getProject(projectId);
             if (project) {
                 entities.projects.push({ id: project.id, name: project.name, type: 'project' });
+            } else {
+                const gcsEntity = await findContextEntityInGcs('project', projectId);
+                if (gcsEntity && typeof gcsEntity.id === 'string' && typeof gcsEntity.name === 'string') {
+                    entities.projects.push({ id: gcsEntity.id, name: gcsEntity.name, type: 'project' });
+                }
             }
         }
         for (const termId of referenced.terms) {
@@ -2362,14 +2396,25 @@ export async function handleEnhanceTranscript(args: {
             || entities.companies.length > 0;
 
         const decidedProjectId = agenticResult.state.routeDecision?.projectId || routeResult.projectId || undefined;
-        const decidedProject = decidedProjectId ? context.getProject(decidedProjectId) : undefined;
+        let decidedProjectName: string | undefined;
+        if (decidedProjectId) {
+            const decidedProject = context.getProject(decidedProjectId);
+            if (decidedProject) {
+                decidedProjectName = decidedProject.name;
+            } else {
+                const gcsEntity = await findContextEntityInGcs('project', decidedProjectId);
+                if (gcsEntity && typeof gcsEntity.name === 'string') {
+                    decidedProjectName = gcsEntity.name;
+                }
+            }
+        }
         const decidedConfidence = agenticResult.state.routeDecision?.confidence ?? routeResult.confidence;
 
         transcript.updateContent(enhancedText);
         transcript.updateMetadata({
             status: finalStatus as TranscriptMetadata['status'],
             projectId: decidedProjectId || transcript.metadata.projectId,
-            project: decidedProject?.name || transcript.metadata.project,
+            project: decidedProjectName || transcript.metadata.project,
             confidence: typeof decidedConfidence === 'number' ? decidedConfidence : transcript.metadata.confidence,
             entities: hasEntities ? entities : transcript.metadata.entities,
         });
@@ -2396,7 +2441,7 @@ export async function handleEnhanceTranscript(args: {
             transcriptPath: args.transcriptPath,
             status: finalStatus,
             projectId: decidedProjectId || null,
-            projectName: decidedProject?.name || null,
+            projectName: decidedProjectName || null,
             toolsUsed: agenticResult.toolsUsed,
             totalToolCalls: toolCallCount,
             iterations: agenticResult.iterations,
@@ -2483,14 +2528,15 @@ export async function handleCreateNote(args: {
     // If projectId is provided, try to get project name from context
     if (args.projectId) {
         try {
-            const contextDirectories = await getContextDirectories();
-            const context = await Context.create({
-                startingDir: args.contextDirectory || process.cwd(),
-                contextDirectories,
-            });
+            const context = await getProjectLookupContext(args.contextDirectory);
             const project = await context.getProject(args.projectId);
             if (project) {
                 projectName = project.name;
+            } else {
+                const gcsEntity = await findContextEntityInGcs('project', args.projectId);
+                if (gcsEntity && typeof gcsEntity.name === 'string') {
+                    projectName = gcsEntity.name;
+                }
             }
         } catch {
             // Ignore errors - project name is optional
