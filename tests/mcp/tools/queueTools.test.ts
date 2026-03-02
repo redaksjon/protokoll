@@ -12,6 +12,7 @@ import * as os from 'node:os';
 // Mock dependencies
 vi.mock('../../../src/mcp/serverConfig', () => ({
     getOutputDirectory: vi.fn().mockReturnValue('/test/output'),
+    getOutputStorage: vi.fn().mockReturnValue({ name: 'filesystem' }),
 }));
 
 vi.mock('../../../src/mcp/tools/shared', () => ({
@@ -37,8 +38,9 @@ describe('Queue Tools', () => {
         testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'protokoll-queue-test-'));
         
         // Mock getOutputDirectory to return test directory
-        const { getOutputDirectory } = await import('../../../src/mcp/serverConfig');
+        const { getOutputDirectory, getOutputStorage } = await import('../../../src/mcp/serverConfig');
         vi.mocked(getOutputDirectory).mockReturnValue(testDir);
+        vi.mocked(getOutputStorage).mockReturnValue({ name: 'filesystem' } as any);
         setWorkerInstance(null);
     });
 
@@ -115,6 +117,69 @@ describe('Queue Tools', () => {
             expect(recent).toBeDefined();
             expect(recent?.status).toBe('enhanced');
             expect(recent?.completedAt).toBe(new Date(now - 1 * 60 * 1000).toISOString());
+        });
+
+        it('should read queued placeholders from gcs-style storage', async () => {
+            const uploadedMetadata: TranscriptMetadata = {
+                id: 'gcs-uploaded-1',
+                status: 'uploaded',
+                audioFile: 'gcs-uploaded.m4a',
+                date: new Date('2026-02-15T10:00:00Z'),
+            };
+            const transcribingMetadata: TranscriptMetadata = {
+                id: 'gcs-transcribing-1',
+                status: 'transcribing',
+                audioFile: 'gcs-transcribing.m4a',
+                date: new Date('2026-02-15T10:01:00Z'),
+                history: [{ from: 'uploaded', to: 'transcribing', at: new Date('2026-02-15T10:02:00Z') }],
+            };
+
+            const uploadedPath = path.join(testDir, 'gcs-uploaded-upload.pkl');
+            const transcribingPath = path.join(testDir, 'gcs-transcribing-upload.pkl');
+
+            const uploadedTranscript = PklTranscript.create(uploadedPath, uploadedMetadata);
+            await uploadedTranscript.close();
+            const transcribingTranscript = PklTranscript.create(transcribingPath, transcribingMetadata);
+            await transcribingTranscript.close();
+
+            const uploadedBytes = await fs.readFile(uploadedPath);
+            const transcribingBytes = await fs.readFile(transcribingPath);
+
+            const { getOutputStorage } = await import('../../../src/mcp/serverConfig');
+            vi.mocked(getOutputStorage).mockReturnValue({
+                name: 'gcs',
+                listFiles: vi.fn().mockResolvedValue([
+                    'gcs-uploaded-upload.pkl',
+                    'gcs-transcribing-upload.pkl',
+                ]),
+                readFile: vi.fn().mockImplementation(async (requestedPath: string) => {
+                    if (requestedPath === 'gcs-uploaded-upload.pkl') {
+                        return uploadedBytes;
+                    }
+                    if (requestedPath === 'gcs-transcribing-upload.pkl') {
+                        return transcribingBytes;
+                    }
+                    throw new Error(`Unexpected path: ${requestedPath}`);
+                }),
+            } as any);
+
+            const result = await handleQueueStatus();
+            expect(result.pending.some((item) => item.uuid === 'gcs-uploaded-1')).toBe(true);
+            expect(result.processing.some((item) => item.uuid === 'gcs-transcribing-1')).toBe(true);
+        });
+
+        it('should ignore unreadable gcs placeholders', async () => {
+            const { getOutputStorage } = await import('../../../src/mcp/serverConfig');
+            vi.mocked(getOutputStorage).mockReturnValue({
+                name: 'gcs',
+                listFiles: vi.fn().mockResolvedValue(['broken-upload.pkl']),
+                readFile: vi.fn().mockResolvedValue(Buffer.from('not-a-pkl')),
+            } as any);
+
+            const result = await handleQueueStatus();
+            expect(result.pending).toEqual([]);
+            expect(result.processing).toEqual([]);
+            expect(result.totalPending).toBe(0);
         });
     });
 
