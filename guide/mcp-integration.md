@@ -347,6 +347,16 @@ Instead of manually editing transcripts:
 
 ## Troubleshooting
 
+### Secured HTTP mode (RBAC)
+
+The HTTP server supports optional secured mode (`PROTOKOLL_HTTP_SECURED=true` / `--secured`).
+When enabled, clients must send an API key on all HTTP requests using either:
+
+- `Authorization: Bearer <raw_secret>`
+- `X-API-Key: <raw_secret>`
+
+If secured mode is enabled and RBAC files are missing/invalid, server startup fails fast.
+
 ### "No configuration found"
 
 Create a `.protokoll` directory:

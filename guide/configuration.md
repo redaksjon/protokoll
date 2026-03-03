@@ -41,6 +41,11 @@ contextDirectories: []             # Additional context locations
 | `ANTHROPIC_API_KEY` | Anthropic API key (for Claude models) |
 | `PROTOKOLL_MODEL` | Override default model |
 | `PROTOKOLL_CONFIG_DIR` | Config directory |
+| `PROTOKOLL_HTTP_SECURED` | Enable HTTP secured mode (API key + RBAC) |
+| `RBAC_USERS_PATH` | Path to RBAC users YAML/JSON file |
+| `RBAC_KEYS_PATH` | Path to RBAC keys YAML/JSON file |
+| `RBAC_POLICY_PATH` | Optional path to RBAC policy YAML/JSON file |
+| `RBAC_RELOAD_SECONDS` | Optional RBAC reload interval (seconds) |
 
 ## Command Line Options
 
@@ -75,6 +80,11 @@ contextDirectories: []             # Additional context locations
 | `--temp-directory <dir>` | Temporary file storage | OS temp dir |
 | `--processed-directory <dir>` | Move processed files here | - |
 | `--overrides` | Allow config overrides | `false` |
+| `--secured` | Enable API-key auth + RBAC | `false` |
+| `--rbac-users-path <path>` | RBAC users file path | Required when secured |
+| `--rbac-keys-path <path>` | RBAC keys file path | Required when secured |
+| `--rbac-policy-path <path>` | RBAC policy file path | Optional |
+| `--rbac-reload-seconds <seconds>` | Reload RBAC files periodically | Off |
 
 ## Output Structures
 

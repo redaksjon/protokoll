@@ -1,0 +1,11 @@
+keys:
+  - key_id: admin-key-2026-03
+    user_id: admin-user
+    # Replace with a generated scrypt hash:
+    # scrypt$N$r$p$<salt_base64>$<derived_key_base64>
+    secret_hash: scrypt$16384$8$1$RkFLRV9TQUxUX0JBU0U2NA==$RkFLRV9ERVJJVkVEX0tFWV9CQVNFNjQ=
+    enabled: true
+  - key_id: editor-key-2026-03
+    user_id: editor-user
+    secret_hash: scrypt$16384$8$1$QU5PVEhFUl9TQUxUX0I2NA==$QU5PVEhFUl9ERVJJVkVEX0I2NA==
+    enabled: true
