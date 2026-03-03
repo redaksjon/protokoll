@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
     findUploadedTranscripts: vi.fn(),
     markTranscriptAsTranscribing: vi.fn(),
     markTranscriptAsFailed: vi.fn(),
+    resetTranscriptToUploaded: vi.fn(),
     pipelineProcess: vi.fn(),
     pipelineCreate: vi.fn(),
     loadFromFile: vi.fn(),
@@ -68,6 +69,7 @@ vi.mock('@redaksjon/protokoll-engine', () => {
             findUploadedTranscripts: mocks.findUploadedTranscripts,
             markTranscriptAsTranscribing: mocks.markTranscriptAsTranscribing,
             markTranscriptAsFailed: mocks.markTranscriptAsFailed,
+            resetTranscriptToUploaded: mocks.resetTranscriptToUploaded,
         },
         Weighting: {
             WeightModelBuilder: MockWeightModelBuilder,
@@ -91,10 +93,23 @@ vi.mock('@redaksjon/protokoll-format', () => ({
 }));
 
 import { TranscriptionWorker } from '../../src/mcp/worker/transcription-worker';
+import { PklTranscript } from '@redaksjon/protokoll-format';
 
 describe('TranscriptionWorker', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        const pklOpenMock = PklTranscript.open as unknown as ReturnType<typeof vi.fn>;
+        pklOpenMock.mockReset();
+        pklOpenMock.mockImplementation(() => ({
+            metadata: {},
+            enhancementLog: {
+                logStep: mocks.enhancementLogStep,
+            },
+            setRawTranscript: mocks.setRawTranscript,
+            updateContent: mocks.updateContent,
+            updateMetadata: mocks.updateMetadata,
+            close: mocks.transcriptClose,
+        }));
 
         mocks.loadFromFile.mockResolvedValue({
             metadata: { transcriptCount: 2, entityCount: 5 },
@@ -116,6 +131,7 @@ describe('TranscriptionWorker', () => {
         mocks.findUploadedTranscripts.mockResolvedValue([]);
         mocks.markTranscriptAsTranscribing.mockResolvedValue(undefined);
         mocks.markTranscriptAsFailed.mockResolvedValue(undefined);
+        mocks.resetTranscriptToUploaded.mockResolvedValue(undefined);
     });
 
     it('starts and stops cleanly with an existing weight model', async () => {
@@ -267,17 +283,42 @@ describe('TranscriptionWorker', () => {
         });
 
         (worker as any).pipeline = { process: mocks.pipelineProcess };
-        mocks.pipelineProcess.mockResolvedValue({
-            rawTranscript: 'raw transcript',
-            enhancedText: 'x'.repeat(80),
-            outputPath: '/tmp/out/routed.pkl',
-            title: 'Enhanced title',
-            routedProject: 'project-1',
-            routedProjectName: 'Project One',
-            routingConfidence: 0.92,
-            entities: [{ id: 'person-1', type: 'person' }],
-            toolsUsed: ['protokoll_list_people'],
-            processingTime: 1234,
+        mocks.pipelineProcess.mockImplementation(async (input: any) => {
+            input.onModelCallStart?.({
+                callIndex: 1,
+                phase: 'initial',
+                request: {
+                    model: 'gpt-5-mini',
+                    reasoningLevel: 'medium',
+                    tools: [{ name: 'route_note' }],
+                },
+                timestamp: new Date('2026-01-01T00:00:00.000Z'),
+            });
+            input.onModelCallComplete?.({
+                callIndex: 1,
+                phase: 'initial',
+                durationMs: 42,
+                response: {
+                    model: 'gpt-5-mini',
+                    finishReason: 'stop',
+                    contentLength: 80,
+                    usage: { totalTokens: 123 },
+                    toolCalls: [{ id: 'tc-1' }],
+                },
+                timestamp: new Date('2026-01-01T00:00:01.000Z'),
+            });
+            return {
+                rawTranscript: 'raw transcript',
+                enhancedText: 'x'.repeat(80),
+                outputPath: '/tmp/out/routed.pkl',
+                title: 'Enhanced title',
+                routedProject: 'project-1',
+                routedProjectName: 'Project One',
+                routingConfidence: 0.92,
+                entities: [{ id: 'person-1', type: 'person' }],
+                toolsUsed: ['protokoll_list_people'],
+                processingTime: 1234,
+            };
         });
 
         const item = {
@@ -314,6 +355,74 @@ describe('TranscriptionWorker', () => {
         expect(mocks.transcriptClose).toHaveBeenCalled();
         expect(worker.getProcessedCount()).toBe(1);
         expect(worker.getCurrentTask()).toBeUndefined();
+        expect(mocks.enhancementLogStep).toHaveBeenCalledWith(
+            expect.any(Date),
+            'enhance',
+            'model_call_start',
+            expect.objectContaining({
+                callIndex: 1,
+                phase: 'initial',
+            })
+        );
+        expect(mocks.enhancementLogStep).toHaveBeenCalledWith(
+            expect.any(Date),
+            'enhance',
+            'model_call_complete',
+            expect.objectContaining({
+                callIndex: 1,
+                phase: 'initial',
+                durationMs: 42,
+            })
+        );
+    });
+
+    it('recovers stale transcribing uploads from gcs queue scan', async () => {
+        const outputStorage = {
+            name: 'gcs',
+            readFile: vi.fn().mockResolvedValue(Buffer.from('stale-pkl')),
+            writeFile: vi.fn().mockResolvedValue(undefined),
+            listFiles: vi.fn().mockResolvedValue(['stale-upload.pkl']),
+            deleteFile: vi.fn(),
+            exists: vi.fn(),
+            mkdir: vi.fn(),
+        };
+        const worker = new TranscriptionWorker({
+            outputDirectory: '/tmp/out',
+            uploadDirectory: '/tmp/uploads',
+            outputStorage: outputStorage as any,
+        });
+        const staleStart = new Date(Date.now() - (31 * 60 * 1000));
+        const openMock = PklTranscript.open as unknown as ReturnType<typeof vi.fn>;
+        openMock
+            .mockImplementationOnce(() => ({
+                metadata: {
+                    id: 'uuid-stale',
+                    status: 'transcribing',
+                    date: staleStart,
+                    history: [{ to: 'transcribing', at: staleStart }],
+                },
+                close: vi.fn(),
+            }) as any)
+            .mockImplementationOnce(() => ({
+                metadata: {
+                    id: 'uuid-stale',
+                    status: 'uploaded',
+                    date: new Date('2026-01-01T00:00:00.000Z'),
+                    audioFile: '/tmp/uploads/a.m4a',
+                },
+                close: vi.fn(),
+            }) as any);
+
+        const uploaded = await (worker as any).findUploadedTranscriptsFromStorage(outputStorage as any);
+
+        expect(uploaded).toHaveLength(1);
+        expect(uploaded[0].uuid).toBe('uuid-stale');
+        expect(uploaded[0].metadata.status).toBe('uploaded');
+        expect(mocks.resetTranscriptToUploaded).toHaveBeenCalledTimes(1);
+        expect(outputStorage.writeFile).toHaveBeenCalledWith(
+            'stale-upload.pkl',
+            Buffer.from('updated-pkl')
+        );
     });
 
     it('falls back to hash lookup and marks initial when enhancement did not improve text', async () => {

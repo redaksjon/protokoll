@@ -19,12 +19,13 @@ import type { FileStorageProvider } from '../storage/fileProviders';
 import type { StorageFileMetadata } from '../storage/fileProviders';
 import { markTranscriptIndexDirtyForStorage } from '../resources/transcriptIndexService';
 
-const { findUploadedTranscripts, markTranscriptAsTranscribing, markTranscriptAsFailed } = TranscriptOps;
+const { findUploadedTranscripts, markTranscriptAsTranscribing, markTranscriptAsFailed, resetTranscriptToUploaded } = TranscriptOps;
 const logger = Logging.getLogger('@redaksjon/protokoll-mcp').get('transcription-worker');
 
 const WEIGHT_MODEL_FILENAME = '.protokoll-weight-model.json';
 const WEIGHT_MODEL_STORAGE_PATH = WEIGHT_MODEL_FILENAME;
 const WEIGHT_MODEL_VISIBILITY_PATH = '.protokoll/weight-model.snapshot.json';
+const STALE_TRANSCRIBING_TIMEOUT_MS = 30 * 60 * 1000;
 
 /**
  * Worker configuration
@@ -244,6 +245,19 @@ function metadataVersionKey(metadata: { generation?: string; updatedAt?: string 
 
 function normalizeStoragePath(pathValue: string): string {
     return pathValue.replace(/^\/+/, '').replace(/\\/g, '/');
+}
+
+function getLatestTranscribingTimestamp(metadata: TranscriptMetadata): number | null {
+    const history = Array.isArray(metadata.history) ? metadata.history : [];
+    const transitions = history
+        .filter((entry) => entry?.to === 'transcribing')
+        .map((entry) => entry.at?.getTime?.())
+        .filter((value): value is number => Number.isFinite(value));
+    if (transitions.length > 0) {
+        return Math.max(...transitions);
+    }
+    const fallback = metadata.date?.getTime() ?? null;
+    return Number.isFinite(fallback) ? fallback : null;
 }
 
 async function listFilesWithMetadataCompat(
@@ -571,6 +585,30 @@ export class TranscriptionWorker {
                         filePath: storagePath,
                         metadata: transcriptMetadata,
                     });
+                    continue;
+                }
+
+                if (status === 'transcribing') {
+                    const startedAt = getLatestTranscribingTimestamp(transcriptMetadata);
+                    const isStale = startedAt !== null && (Date.now() - startedAt) > STALE_TRANSCRIBING_TIMEOUT_MS;
+                    if (isStale && tempPath) {
+                        await resetTranscriptToUploaded(tempPath);
+                        await syncTranscriptToStorage(outputStorage, storagePath, tempPath);
+                        const refreshed = PklTranscript.open(tempPath, { readOnly: true });
+                        const refreshedMetadata = refreshed.metadata;
+                        refreshed.close();
+                        this.uploadStatusCache.set(storagePath, { version, status: refreshedMetadata.status || null });
+                        uploaded.push({
+                            uuid: refreshedMetadata.id,
+                            filePath: storagePath,
+                            metadata: refreshedMetadata,
+                        });
+                        logger.warning('worker.queue.recovered_stale_transcribing', {
+                            uuid: refreshedMetadata.id,
+                            storagePath,
+                            timeoutMs: STALE_TRANSCRIBING_TIMEOUT_MS,
+                        });
+                    }
                 }
             } catch {
                 // Ignore unreadable PKL files; transcript index logs these elsewhere.
@@ -714,6 +752,8 @@ export class TranscriptionWorker {
             // Log that enhancement is starting
             transcript.enhancementLog.logStep(new Date(), 'enhance', 'enhancement_start', {
                 model: this.config.model || 'gpt-5-mini',
+                reasoningLevel: 'medium',
+                maxIterations: 20,
                 audioFile: item.metadata.audioFile,
             });
 
@@ -784,6 +824,49 @@ export class TranscriptionWorker {
                         // Never let log errors interrupt processing
                     }
                 },
+                onModelCallStart: (entry) => {
+                    logger.info('worker.enhance.model_start', {
+                        uuid: item.uuid,
+                        callIndex: entry.callIndex,
+                        phase: entry.phase,
+                        model: entry.request.model,
+                        reasoningLevel: entry.request.reasoningLevel,
+                        hasTools: Array.isArray(entry.request.tools) && entry.request.tools.length > 0,
+                        toolCount: entry.request.tools?.length ?? 0,
+                    });
+                    try {
+                        transcript.enhancementLog.logStep(entry.timestamp, 'enhance', 'model_call_start', {
+                            callIndex: entry.callIndex,
+                            phase: entry.phase,
+                            request: entry.request,
+                        });
+                    } catch {
+                        // Never let log errors interrupt processing
+                    }
+                },
+                onModelCallComplete: (entry) => {
+                    logger.info('worker.enhance.model_complete', {
+                        uuid: item.uuid,
+                        callIndex: entry.callIndex,
+                        phase: entry.phase,
+                        model: entry.response.model,
+                        finishReason: entry.response.finishReason,
+                        durationMs: entry.durationMs,
+                        contentLength: entry.response.contentLength,
+                        totalTokens: entry.response.usage?.totalTokens,
+                        toolCallsRequested: entry.response.toolCalls?.length ?? 0,
+                    });
+                    try {
+                        transcript.enhancementLog.logStep(entry.timestamp, 'enhance', 'model_call_complete', {
+                            callIndex: entry.callIndex,
+                            phase: entry.phase,
+                            durationMs: entry.durationMs,
+                            response: entry.response,
+                        });
+                    } catch {
+                        // Never let log errors interrupt processing
+                    }
+                },
             });
             
             // Clean up the local routed PKL the pipeline created. In GCS mode we persist
@@ -805,6 +888,9 @@ export class TranscriptionWorker {
             // Log enhancement completion before writing results
             transcript.enhancementLog.logStep(new Date(), 'enhance', 'enhancement_complete', {
                 status: finalStatus,
+                model: this.config.model || 'gpt-5-mini',
+                reasoningLevel: 'medium',
+                maxIterations: 20,
                 toolsUsed: result.toolsUsed,
                 totalToolCalls: toolCallCount,
                 processingTimeMs: result.processingTime,

@@ -778,29 +778,55 @@ describe('transcriptTools - extended handlers', () => {
                 })),
             } as any);
             mockReasoningCreate.mockReturnValue({} as any);
-            mockAgenticCreate.mockReturnValue({
-                process: vi.fn(async (text: string) => ({
-                    enhancedText: `${text}\n\nEnhanced transcript output with enough length to satisfy the enhancement-success threshold.`,
-                    toolsUsed: ['lookup_person', 'route_note'],
-                    iterations: 2,
-                    totalTokens: 123,
-                    state: {
-                        referencedEntities: {
-                            people: new Set<string>(),
-                            projects: new Set<string>(['project-123']),
-                            terms: new Set<string>(),
-                            companies: new Set<string>(),
+            mockAgenticCreate.mockImplementation((_reasoning, toolContext: any) => ({
+                process: vi.fn(async (text: string) => {
+                    toolContext.onModelCallStart?.({
+                        callIndex: 1,
+                        phase: 'initial',
+                        request: {
+                            model: 'gpt-5.2',
+                            reasoningLevel: 'medium',
+                            prompt: 'Enhance transcript',
+                            tools: [{ name: 'lookup_person' }],
                         },
-                        routeDecision: {
-                            projectId: 'project-123',
-                            destination: { path: transcriptsDir, structure: 'month' },
-                            confidence: 0.95,
-                            signals: [],
-                            reasoning: 'agentic route',
+                        timestamp: new Date('2026-01-01T00:00:00.000Z'),
+                    });
+                    toolContext.onModelCallComplete?.({
+                        callIndex: 1,
+                        phase: 'initial',
+                        durationMs: 25,
+                        response: {
+                            model: 'gpt-5.2',
+                            finishReason: 'stop',
+                            usage: { promptTokens: 100, completionTokens: 23, totalTokens: 123 },
+                            toolCalls: [{ id: 'tc-1', name: 'lookup_person', arguments: {} }],
+                            contentLength: 90,
                         },
-                    },
-                })),
-            } as any);
+                        timestamp: new Date('2026-01-01T00:00:01.000Z'),
+                    });
+                    return {
+                        enhancedText: `${text}\n\nEnhanced transcript output with enough length to satisfy the enhancement-success threshold.`,
+                        toolsUsed: ['lookup_person', 'route_note'],
+                        iterations: 2,
+                        totalTokens: 123,
+                        state: {
+                            referencedEntities: {
+                                people: new Set<string>(),
+                                projects: new Set<string>(['project-123']),
+                                terms: new Set<string>(),
+                                companies: new Set<string>(),
+                            },
+                            routeDecision: {
+                                projectId: 'project-123',
+                                destination: { path: transcriptsDir, structure: 'month' },
+                                confidence: 0.95,
+                                signals: [],
+                                reasoning: 'agentic route',
+                            },
+                        },
+                    };
+                }),
+            }) as any);
 
             const result = await handleEnhanceTranscript({
                 transcriptPath: '2025/2/enhance-test.pkl',
@@ -817,6 +843,9 @@ describe('transcriptTools - extended handlers', () => {
                 expect(transcript.content).toContain('Enhanced transcript output');
                 expect(transcript.metadata.status).toBe('enhanced');
                 expect(transcript.getEnhancementLogCount()).toBeGreaterThan(0);
+                const entries = transcript.getEnhancementLog();
+                expect(entries.some((entry) => entry.action === 'model_call_start')).toBe(true);
+                expect(entries.some((entry) => entry.action === 'model_call_complete')).toBe(true);
             } finally {
                 transcript.close();
             }

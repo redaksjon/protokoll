@@ -2182,6 +2182,8 @@ export async function handleEnhanceTranscript(args: {
         }
 
         const model = args.model || DEFAULT_MODEL;
+        const reasoningLevel = 'medium' as const;
+        const maxIterations = 20;
         const startedAt = Date.now();
         let toolCallCount = 0;
         logger.info('transcript.enhance.start', {
@@ -2243,11 +2245,14 @@ export async function handleEnhanceTranscript(args: {
 
         transcript.enhancementLog.logStep(new Date(), 'enhance', 'enhancement_start', {
             model,
+            reasoningLevel,
+            maxIterations,
             transcriptPath: args.transcriptPath,
             hasExplicitOriginal: explicitOriginal.length > 0,
             source: explicitOriginal ? 'explicit_original_text' : (rawOriginal ? 'raw_transcript' : 'enhanced_content_fallback'),
             routedProject: routeResult.projectId || null,
             routedConfidence: routeResult.confidence,
+            sourceLength: sourceText.length,
         });
 
         // Run simple-replace with the same engine phase used by audio processing.
@@ -2311,8 +2316,23 @@ export async function handleEnhanceTranscript(args: {
         }
 
         // Run agentic enhancement exactly like pipeline enhancement stage.
-        const reasoning = Reasoning.create({ model, reasoningLevel: 'medium' });
-        const executor = Agentic.create(reasoning, {
+        const reasoning = Reasoning.create({ model, reasoningLevel });
+        const toolContext: Agentic.ToolContext & {
+            modelConfiguration?: { model: string; reasoningLevel?: string };
+            onModelCallStart?: (entry: {
+                callIndex: number;
+                phase: string;
+                request: Record<string, unknown>;
+                timestamp: Date;
+            }) => void;
+            onModelCallComplete?: (entry: {
+                callIndex: number;
+                phase: string;
+                durationMs: number;
+                response: Record<string, unknown>;
+                timestamp: Date;
+            }) => void;
+        } = {
             transcriptText: simpleReplaceResult.text,
             audioDate: fallbackDate,
             sourceFile: pklPath,
@@ -2320,6 +2340,10 @@ export async function handleEnhanceTranscript(args: {
             routingInstance: routing,
             interactiveMode: false,
             preIdentifiedEntities,
+            modelConfiguration: {
+                model,
+                reasoningLevel,
+            },
             onToolCallStart: (tool, input) => {
                 toolCallCount++;
                 transcript.enhancementLog.logStep(new Date(), 'enhance', 'tool_start', {
@@ -2337,7 +2361,29 @@ export async function handleEnhanceTranscript(args: {
                     success: entry.success,
                 });
             },
-        });
+            onModelCallStart: (entry) => {
+                transcript.enhancementLog.logStep(entry.timestamp, 'enhance', 'model_call_start', {
+                    callIndex: entry.callIndex,
+                    phase: entry.phase,
+                    request: entry.request,
+                });
+            },
+            onModelCallComplete: (entry: {
+                callIndex: number;
+                phase: string;
+                durationMs: number;
+                response: Record<string, unknown>;
+                timestamp: Date;
+            }) => {
+                transcript.enhancementLog.logStep(entry.timestamp, 'enhance', 'model_call_complete', {
+                    callIndex: entry.callIndex,
+                    phase: entry.phase,
+                    durationMs: entry.durationMs,
+                    response: entry.response,
+                });
+            },
+        };
+        const executor = Agentic.create(reasoning, toolContext);
 
         const agenticResult = await executor.process(simpleReplaceResult.text);
         const enhancedText = (agenticResult.enhancedText || '').trim() || sourceText;
@@ -2421,6 +2467,9 @@ export async function handleEnhanceTranscript(args: {
 
         transcript.enhancementLog.logStep(new Date(), 'enhance', 'enhancement_complete', {
             status: finalStatus,
+            model,
+            reasoningLevel,
+            maxIterations,
             toolsUsed: agenticResult.toolsUsed,
             totalToolCalls: toolCallCount,
             iterations: agenticResult.iterations,
@@ -2455,6 +2504,8 @@ export async function handleEnhanceTranscript(args: {
         transcript.enhancementLog.logStep(new Date(), 'enhance', 'enhancement_failed', {
             transcriptPath: args.transcriptPath,
             model: args.model || DEFAULT_MODEL,
+            reasoningLevel: 'medium',
+            maxIterations: 20,
             error: message,
         });
         // Always emit a terminal completion event so clients waiting on
@@ -2464,6 +2515,8 @@ export async function handleEnhanceTranscript(args: {
             failed: true,
             transcriptPath: args.transcriptPath,
             model: args.model || DEFAULT_MODEL,
+            reasoningLevel: 'medium',
+            maxIterations: 20,
             error: message,
         });
         logger.error('transcript.enhance.failed', {
