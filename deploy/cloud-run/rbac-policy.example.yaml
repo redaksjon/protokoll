@@ -1,0 +1,20 @@
+policy:
+  - path: /health
+    methods: [GET]
+    public: true
+
+  - path: /auth/whoami
+    methods: [GET]
+    any_roles: ["*"]
+
+  - path: /admin/ping
+    methods: [GET]
+    any_roles: [admin]
+
+  - path: /mcp
+    methods: [GET, POST, DELETE, OPTIONS]
+    any_roles: ["*"]
+
+  - path: /audio/*
+    methods: [GET, POST, OPTIONS]
+    any_roles: ["*"]

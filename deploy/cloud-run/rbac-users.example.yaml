@@ -1,0 +1,10 @@
+users:
+  - user_id: admin-user
+    roles:
+      - admin
+      - editor
+    enabled: true
+  - user_id: editor-user
+    roles:
+      - editor
+    enabled: true

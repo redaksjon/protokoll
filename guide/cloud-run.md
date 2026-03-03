@@ -7,6 +7,9 @@ Use these files:
 - `deploy/cloud-run/Dockerfile`
 - `deploy/cloud-run/cloudbuild.yaml`
 - `deploy/cloud-run/env.example.yaml`
+- `deploy/cloud-run/rbac-users.example.yaml`
+- `deploy/cloud-run/rbac-keys.example.yaml`
+- `deploy/cloud-run/rbac-policy.example.yaml`
 
 ## 1) Runtime Service Account
 
@@ -118,6 +121,18 @@ cp deploy/cloud-run/env.example.yaml deploy/cloud-run/env.prod.yaml
 ```
 
 Update `deploy/cloud-run/env.prod.yaml` with non-secret values only.
+
+### Optional: Secured mode (RBAC)
+
+Set the following env vars when you want API-key auth + RBAC enabled:
+
+- `PROTOKOLL_HTTP_SECURED=true`
+- `RBAC_USERS_PATH=/app/rbac/users.yaml`
+- `RBAC_KEYS_PATH=/app/rbac/keys.yaml`
+- `RBAC_POLICY_PATH=/app/rbac/policy.yaml` (optional)
+- `RBAC_RELOAD_SECONDS=300` (optional)
+
+When `PROTOKOLL_HTTP_SECURED=true`, startup fails fast if the required RBAC files are missing/invalid.
 
 ## 6) Configure Cloud Build Substitutions
 

@@ -11,7 +11,7 @@
  *
  * Security:
  * - Binds to localhost only (127.0.0.1) by default
- * - No authentication (local development only)
+ * - Optional secured mode with API-key auth + RBAC policy enforcement
  *
  * Usage:
  *   node dist/mcp/server-hono.js
@@ -29,7 +29,7 @@ import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
 import { bodyLimit } from 'hono/body-limit';
 import { join, extname, basename, dirname } from 'node:path';
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, access } from 'node:fs/promises';
 // eslint-disable-next-line import/extensions
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
@@ -57,6 +57,11 @@ import { TranscriptionWorker } from './worker/transcription-worker';
 import { setWorkerInstance } from './tools/queueTools';
 import { configureEngineLoggingBridge } from './engineLogging';
 import { markTranscriptIndexDirtyForStorage } from './resources/transcriptIndexService';
+import {
+    loadRbacAuthorizerFromFiles,
+    type AuthContext,
+    type RbacAuthorizer,
+} from './rbac';
 import { Transcript as TranscriptOps } from '@redaksjon/protokoll-engine';
 import { PklTranscript } from '@redaksjon/protokoll-format';
 
@@ -95,6 +100,28 @@ let serverConfigInitKey: string | null = null;
 // Audio upload constants
 const DEFAULT_MAX_AUDIO_SIZE = 1024 * 1024 * 1024; // 1GB
 const DEFAULT_AUDIO_EXTENSIONS = ['mp3', 'm4a', 'wav', 'webm', 'mp4', 'aac', 'ogg', 'flac'];
+const REQUEST_ID_CONTEXT_KEY = 'requestId';
+const AUTH_CONTEXT_KEY = 'authContext';
+const AUTH_FAILURE_STATUS_BY_REASON: Record<string, number> = {
+    missing_key: 401,
+    invalid_key: 401,
+    disabled_key: 401,
+    expired_key: 401,
+    missing_user: 401,
+    disabled_user: 401,
+};
+const AUTH_FAILURE_ERROR_CODE_BY_REASON: Record<string, string> = {
+    missing_key: 'missing_api_key',
+    invalid_key: 'invalid_api_key',
+    disabled_key: 'disabled_api_key',
+    expired_key: 'expired_api_key',
+    missing_user: 'invalid_user',
+    disabled_user: 'disabled_user',
+};
+
+let rbacSecuredMode = false;
+let rbacAuthorizer: RbacAuthorizer | null = null;
+let rbacReloadTimer: ReturnType<typeof setInterval> | null = null;
 
 function parseBooleanEnv(value: string | undefined): boolean | undefined {
     if (!value) return undefined;
@@ -283,7 +310,118 @@ const McpHttpConfigSchema = z.object({
     transcriptionModel: z.string().optional(),
     debug: z.boolean().default(parseBooleanEnv(process.env.PROTOKOLL_DEBUG) ?? false),
     verbose: z.boolean().default(parseBooleanEnv(process.env.PROTOKOLL_VERBOSE) ?? false),
+    secured: z.boolean().default(parseBooleanEnv(process.env.PROTOKOLL_HTTP_SECURED) ?? false),
+    rbacUsersPath: z.string().optional(),
+    rbacKeysPath: z.string().optional(),
+    rbacPolicyPath: z.string().optional(),
+    rbacReloadSeconds: z.number().optional(),
 });
+
+function parseReloadSeconds(raw: unknown): number | undefined {
+    if (raw === undefined || raw === null || raw === '') return undefined;
+    if (typeof raw === 'number') {
+        if (!Number.isFinite(raw) || raw <= 0) {
+            throw new Error('rbacReloadSeconds must be a positive number');
+        }
+        return raw;
+    }
+    if (typeof raw === 'string') {
+        const parsed = Number.parseInt(raw, 10);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+            throw new Error('rbacReloadSeconds must be a positive integer');
+        }
+        return parsed;
+    }
+    throw new Error('rbacReloadSeconds must be a positive integer');
+}
+
+function requestIdFromContext(c: any): string {
+    const requestId = c.get?.(REQUEST_ID_CONTEXT_KEY);
+    return typeof requestId === 'string' && requestId.trim().length > 0
+        ? requestId
+        : randomUUID();
+}
+
+function authError(c: any, status: number, errorCode: string, message: string) {
+    const requestId = requestIdFromContext(c);
+    return c.json({
+        error_code: errorCode,
+        message,
+        request_id: requestId,
+    }, status);
+}
+
+function getAuthorizationHeaderSummary(c: any): string {
+    const hasAuthorization = Boolean(c.req.header('authorization'));
+    const hasApiKey = Boolean(c.req.header('x-api-key'));
+    if (hasAuthorization && hasApiKey) return 'bearer+x-api-key';
+    if (hasAuthorization) return 'bearer';
+    if (hasApiKey) return 'x-api-key';
+    return 'none';
+}
+
+async function configureRbacIfSecured(config: Record<string, unknown>): Promise<void> {
+    if (rbacReloadTimer) {
+        clearInterval(rbacReloadTimer);
+        rbacReloadTimer = null;
+    }
+    rbacSecuredMode = Boolean(config.secured);
+    rbacAuthorizer = null;
+
+    if (!rbacSecuredMode) {
+        lifecycleLogger.info('security.mode', { secured: false });
+        return;
+    }
+
+    const usersPath = readNonEmptyString(config.rbacUsersPath);
+    const keysPath = readNonEmptyString(config.rbacKeysPath);
+    const policyPath = readNonEmptyString(config.rbacPolicyPath);
+    const reloadSeconds = parseReloadSeconds(config.rbacReloadSeconds);
+
+    if (!usersPath || !keysPath) {
+        throw new Error('secured=true requires rbacUsersPath and rbacKeysPath');
+    }
+
+    await access(usersPath).catch(() => {
+        throw new Error(`RBAC users file not found: ${usersPath}`);
+    });
+    await access(keysPath).catch(() => {
+        throw new Error(`RBAC keys file not found: ${keysPath}`);
+    });
+    if (policyPath) {
+        await access(policyPath).catch(() => {
+            throw new Error(`RBAC policy file not found: ${policyPath}`);
+        });
+    }
+
+    const loadAuthorizer = async () => {
+        const loaded = await loadRbacAuthorizerFromFiles({ usersPath, keysPath, policyPath });
+        rbacAuthorizer = loaded;
+    };
+
+    await loadAuthorizer();
+    lifecycleLogger.info('security.mode', {
+        secured: true,
+        usersPath,
+        keysPath,
+        policyPath: policyPath ?? null,
+        reloadSeconds: reloadSeconds ?? null,
+    });
+
+    if (reloadSeconds && reloadSeconds > 0) {
+        rbacReloadTimer = setInterval(() => {
+            loadAuthorizer()
+                .then(() => {
+                    lifecycleLogger.debug('security.rbac.reloaded', { reloadSeconds });
+                })
+                .catch((error) => {
+                    lifecycleLogger.error('security.rbac.reload_failed', {
+                        error: error instanceof Error ? error.message : String(error),
+                    });
+                });
+        }, reloadSeconds * 1000);
+    }
+}
 
 // ============================================================================
 // Session Management
@@ -632,12 +770,103 @@ function createMcpServer(): Server {
 // Hono Application Setup
 // ============================================================================
 
-const app = new Hono();
+const app = new Hono<{ Variables: { requestId: string; authContext: AuthContext } }>();
+
+app.use('*', async (c, next) => {
+    const requestId = c.req.header('x-request-id')?.trim() || randomUUID();
+    c.set(REQUEST_ID_CONTEXT_KEY, requestId);
+    c.header('x-request-id', requestId);
+    await next();
+});
+
+app.use('*', async (c, next) => {
+    const requestId = requestIdFromContext(c);
+    const method = c.req.method;
+    const pathname = c.req.path;
+    if (!rbacSecuredMode) {
+        await next();
+        return;
+    }
+    if (!rbacAuthorizer) {
+        return authError(c, 500, 'rbac_unavailable', 'RBAC authorizer is not initialized');
+    }
+
+    const routeDecision = rbacAuthorizer.resolveRoute(method, pathname);
+    if (routeDecision.isPublic) {
+        requestLogger.info('auth.decision', {
+            requestId,
+            method,
+            path: pathname,
+            decision: 'allow',
+            reason: 'public_route',
+            identity: null,
+            authorizationHeader: getAuthorizationHeaderSummary(c),
+        });
+        await next();
+        return;
+    }
+
+    const auth = rbacAuthorizer.authenticate(c.req.raw.headers);
+    if (!auth.ok) {
+        requestLogger.info('auth.decision', {
+            requestId,
+            method,
+            path: pathname,
+            decision: 'deny',
+            reason: auth.reason,
+            identity: null,
+            authorizationHeader: getAuthorizationHeaderSummary(c),
+        });
+        return authError(
+            c,
+            AUTH_FAILURE_STATUS_BY_REASON[auth.reason] ?? 401,
+            AUTH_FAILURE_ERROR_CODE_BY_REASON[auth.reason] ?? 'auth_failed',
+            'Authentication failed'
+        );
+    }
+
+    const authContext: AuthContext = auth.context;
+    c.set(AUTH_CONTEXT_KEY, authContext);
+
+    const authorization = rbacAuthorizer.authorize(routeDecision, authContext);
+    if (!authorization.allowed) {
+        requestLogger.info('auth.decision', {
+            requestId,
+            method,
+            path: pathname,
+            decision: 'deny',
+            reason: authorization.reason,
+            userId: authContext.user_id,
+            keyId: authContext.key_id,
+            roles: authContext.roles,
+            authorizationHeader: getAuthorizationHeaderSummary(c),
+        });
+        return authError(
+            c,
+            403,
+            authorization.reason === 'no_policy_match' ? 'policy_no_match' : 'forbidden',
+            authorization.reason === 'no_policy_match' ? 'No policy rule matched this route' : 'Access denied'
+        );
+    }
+
+    requestLogger.info('auth.decision', {
+        requestId,
+        method,
+        path: pathname,
+        decision: 'allow',
+        reason: authorization.reason,
+        userId: authContext.user_id,
+        keyId: authContext.key_id,
+        roles: authContext.roles,
+        authorizationHeader: getAuthorizationHeaderSummary(c),
+    });
+    await next();
+});
 
 // CORS middleware for /mcp endpoint
 app.use('/mcp', cors({
     origin: '*',
-    allowHeaders: ['Content-Type', 'Accept', 'Mcp-Session-Id', 'Mcp-Protocol-Version', 'Last-Event-Id'],
+    allowHeaders: ['Content-Type', 'Accept', 'Mcp-Session-Id', 'Mcp-Protocol-Version', 'Last-Event-Id', 'Authorization', 'X-API-Key', 'X-Request-Id'],
     exposeHeaders: ['Mcp-Session-Id', 'Mcp-Protocol-Version'],
     allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
 }));
@@ -645,6 +874,7 @@ app.use('/mcp', cors({
 // CORS middleware for audio endpoints
 app.use('/audio/*', cors({
     origin: '*',
+    allowHeaders: ['Authorization', 'X-API-Key', 'X-Request-Id', 'Content-Type', 'Accept'],
     allowMethods: ['GET', 'POST', 'OPTIONS'],
 }));
 
@@ -865,6 +1095,31 @@ app.get('/health', async (c) => {
             error: 'Could not fetch queue statistics',
         });
     }
+});
+
+app.get('/auth/whoami', async (c) => {
+    const auth = c.get(AUTH_CONTEXT_KEY) as AuthContext | undefined;
+    if (!auth) {
+        return authError(c, 401, 'missing_auth_context', 'Authentication required');
+    }
+    return c.json({
+        user_id: auth.user_id,
+        roles: auth.roles,
+        key_id: auth.key_id,
+    });
+});
+
+app.get('/admin/ping', async (c) => {
+    const auth = c.get(AUTH_CONTEXT_KEY) as AuthContext | undefined;
+    if (!auth) {
+        return authError(c, 401, 'missing_auth_context', 'Authentication required');
+    }
+    return c.json({
+        ok: true,
+        user_id: auth.user_id,
+        key_id: auth.key_id,
+        roles: auth.roles,
+    });
 });
 
 // MCP endpoint - handles POST requests (JSON-RPC)
@@ -1317,6 +1572,11 @@ async function main() {
         .option('--classify-model <model>', 'Classification model (env: PROTOKOLL_CLASSIFY_MODEL)')
         .option('--compose-model <model>', 'Composition model (env: PROTOKOLL_COMPOSE_MODEL)')
         .option('--transcription-model <model>', 'Transcription model (env: PROTOKOLL_TRANSCRIPTION_MODEL)')
+        .option('--secured', 'Enable API-key + RBAC secured mode (env: PROTOKOLL_HTTP_SECURED)')
+        .option('--rbac-users-path <path>', 'RBAC users file path (env: RBAC_USERS_PATH)')
+        .option('--rbac-keys-path <path>', 'RBAC keys file path (env: RBAC_KEYS_PATH)')
+        .option('--rbac-policy-path <path>', 'RBAC policy file path (env: RBAC_POLICY_PATH)')
+        .option('--rbac-reload-seconds <seconds>', 'RBAC reload interval in seconds (env: RBAC_RELOAD_SECONDS)')
         .option('--debug', 'Enable debug mode (env: PROTOKOLL_DEBUG)')
         .option('--verbose', 'Enable verbose mode (env: PROTOKOLL_VERBOSE)');
 
@@ -1370,6 +1630,11 @@ async function main() {
         classifyModel: (args.classifyModel as string | undefined) ?? process.env.PROTOKOLL_CLASSIFY_MODEL,
         composeModel: (args.composeModel as string | undefined) ?? process.env.PROTOKOLL_COMPOSE_MODEL,
         transcriptionModel: (args.transcriptionModel as string | undefined) ?? process.env.PROTOKOLL_TRANSCRIPTION_MODEL,
+        secured: (args.secured as boolean | undefined) ?? parseBooleanEnv(process.env.PROTOKOLL_HTTP_SECURED),
+        rbacUsersPath: (args.rbacUsersPath as string | undefined) ?? process.env.RBAC_USERS_PATH,
+        rbacKeysPath: (args.rbacKeysPath as string | undefined) ?? process.env.RBAC_KEYS_PATH,
+        rbacPolicyPath: (args.rbacPolicyPath as string | undefined) ?? process.env.RBAC_POLICY_PATH,
+        rbacReloadSeconds: (args.rbacReloadSeconds as string | undefined) ?? process.env.RBAC_RELOAD_SECONDS,
         debug: (args.debug as boolean | undefined) ?? parseBooleanEnv(process.env.PROTOKOLL_DEBUG),
         verbose: (args.verbose as boolean | undefined) ?? parseBooleanEnv(process.env.PROTOKOLL_VERBOSE),
         storage: buildEnvStorageConfig(),
@@ -1389,6 +1654,8 @@ async function main() {
     startupContextDirectories = Array.isArray(startupContextDirs) && startupContextDirs.length > 0
         ? startupContextDirs
         : undefined;
+
+    await configureRbacIfSecured(startupConfig);
 
     // ── Port / host resolution ────────────────────────────────────────────────
     // Priority: --port CLI > MCP_PORT env > PROTOKOLL_MCP_PORT env > PORT env > default 3000
@@ -1446,6 +1713,11 @@ async function main() {
         transcriptionModel: (cardigantimeConfig as any).transcriptionModel || 'default',
         debugMode: (cardigantimeConfig as any).debug ? 'ON' : 'OFF',
         verboseMode: (cardigantimeConfig as any).verbose ? 'ON' : 'OFF',
+        securedMode: Boolean((cardigantimeConfig as any).secured),
+        rbacUsersPath: (cardigantimeConfig as any).rbacUsersPath || null,
+        rbacKeysPath: (cardigantimeConfig as any).rbacKeysPath || null,
+        rbacPolicyPath: (cardigantimeConfig as any).rbacPolicyPath || null,
+        rbacReloadSeconds: (cardigantimeConfig as any).rbacReloadSeconds || null,
     });
     lifecycleLogger.debug('startup.storage', {
         lines: describeRawStorageConfig(cardigantimeConfig as Record<string, unknown>),
@@ -1456,6 +1728,7 @@ async function main() {
     // Graceful shutdown
     process.on('SIGTERM', async () => {
         lifecycleLogger.info('shutdown.signal_received', { signal: 'SIGTERM' });
+        if (rbacReloadTimer) clearInterval(rbacReloadTimer);
         if (transcriptionWorker) {
             await transcriptionWorker.stop();
         }
@@ -1464,6 +1737,7 @@ async function main() {
 
     process.on('SIGINT', async () => {
         lifecycleLogger.info('shutdown.signal_received', { signal: 'SIGINT' });
+        if (rbacReloadTimer) clearInterval(rbacReloadTimer);
         if (transcriptionWorker) {
             await transcriptionWorker.stop();
         }
@@ -1483,6 +1757,11 @@ main().catch((error) => {
     });
     process.exit(1);
 });
+
+export function __setSecurityForTests(options: { secured: boolean; authorizer: RbacAuthorizer | null }): void {
+    rbacSecuredMode = options.secured;
+    rbacAuthorizer = options.authorizer;
+}
 
 // Export for testing
 export { app, sessions };
