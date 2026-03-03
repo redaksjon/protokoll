@@ -11,6 +11,10 @@ import { PklTranscript } from '@redaksjon/protokoll-format';
 import type { TranscriptMetadata } from '@redaksjon/protokoll-format';
 import { Transcript } from '@redaksjon/protokoll-engine';
 import Logging from '@fjell/logging';
+import * as fs from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import type { FileStorageProvider, StorageFileMetadata } from '../storage/fileProviders';
 
 const { 
     findUploadedTranscripts,
@@ -18,7 +22,7 @@ const {
     resetTranscriptToUploaded,
     findTranscriptByUuid,
 } = Transcript;
-import { getOutputDirectory } from '../serverConfig';
+import { getOutputDirectory, getOutputStorage } from '../serverConfig';
 import { sanitizePath } from './shared';
 import { unlink } from 'node:fs/promises';
 import type { TranscriptionWorker } from '../worker/transcription-worker';
@@ -150,6 +154,113 @@ function getCompletionTime(metadata: TranscriptMetadata): string {
     return lastTransition?.at.toISOString() || '';
 }
 
+function isQueueCandidatePath(pathValue: string): boolean {
+    const normalized = pathValue.replace(/^\/+/, '').replace(/\\/g, '/');
+    if (!normalized.toLowerCase().endsWith('.pkl')) {
+        return false;
+    }
+    if (normalized.startsWith('uploads/') || normalized.includes('/uploads/')) {
+        return false;
+    }
+    if (normalized.startsWith('.intermediate/') || normalized.includes('/.intermediate/')) {
+        return false;
+    }
+    return true;
+}
+
+/**
+ * Upload placeholder transcripts use a root-level `*-upload.pkl` naming convention.
+ */
+function isUploadPlaceholderPath(pathValue: string): boolean {
+    const normalized = pathValue.replace(/^\/+/, '').replace(/\\/g, '/').toLowerCase();
+    if (!normalized.endsWith('-upload.pkl')) {
+        return false;
+    }
+    return !normalized.includes('/');
+}
+
+async function listFilesWithMetadataCompat(
+    provider: FileStorageProvider,
+    prefix: string,
+    pattern?: string,
+): Promise<StorageFileMetadata[]> {
+    const withMetadata = (provider as {
+        listFilesWithMetadata?: (prefix: string, pattern?: string) => Promise<StorageFileMetadata[]>;
+    }).listFilesWithMetadata;
+    if (typeof withMetadata === 'function') {
+        return withMetadata.call(provider, prefix, pattern);
+    }
+    const listed = await provider.listFiles(prefix, pattern);
+    return listed.map((pathValue) => ({
+        path: pathValue,
+        size: 1,
+        updatedAt: null,
+    }));
+}
+
+async function materializeTranscriptFromStorage(
+    outputStorage: FileStorageProvider,
+    transcriptPath: string,
+): Promise<string> {
+    const fileName = transcriptPath.split('/').pop() || 'transcript.pkl';
+    const tempPath = join(
+        tmpdir(),
+        `protokoll-queue-pkl-${Date.now()}-${Math.random().toString(36).slice(2)}-${fileName}`,
+    );
+    const contents = await outputStorage.readFile(transcriptPath);
+    await fs.writeFile(tempPath, contents);
+    return tempPath;
+}
+
+async function findQueueTranscriptsFromStorage(
+    outputStorage: FileStorageProvider,
+): Promise<{
+    uploaded: Array<{ uuid: string; metadata: TranscriptMetadata }>;
+    transcribing: Array<{ uuid: string; metadata: TranscriptMetadata }>;
+}> {
+    const files = await listFilesWithMetadataCompat(outputStorage, '', '-upload.pkl');
+    const candidates = files
+        .map((metadata) => ({ ...metadata, path: metadata.path.replace(/^\/+/, '').replace(/\\/g, '/') }))
+        .filter((metadata) => isQueueCandidatePath(metadata.path))
+        .filter((metadata) => isUploadPlaceholderPath(metadata.path));
+
+    const uploaded: Array<{ uuid: string; metadata: TranscriptMetadata }> = [];
+    const transcribing: Array<{ uuid: string; metadata: TranscriptMetadata }> = [];
+
+    for (const metadata of candidates) {
+        let tempPath: string | null = null;
+        try {
+            tempPath = await materializeTranscriptFromStorage(outputStorage, metadata.path);
+            const transcript = PklTranscript.open(tempPath, { readOnly: true });
+            const transcriptMetadata = transcript.metadata;
+            await transcript.close();
+
+            if (transcriptMetadata.status === 'uploaded') {
+                uploaded.push({ uuid: transcriptMetadata.id, metadata: transcriptMetadata });
+            } else if (transcriptMetadata.status === 'transcribing') {
+                transcribing.push({ uuid: transcriptMetadata.id, metadata: transcriptMetadata });
+            }
+        } catch {
+            // Ignore unreadable queue placeholders.
+        } finally {
+            if (tempPath) {
+                await fs.rm(tempPath, { force: true });
+            }
+        }
+    }
+
+    const sortByDateAsc = (a: { metadata: TranscriptMetadata }, b: { metadata: TranscriptMetadata }): number => {
+        const aTime = a.metadata.date?.getTime() || 0;
+        const bTime = b.metadata.date?.getTime() || 0;
+        return aTime - bTime;
+    };
+
+    return {
+        uploaded: uploaded.sort(sortByDateAsc),
+        transcribing: transcribing.sort(sortByDateAsc),
+    };
+}
+
 /**
  * Find recent transcripts (completed in last 24 hours)
  */
@@ -220,9 +331,19 @@ export async function handleQueueStatus(): Promise<{
     totalPending: number;
 }> {
     const outputDir = getOutputDirectory();
-    
-    const uploaded = await findUploadedTranscripts([outputDir]);
-    const transcribing = await findTranscribingTranscripts([outputDir]);
+    const outputStorage = getOutputStorage();
+    let uploaded: Array<{ uuid: string; metadata: TranscriptMetadata }> = [];
+    let transcribing: Array<{ uuid: string; metadata: TranscriptMetadata }> = [];
+
+    if (outputStorage.name === 'gcs') {
+        const storageQueue = await findQueueTranscriptsFromStorage(outputStorage);
+        uploaded = storageQueue.uploaded;
+        transcribing = storageQueue.transcribing;
+    } else {
+        uploaded = await findUploadedTranscripts([outputDir]);
+        transcribing = await findTranscribingTranscripts([outputDir]);
+    }
+
     const recent = await findRecentTranscripts([outputDir], 10);
     
     return {

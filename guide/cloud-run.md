@@ -130,6 +130,8 @@ Use `deploy/cloud-run/cloudbuild.yaml` substitutions:
 - `_SERVICE_ACCOUNT`
 - `_ENV_VARS_FILE`
 - `_OPENAI_SECRET`
+- `_REQUEST_TIMEOUT` (seconds; default `3600` for MCP SSE streams)
+- `_MIN_INSTANCES` (default `1` to reduce cold starts/worker interruptions)
 
 For production, set `_ENV_VARS_FILE=deploy/cloud-run/env.prod.yaml`.
 
@@ -139,7 +141,7 @@ From the repo root:
 
 ```bash
 gcloud builds submit --config deploy/cloud-run/cloudbuild.yaml \
-  --substitutions=_REGION=us-central1,_SERVICE_NAME=protokoll-mcp,_AR_REPO=protokoll,_IMAGE_NAME=protokoll-mcp,_SERVICE_ACCOUNT=protokoll-runtime@${PROJECT_ID}.iam.gserviceaccount.com,_ENV_VARS_FILE=deploy/cloud-run/env.prod.yaml,_OPENAI_SECRET=protokoll-openai-api-key
+  --substitutions=_REGION=us-central1,_SERVICE_NAME=protokoll-mcp,_AR_REPO=protokoll,_IMAGE_NAME=protokoll-mcp,_SERVICE_ACCOUNT=protokoll-runtime@${PROJECT_ID}.iam.gserviceaccount.com,_ENV_VARS_FILE=deploy/cloud-run/env.prod.yaml,_OPENAI_SECRET=protokoll-openai-api-key,_REQUEST_TIMEOUT=3600,_MIN_INSTANCES=1
 ```
 
 ## Notes
@@ -148,3 +150,4 @@ gcloud builds submit --config deploy/cloud-run/cloudbuild.yaml \
 - The Docker image includes `ffmpeg`, required for audio format conversion/splitting.
 - Cloud Run should use service account identity (ADC); do not bake key files into the image.
 - Cloud Build uses `${BUILD_ID}` for image tags in this template so `gcloud builds submit` works reliably outside trigger contexts.
+- Deploy defaults include `--timeout=3600`, `--min-instances=1`, and `--no-cpu-throttling` to better support long-lived MCP SSE connections and in-process background polling.

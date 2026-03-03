@@ -19,11 +19,15 @@ import { PklTranscript } from '@redaksjon/protokoll-format';
 // Mock serverConfig for validateNotRemoteMode and getContextDirectories
 vi.mock('../../src/mcp/serverConfig', () => ({
     getServerConfig: vi.fn().mockReturnValue({ configFile: { contextDirectories: [] } }),
+    isInitialized: vi.fn().mockReturnValue(false),
     isRemoteMode: vi.fn().mockReturnValue(false),
+    getWorkspaceRoot: vi.fn().mockReturnValue('/test/workspace'),
     getInputDirectory: vi.fn().mockReturnValue('/test/input'),
     getOutputDirectory: vi.fn().mockReturnValue('/test/output'),
     getProcessedDirectory: vi.fn().mockReturnValue('/test/processed'),
+    getStorageConfig: vi.fn().mockReturnValue({ backend: 'filesystem' }),
     getOutputStorage: vi.fn().mockReturnValue({ name: 'local' }),
+    getContext: vi.fn().mockReturnValue(null),
 }));
 
 // Mock Context for handleCreateNote project resolution (line 1060)
@@ -35,6 +39,13 @@ vi.mock('@/context', async (importOriginal) => {
         getConfig: () => ({}),
     });
     return { ...actual, create: mockCreate };
+});
+
+// Mock entityIndexService for GCS fallback tests
+const mockFindContextEntityInGcs = vi.hoisted(() => vi.fn());
+vi.mock('../../src/mcp/resources/entityIndexService', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../../src/mcp/resources/entityIndexService')>();
+    return { ...actual, findContextEntityInGcs: mockFindContextEntityInGcs };
 });
 
 // Mock the shared module
@@ -302,6 +313,40 @@ describe('transcriptTools - complete (edge cases and uncovered paths)', () => {
             const fullPath = path.join(transcriptsDir, result.filePath);
             const { metadata } = readTestTranscript(fullPath);
             expect(metadata.projectId).toBe('unknown-project');
+            expect(metadata.project).toBeUndefined();
+        });
+
+        it('should fall back to GCS entity when context.getProject returns null', async () => {
+            mockGetProject.mockResolvedValue(null);
+            mockFindContextEntityInGcs.mockResolvedValue({ id: 'gcs-project', name: 'GCS Project Name' });
+
+            const result = await handleCreateNote({
+                title: 'GCS Project Note',
+                content: 'Content',
+                projectId: 'gcs-project',
+            });
+
+            expect(result.success).toBe(true);
+            const fullPath = path.join(transcriptsDir, result.filePath);
+            const { metadata } = readTestTranscript(fullPath);
+            expect(metadata.projectId).toBe('gcs-project');
+            expect(metadata.project).toBe('GCS Project Name');
+        });
+
+        it('should leave project name undefined when GCS fallback also returns null', async () => {
+            mockGetProject.mockResolvedValue(null);
+            mockFindContextEntityInGcs.mockResolvedValue(null);
+
+            const result = await handleCreateNote({
+                title: 'No Project Name Note',
+                content: 'Content',
+                projectId: 'missing-project',
+            });
+
+            expect(result.success).toBe(true);
+            const fullPath = path.join(transcriptsDir, result.filePath);
+            const { metadata } = readTestTranscript(fullPath);
+            expect(metadata.projectId).toBe('missing-project');
             expect(metadata.project).toBeUndefined();
         });
     });

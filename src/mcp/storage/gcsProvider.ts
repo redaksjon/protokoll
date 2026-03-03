@@ -128,7 +128,7 @@ export class GcsStorageProvider implements FileStorageProvider {
                 } satisfies StorageFileMetadata;
             });
         if (!pattern) {
-            logger.info('gcs.list.complete', {
+            logger.debug('gcs.list.complete', {
                 bucket: this.bucketName,
                 fullPrefix,
                 matchedCount: relativeEntries.length,
@@ -137,7 +137,7 @@ export class GcsStorageProvider implements FileStorageProvider {
             return relativeEntries;
         }
         const filtered = relativeEntries.filter((entry) => entry.path.includes(pattern));
-        logger.info('gcs.list.complete', {
+        logger.debug('gcs.list.complete', {
             bucket: this.bucketName,
             fullPrefix,
             pattern,

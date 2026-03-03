@@ -19,10 +19,13 @@ import type { FileStorageProvider } from '../storage/fileProviders';
 import type { StorageFileMetadata } from '../storage/fileProviders';
 import { markTranscriptIndexDirtyForStorage } from '../resources/transcriptIndexService';
 
-const { findUploadedTranscripts, markTranscriptAsTranscribing, markTranscriptAsFailed } = TranscriptOps;
+const { findUploadedTranscripts, markTranscriptAsTranscribing, markTranscriptAsFailed, resetTranscriptToUploaded } = TranscriptOps;
 const logger = Logging.getLogger('@redaksjon/protokoll-mcp').get('transcription-worker');
 
 const WEIGHT_MODEL_FILENAME = '.protokoll-weight-model.json';
+const WEIGHT_MODEL_STORAGE_PATH = WEIGHT_MODEL_FILENAME;
+const WEIGHT_MODEL_VISIBILITY_PATH = '.protokoll/weight-model.snapshot.json';
+const STALE_TRANSCRIBING_TIMEOUT_MS = 30 * 60 * 1000;
 
 /**
  * Worker configuration
@@ -36,7 +39,7 @@ export interface WorkerConfig {
     contextInstance?: ContextInstance;
     uploadDirectory: string;       // Where uploaded audio files are stored
     outputStorage?: FileStorageProvider; // Optional storage provider for uploads in non-filesystem backends
-    scanInterval?: number;         // Milliseconds between queue scans (default: 5000)
+    scanInterval?: number;         // Milliseconds between queue scans (default: 60000)
     model?: string;                // AI model for enhancement
     transcriptionModel?: string;   // Whisper model
 }
@@ -73,6 +76,87 @@ function syncWeightModelMetadata(model: Weighting.WeightModel): {
         model.metadata.entityCount = entityCount;
     }
     return { transcriptCount, entityCount, changed };
+}
+
+type TranscriptEntities = {
+    people?: Array<{ id?: string }>;
+    projects?: Array<{ id?: string }>;
+    terms?: Array<{ id?: string }>;
+    companies?: Array<{ id?: string }>;
+};
+
+function createEmptyWeightModel(): Weighting.WeightModel {
+    const now = new Date().toISOString();
+    return {
+        cooccurrence: {},
+        byProject: {},
+        transcriptSnapshots: {},
+        metadata: {
+            builtAt: now,
+            lastUpdatedAt: now,
+            transcriptCount: 0,
+            entityCount: 0,
+            version: '1.0.0',
+        },
+    };
+}
+
+function extractEntityIdsFromMetadata(metadata: TranscriptMetadata): string[] {
+    const entities = metadata.entities as TranscriptEntities | undefined;
+    if (!entities) {
+        return [];
+    }
+    const ids = [
+        ...(entities.people || []).map(entity => entity?.id),
+        ...(entities.projects || []).map(entity => entity?.id),
+        ...(entities.terms || []).map(entity => entity?.id),
+        ...(entities.companies || []).map(entity => entity?.id),
+    ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+    return Array.from(new Set(ids));
+}
+
+async function loadWeightModelFromStorage(
+    outputStorage: FileStorageProvider,
+): Promise<Weighting.WeightModel | null> {
+    const candidates = [WEIGHT_MODEL_STORAGE_PATH, WEIGHT_MODEL_VISIBILITY_PATH];
+    for (const pathValue of candidates) {
+        try {
+            if (!(await outputStorage.exists(pathValue))) {
+                continue;
+            }
+            const contents = await outputStorage.readFile(pathValue);
+            const model = JSON.parse(contents.toString('utf-8')) as Weighting.WeightModel;
+            logger.info('worker.weight_model.loaded_from_storage', { path: pathValue });
+            return model;
+        } catch {
+            // Try next candidate path.
+        }
+    }
+    return null;
+}
+
+async function writeWeightModel(
+    model: Weighting.WeightModel,
+    options: {
+        weightModelBuilder: Weighting.WeightModelBuilder;
+        weightModelPath: string;
+        outputStorage?: FileStorageProvider;
+    },
+): Promise<void> {
+    if (options.outputStorage?.name === 'gcs') {
+        const serialized = JSON.stringify(model, null, 2);
+        await options.outputStorage.writeFile(WEIGHT_MODEL_STORAGE_PATH, serialized);
+        try {
+            // Keep a human-visible snapshot in .protokoll for debugging and warm starts.
+            await options.outputStorage.writeFile(WEIGHT_MODEL_VISIBILITY_PATH, serialized);
+        } catch {
+            logger.warning('worker.weight_model.visibility_copy_failed', {
+                path: WEIGHT_MODEL_VISIBILITY_PATH,
+            });
+        }
+        return;
+    }
+    await options.weightModelBuilder.writeToFile(model, options.weightModelPath);
 }
 
 function toStorageCandidatePath(outputDirectory: string, filePath: string): string {
@@ -163,6 +247,19 @@ function normalizeStoragePath(pathValue: string): string {
     return pathValue.replace(/^\/+/, '').replace(/\\/g, '/');
 }
 
+function getLatestTranscribingTimestamp(metadata: TranscriptMetadata): number | null {
+    const history = Array.isArray(metadata.history) ? metadata.history : [];
+    const transitions = history
+        .filter((entry) => entry?.to === 'transcribing')
+        .map((entry) => entry.at?.getTime?.())
+        .filter((value): value is number => Number.isFinite(value));
+    if (transitions.length > 0) {
+        return Math.max(...transitions);
+    }
+    const fallback = metadata.date?.getTime() ?? null;
+    return Number.isFinite(fallback) ? fallback : null;
+}
+
 async function listFilesWithMetadataCompat(
     provider: FileStorageProvider,
     prefix: string,
@@ -245,11 +342,18 @@ export class TranscriptionWorker {
         });
         this.weightModelProvider = new Weighting.WeightModelProvider();
 
-        const existingModel = await Weighting.WeightModelBuilder.loadFromFile(this.weightModelPath);
+        const storageBacked = this.config.outputStorage?.name === 'gcs' && !!this.config.outputStorage;
+        const existingModel = storageBacked
+            ? await loadWeightModelFromStorage(this.config.outputStorage!)
+            : await Weighting.WeightModelBuilder.loadFromFile(this.weightModelPath);
         if (existingModel) {
             const normalized = syncWeightModelMetadata(existingModel);
             if (normalized.changed) {
-                await this.weightModelBuilder.writeToFile(existingModel, this.weightModelPath);
+                await writeWeightModel(existingModel, {
+                    weightModelBuilder: this.weightModelBuilder,
+                    weightModelPath: this.weightModelPath,
+                    outputStorage: this.config.outputStorage,
+                });
                 logger.info('worker.weight_model.metadata_repaired', {
                     transcriptCount: normalized.transcriptCount,
                     entityCount: normalized.entityCount,
@@ -263,10 +367,16 @@ export class TranscriptionWorker {
         } else {
             // No existing model — do an initial build from all transcripts in the output dir
             try {
-                const builtModel = await this.weightModelBuilder.build(this.config.outputDirectory);
+                const builtModel = storageBacked
+                    ? await this.buildWeightModelFromStorage(this.config.outputStorage!)
+                    : await this.weightModelBuilder.build(this.config.outputDirectory);
+                this.weightModelProvider.loadModel(builtModel);
                 if (builtModel.metadata.transcriptCount > 0) {
-                    this.weightModelProvider.loadModel(builtModel);
-                    await this.weightModelBuilder.writeToFile(builtModel, this.weightModelPath);
+                    await writeWeightModel(builtModel, {
+                        weightModelBuilder: this.weightModelBuilder,
+                        weightModelPath: this.weightModelPath,
+                        outputStorage: this.config.outputStorage,
+                    });
                     logger.info('worker.weight_model.built', {
                         transcriptCount: builtModel.metadata.transcriptCount,
                         entityCount: builtModel.metadata.entityCount,
@@ -310,7 +420,11 @@ export class TranscriptionWorker {
                 weightModelBuilder.updateTranscript(model, transcriptUuid, entityIds, projectId);
                 syncWeightModelMetadata(model);
                 // Save asynchronously — never block processing on disk I/O
-                weightModelBuilder.writeToFile(model, weightModelPath).catch(() => {
+                writeWeightModel(model, {
+                    weightModelBuilder,
+                    weightModelPath,
+                    outputStorage: this.config.outputStorage,
+                }).catch(() => {
                     logger.warning('worker.weight_model.save_failed');
                 });
             },
@@ -381,7 +495,7 @@ export class TranscriptionWorker {
                     await this.processNextTranscript(uploaded[0]);
                 } else {
                     // No work, wait before next scan
-                    await new Promise(resolve => setTimeout(resolve, this.config.scanInterval || 5000));
+                    await new Promise(resolve => setTimeout(resolve, this.config.scanInterval || 60_000));
                 }
             } catch (error) {
                 logger.error('worker.loop.error', {
@@ -392,6 +506,51 @@ export class TranscriptionWorker {
                 await new Promise(resolve => setTimeout(resolve, 10000));
             }
         }
+    }
+
+    private async buildWeightModelFromStorage(outputStorage: FileStorageProvider): Promise<Weighting.WeightModel> {
+        const model = createEmptyWeightModel();
+        const files = await listFilesWithMetadataCompat(outputStorage, '', '.pkl');
+        const candidates = files
+            .map((metadata) => ({ ...metadata, path: normalizeStoragePath(metadata.path) }))
+            .filter((metadata) => isQueueCandidatePath(metadata.path))
+            .filter((metadata) => !isUploadPlaceholderPath(metadata.path))
+            .sort((a, b) => {
+                const aTime = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+                const bTime = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+                return bTime - aTime;
+            })
+            .slice(0, 500);
+
+        for (const metadata of candidates) {
+            let tempPath: string | null = null;
+            try {
+                tempPath = await materializeTranscriptFromStorage(outputStorage, metadata.path);
+                const transcript = PklTranscript.open(tempPath, { readOnly: true });
+                const transcriptMetadata = transcript.metadata;
+                transcript.close();
+                const entityIds = extractEntityIdsFromMetadata(transcriptMetadata);
+                if (entityIds.length === 0 || !transcriptMetadata.id) {
+                    continue;
+                }
+                this.weightModelBuilder?.updateTranscript(
+                    model,
+                    transcriptMetadata.id,
+                    entityIds,
+                    transcriptMetadata.project || undefined,
+                );
+            } catch {
+                // Ignore unreadable/invalid transcript files in startup bootstrap.
+            } finally {
+                if (tempPath) {
+                    await fs.rm(tempPath, { force: true });
+                }
+            }
+        }
+
+        syncWeightModelMetadata(model);
+        model.metadata.lastUpdatedAt = new Date().toISOString();
+        return model;
     }
 
     private async findUploadedTranscriptsFromStorage(outputStorage: FileStorageProvider): Promise<UploadedTranscript[]> {
@@ -426,6 +585,30 @@ export class TranscriptionWorker {
                         filePath: storagePath,
                         metadata: transcriptMetadata,
                     });
+                    continue;
+                }
+
+                if (status === 'transcribing') {
+                    const startedAt = getLatestTranscribingTimestamp(transcriptMetadata);
+                    const isStale = startedAt !== null && (Date.now() - startedAt) > STALE_TRANSCRIBING_TIMEOUT_MS;
+                    if (isStale && tempPath) {
+                        await resetTranscriptToUploaded(tempPath);
+                        await syncTranscriptToStorage(outputStorage, storagePath, tempPath);
+                        const refreshed = PklTranscript.open(tempPath, { readOnly: true });
+                        const refreshedMetadata = refreshed.metadata;
+                        refreshed.close();
+                        this.uploadStatusCache.set(storagePath, { version, status: refreshedMetadata.status || null });
+                        uploaded.push({
+                            uuid: refreshedMetadata.id,
+                            filePath: storagePath,
+                            metadata: refreshedMetadata,
+                        });
+                        logger.warning('worker.queue.recovered_stale_transcribing', {
+                            uuid: refreshedMetadata.id,
+                            storagePath,
+                            timeoutMs: STALE_TRANSCRIBING_TIMEOUT_MS,
+                        });
+                    }
                 }
             } catch {
                 // Ignore unreadable PKL files; transcript index logs these elsewhere.
@@ -569,6 +752,8 @@ export class TranscriptionWorker {
             // Log that enhancement is starting
             transcript.enhancementLog.logStep(new Date(), 'enhance', 'enhancement_start', {
                 model: this.config.model || 'gpt-5-mini',
+                reasoningLevel: 'medium',
+                maxIterations: 20,
                 audioFile: item.metadata.audioFile,
             });
 
@@ -639,6 +824,49 @@ export class TranscriptionWorker {
                         // Never let log errors interrupt processing
                     }
                 },
+                onModelCallStart: (entry) => {
+                    logger.info('worker.enhance.model_start', {
+                        uuid: item.uuid,
+                        callIndex: entry.callIndex,
+                        phase: entry.phase,
+                        model: entry.request.model,
+                        reasoningLevel: entry.request.reasoningLevel,
+                        hasTools: Array.isArray(entry.request.tools) && entry.request.tools.length > 0,
+                        toolCount: entry.request.tools?.length ?? 0,
+                    });
+                    try {
+                        transcript.enhancementLog.logStep(entry.timestamp, 'enhance', 'model_call_start', {
+                            callIndex: entry.callIndex,
+                            phase: entry.phase,
+                            request: entry.request,
+                        });
+                    } catch {
+                        // Never let log errors interrupt processing
+                    }
+                },
+                onModelCallComplete: (entry) => {
+                    logger.info('worker.enhance.model_complete', {
+                        uuid: item.uuid,
+                        callIndex: entry.callIndex,
+                        phase: entry.phase,
+                        model: entry.response.model,
+                        finishReason: entry.response.finishReason,
+                        durationMs: entry.durationMs,
+                        contentLength: entry.response.contentLength,
+                        totalTokens: entry.response.usage?.totalTokens,
+                        toolCallsRequested: entry.response.toolCalls?.length ?? 0,
+                    });
+                    try {
+                        transcript.enhancementLog.logStep(entry.timestamp, 'enhance', 'model_call_complete', {
+                            callIndex: entry.callIndex,
+                            phase: entry.phase,
+                            durationMs: entry.durationMs,
+                            response: entry.response,
+                        });
+                    } catch {
+                        // Never let log errors interrupt processing
+                    }
+                },
             });
             
             // Clean up the local routed PKL the pipeline created. In GCS mode we persist
@@ -660,6 +888,9 @@ export class TranscriptionWorker {
             // Log enhancement completion before writing results
             transcript.enhancementLog.logStep(new Date(), 'enhance', 'enhancement_complete', {
                 status: finalStatus,
+                model: this.config.model || 'gpt-5-mini',
+                reasoningLevel: 'medium',
+                maxIterations: 20,
                 toolsUsed: result.toolsUsed,
                 totalToolCalls: toolCallCount,
                 processingTimeMs: result.processingTime,

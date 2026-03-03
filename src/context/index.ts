@@ -36,6 +36,7 @@ export interface CreateOptions extends BaseCreateOptions {
     gcs?: {
         bucketName: string;
         basePath: string;
+        projectId?: string;
         credentialsFile?: string;
     };
 }

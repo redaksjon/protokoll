@@ -8,14 +8,13 @@ import { resolve, dirname } from 'node:path';
 import { mkdir, mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import * as Context from '@/context';
 import Logging from '@fjell/logging';
 import { Agentic, Phases, Reasoning, Routing, Transcript } from '@redaksjon/protokoll-engine';
 import { DEFAULT_MODEL, MAX_CONTENT_LENGTH } from '@/constants';
 import { markTranscriptIndexDirtyForStorage, resolveTranscriptPathByFilename } from '../resources/transcriptIndexService';
-import { markContextEntityIndexDirty } from '../resources/entityIndexService';
+import { markContextEntityIndexDirty, findContextEntityInGcs } from '../resources/entityIndexService';
 
-import { fileExists, getConfiguredDirectory, getContextDirectories, sanitizePath, validatePathWithinDirectory, validatePathWithinOutputDirectory, validateNotRemoteMode, resolveTranscriptPath } from './shared.js';
+import { createToolContext, fileExists, getConfiguredDirectory, getContextDirectories, sanitizePath, validatePathWithinDirectory, validatePathWithinOutputDirectory, validateNotRemoteMode, resolveTranscriptPath } from './shared.js';
 import * as Metadata from '@redaksjon/protokoll-engine';
 import { Transcript as TranscriptUtils } from '@redaksjon/protokoll-engine';
 const { ensurePklExtension, transcriptExists } = TranscriptUtils;
@@ -139,6 +138,10 @@ async function resolveStorageTranscriptPath(
         );
     }
     return null;
+}
+
+async function getProjectLookupContext(contextDirectory?: string) {
+    return createToolContext(contextDirectory);
 }
 
 export const transcriptResolutionTestHelpers = {
@@ -1481,6 +1484,7 @@ export async function handleEditTranscript(args: {
     
     const ServerConfig = await import('../serverConfig');
     const outputStorage = ServerConfig.getOutputStorage();
+    const serverContext = ServerConfig.getContext();
 
     if (outputStorage.name === 'gcs') {
         const access = await openToolTranscript(args.transcriptPath, args.contextDirectory);
@@ -1500,18 +1504,25 @@ export async function handleEditTranscript(args: {
                     changes.push('title updated');
                 }
                 if (args.projectId) {
-                    const contextDirectories = await getContextDirectories();
-                    const context = await Context.create({
-                        startingDir: args.contextDirectory || process.cwd(),
-                        contextDirectories,
-                    });
+                    const context = await getProjectLookupContext(args.contextDirectory);
                     const project = await context.getProject(args.projectId);
-                    if (!project) {
-                        throw new Error(`Project not found: ${args.projectId}`);
+                    let resolvedId: string;
+                    let resolvedName: string;
+                    if (project) {
+                        resolvedId = project.id;
+                        resolvedName = project.name;
+                    } else {
+                        const gcsEntity = await findContextEntityInGcs('project', args.projectId);
+                        if (gcsEntity && typeof gcsEntity.id === 'string' && typeof gcsEntity.name === 'string') {
+                            resolvedId = gcsEntity.id;
+                            resolvedName = gcsEntity.name;
+                        } else {
+                            throw new Error(`Project not found: ${args.projectId}`);
+                        }
                     }
 
-                    metadataUpdates.projectId = project.id;
-                    metadataUpdates.project = project.name;
+                    metadataUpdates.projectId = resolvedId;
+                    metadataUpdates.project = resolvedName;
 
                     const existingEntities = transcript.metadata.entities || {
                         people: [],
@@ -1522,8 +1533,8 @@ export async function handleEditTranscript(args: {
                     metadataUpdates.entities = {
                         people: existingEntities.people || [],
                         projects: [{
-                            id: project.id,
-                            name: project.name,
+                            id: resolvedId,
+                            name: resolvedName,
                             type: 'project',
                         }],
                         terms: existingEntities.terms || [],
@@ -1603,9 +1614,15 @@ export async function handleEditTranscript(args: {
     // Handle title/project/tags changes via existing editTranscript function
     // The editTranscript function handles PKL files directly
     if (args.title || args.projectId || args.tagsToAdd || args.tagsToRemove) {
-        // Get context directories from server config (from protokoll-config.yaml)
-        const contextDirectories = await getContextDirectories();
-        
+        // Resolve context directories from the running server context (preferred)
+        // or fall back to protokoll-config.yaml. The engine's editTranscript creates
+        // a fresh Context.create() — it needs explicit contextDirectories so it can
+        // find entities without walking up from the transcript's deep output path.
+        let contextDirectories = await getContextDirectories();
+        if ((!contextDirectories || contextDirectories.length === 0) && serverContext?.hasContext()) {
+            contextDirectories = serverContext.getContextDirs();
+        }
+
         const result = await Transcript.editTranscript(absolutePath, {
             title: args.title,
             projectId: args.projectId,
@@ -1830,8 +1847,13 @@ export async function handleCombineTranscripts(args: {
         absolutePaths.push(absolute);
     }
 
-    // Get context directories from server config (from protokoll-config.yaml)
-    const contextDirectories = await getContextDirectories();
+    // Resolve context directories from server config (preferred) and
+    // fall back to active server context directories when available.
+    const serverContext = ServerConfig.getContext();
+    let contextDirectories = await getContextDirectories();
+    if ((!contextDirectories || contextDirectories.length === 0) && serverContext?.hasContext()) {
+        contextDirectories = serverContext.getContextDirs();
+    }
     
     const result = await Transcript.combineTranscripts(absolutePaths, {
         title: args.title,
@@ -2065,11 +2087,7 @@ export async function handleProvideFeedback(args: {
     const transcript = PklTranscript.open(pklPath, { readOnly: false });
     try {
         const transcriptContent = transcript.content;
-        const contextDirectories = await getContextDirectories();
-        const context = await Context.create({
-            startingDir: args.contextDirectory || dirname(pklPath),
-            contextDirectories,
-        });
+        const context = await createToolContext(args.contextDirectory);
         const reasoning = Reasoning.create({ model: args.model || DEFAULT_MODEL });
 
         // Create a feedback context
@@ -2153,6 +2171,8 @@ export async function handleEnhanceTranscript(args: {
         }
 
         const model = args.model || DEFAULT_MODEL;
+        const reasoningLevel = 'low' as const;
+        const maxIterations = 20;
         const startedAt = Date.now();
         let toolCallCount = 0;
         logger.info('transcript.enhance.start', {
@@ -2166,10 +2186,26 @@ export async function handleEnhanceTranscript(args: {
         });
 
         // Build context and routing similar to the standard pipeline.
-        const contextDirectories = await getContextDirectories();
-        const context = await Context.create({
-            startingDir: args.contextDirectory || dirname(pklPath),
-            contextDirectories,
+        const context = await createToolContext(args.contextDirectory);
+        const projectCount = typeof (context as any).getAllProjects === 'function'
+            ? (context as any).getAllProjects().length
+            : 0;
+        const peopleCount = typeof (context as any).getAllPeople === 'function'
+            ? (context as any).getAllPeople().length
+            : 0;
+        const termCount = typeof (context as any).getAllTerms === 'function'
+            ? (context as any).getAllTerms().length
+            : 0;
+        const companyCount = typeof (context as any).getAllCompanies === 'function'
+            ? (context as any).getAllCompanies().length
+            : 0;
+        logger.info('transcript.enhance.context.loaded', {
+            requestId,
+            transcriptPath: args.transcriptPath,
+            projectCount,
+            peopleCount,
+            termCount,
+            companyCount,
         });
         const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
         const defaultStructure = 'month' as const;
@@ -2214,11 +2250,14 @@ export async function handleEnhanceTranscript(args: {
 
         transcript.enhancementLog.logStep(new Date(), 'enhance', 'enhancement_start', {
             model,
+            reasoningLevel,
+            maxIterations,
             transcriptPath: args.transcriptPath,
             hasExplicitOriginal: explicitOriginal.length > 0,
             source: explicitOriginal ? 'explicit_original_text' : (rawOriginal ? 'raw_transcript' : 'enhanced_content_fallback'),
             routedProject: routeResult.projectId || null,
             routedConfidence: routeResult.confidence,
+            sourceLength: sourceText.length,
         });
 
         // Run simple-replace with the same engine phase used by audio processing.
@@ -2281,9 +2320,35 @@ export async function handleEnhanceTranscript(args: {
             }
         }
 
+        logger.info('transcript.enhance.agentic.start', {
+            requestId,
+            transcriptPath: args.transcriptPath,
+            routedProject: routeResult.projectId || null,
+            routedConfidence: routeResult.confidence,
+            preIdentifiedPeople: preIdentifiedEntities.people.size,
+            preIdentifiedProjects: preIdentifiedEntities.projects.size,
+            preIdentifiedTerms: preIdentifiedEntities.terms.size,
+            sourceLength: simpleReplaceResult.text.length,
+        });
+
         // Run agentic enhancement exactly like pipeline enhancement stage.
-        const reasoning = Reasoning.create({ model, reasoningLevel: 'medium' });
-        const executor = Agentic.create(reasoning, {
+        const reasoning = Reasoning.create({ model, reasoningLevel });
+        const toolContext: Agentic.ToolContext & {
+            modelConfiguration?: { model: string; reasoningLevel?: string };
+            onModelCallStart?: (entry: {
+                callIndex: number;
+                phase: string;
+                request: Record<string, unknown>;
+                timestamp: Date;
+            }) => void;
+            onModelCallComplete?: (entry: {
+                callIndex: number;
+                phase: string;
+                durationMs: number;
+                response: Record<string, unknown>;
+                timestamp: Date;
+            }) => void;
+        } = {
             transcriptText: simpleReplaceResult.text,
             audioDate: fallbackDate,
             sourceFile: pklPath,
@@ -2291,8 +2356,19 @@ export async function handleEnhanceTranscript(args: {
             routingInstance: routing,
             interactiveMode: false,
             preIdentifiedEntities,
+            modelConfiguration: {
+                model,
+                reasoningLevel,
+            },
             onToolCallStart: (tool, input) => {
                 toolCallCount++;
+                logger.info('transcript.enhance.agentic.tool_start', {
+                    requestId,
+                    transcriptPath: args.transcriptPath,
+                    callIndex: toolCallCount,
+                    tool,
+                    input,
+                });
                 transcript.enhancementLog.logStep(new Date(), 'enhance', 'tool_start', {
                     callIndex: toolCallCount,
                     tool,
@@ -2300,6 +2376,13 @@ export async function handleEnhanceTranscript(args: {
                 });
             },
             onToolCallComplete: (entry) => {
+                logger.info('transcript.enhance.agentic.tool_complete', {
+                    requestId,
+                    transcriptPath: args.transcriptPath,
+                    tool: entry.tool,
+                    durationMs: entry.durationMs,
+                    success: entry.success,
+                });
                 transcript.enhancementLog.logStep(entry.timestamp, 'enhance', 'tool_complete', {
                     tool: entry.tool,
                     input: entry.input,
@@ -2308,7 +2391,42 @@ export async function handleEnhanceTranscript(args: {
                     success: entry.success,
                 });
             },
-        });
+            onModelCallStart: (entry) => {
+                logger.info('transcript.enhance.agentic.model_call_start', {
+                    requestId,
+                    transcriptPath: args.transcriptPath,
+                    callIndex: entry.callIndex,
+                    phase: entry.phase,
+                });
+                transcript.enhancementLog.logStep(entry.timestamp, 'enhance', 'model_call_start', {
+                    callIndex: entry.callIndex,
+                    phase: entry.phase,
+                    request: entry.request,
+                });
+            },
+            onModelCallComplete: (entry: {
+                callIndex: number;
+                phase: string;
+                durationMs: number;
+                response: Record<string, unknown>;
+                timestamp: Date;
+            }) => {
+                logger.info('transcript.enhance.agentic.model_call_complete', {
+                    requestId,
+                    transcriptPath: args.transcriptPath,
+                    callIndex: entry.callIndex,
+                    phase: entry.phase,
+                    durationMs: entry.durationMs,
+                });
+                transcript.enhancementLog.logStep(entry.timestamp, 'enhance', 'model_call_complete', {
+                    callIndex: entry.callIndex,
+                    phase: entry.phase,
+                    durationMs: entry.durationMs,
+                    response: entry.response,
+                });
+            },
+        };
+        const executor = Agentic.create(reasoning, toolContext);
 
         const agenticResult = await executor.process(simpleReplaceResult.text);
         const enhancedText = (agenticResult.enhancedText || '').trim() || sourceText;
@@ -2342,6 +2460,11 @@ export async function handleEnhanceTranscript(args: {
             const project = context.getProject(projectId);
             if (project) {
                 entities.projects.push({ id: project.id, name: project.name, type: 'project' });
+            } else {
+                const gcsEntity = await findContextEntityInGcs('project', projectId);
+                if (gcsEntity && typeof gcsEntity.id === 'string' && typeof gcsEntity.name === 'string') {
+                    entities.projects.push({ id: gcsEntity.id, name: gcsEntity.name, type: 'project' });
+                }
             }
         }
         for (const termId of referenced.terms) {
@@ -2362,20 +2485,34 @@ export async function handleEnhanceTranscript(args: {
             || entities.companies.length > 0;
 
         const decidedProjectId = agenticResult.state.routeDecision?.projectId || routeResult.projectId || undefined;
-        const decidedProject = decidedProjectId ? context.getProject(decidedProjectId) : undefined;
+        let decidedProjectName: string | undefined;
+        if (decidedProjectId) {
+            const decidedProject = context.getProject(decidedProjectId);
+            if (decidedProject) {
+                decidedProjectName = decidedProject.name;
+            } else {
+                const gcsEntity = await findContextEntityInGcs('project', decidedProjectId);
+                if (gcsEntity && typeof gcsEntity.name === 'string') {
+                    decidedProjectName = gcsEntity.name;
+                }
+            }
+        }
         const decidedConfidence = agenticResult.state.routeDecision?.confidence ?? routeResult.confidence;
 
         transcript.updateContent(enhancedText);
         transcript.updateMetadata({
             status: finalStatus as TranscriptMetadata['status'],
             projectId: decidedProjectId || transcript.metadata.projectId,
-            project: decidedProject?.name || transcript.metadata.project,
+            project: decidedProjectName || transcript.metadata.project,
             confidence: typeof decidedConfidence === 'number' ? decidedConfidence : transcript.metadata.confidence,
             entities: hasEntities ? entities : transcript.metadata.entities,
         });
 
         transcript.enhancementLog.logStep(new Date(), 'enhance', 'enhancement_complete', {
             status: finalStatus,
+            model,
+            reasoningLevel,
+            maxIterations,
             toolsUsed: agenticResult.toolsUsed,
             totalToolCalls: toolCallCount,
             iterations: agenticResult.iterations,
@@ -2396,7 +2533,7 @@ export async function handleEnhanceTranscript(args: {
             transcriptPath: args.transcriptPath,
             status: finalStatus,
             projectId: decidedProjectId || null,
-            projectName: decidedProject?.name || null,
+            projectName: decidedProjectName || null,
             toolsUsed: agenticResult.toolsUsed,
             totalToolCalls: toolCallCount,
             iterations: agenticResult.iterations,
@@ -2410,6 +2547,8 @@ export async function handleEnhanceTranscript(args: {
         transcript.enhancementLog.logStep(new Date(), 'enhance', 'enhancement_failed', {
             transcriptPath: args.transcriptPath,
             model: args.model || DEFAULT_MODEL,
+            reasoningLevel: 'medium',
+            maxIterations: 20,
             error: message,
         });
         // Always emit a terminal completion event so clients waiting on
@@ -2419,6 +2558,8 @@ export async function handleEnhanceTranscript(args: {
             failed: true,
             transcriptPath: args.transcriptPath,
             model: args.model || DEFAULT_MODEL,
+            reasoningLevel: 'medium',
+            maxIterations: 20,
             error: message,
         });
         logger.error('transcript.enhance.failed', {
@@ -2483,14 +2624,15 @@ export async function handleCreateNote(args: {
     // If projectId is provided, try to get project name from context
     if (args.projectId) {
         try {
-            const contextDirectories = await getContextDirectories();
-            const context = await Context.create({
-                startingDir: args.contextDirectory || process.cwd(),
-                contextDirectories,
-            });
+            const context = await getProjectLookupContext(args.contextDirectory);
             const project = await context.getProject(args.projectId);
             if (project) {
                 projectName = project.name;
+            } else {
+                const gcsEntity = await findContextEntityInGcs('project', args.projectId);
+                if (gcsEntity && typeof gcsEntity.name === 'string') {
+                    projectName = gcsEntity.name;
+                }
             }
         } catch {
             // Ignore errors - project name is optional
