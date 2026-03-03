@@ -8,14 +8,13 @@ import { resolve, dirname } from 'node:path';
 import { mkdir, mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import * as Context from '@/context';
 import Logging from '@fjell/logging';
 import { Agentic, Phases, Reasoning, Routing, Transcript } from '@redaksjon/protokoll-engine';
 import { DEFAULT_MODEL, MAX_CONTENT_LENGTH } from '@/constants';
 import { markTranscriptIndexDirtyForStorage, resolveTranscriptPathByFilename } from '../resources/transcriptIndexService';
 import { markContextEntityIndexDirty, findContextEntityInGcs } from '../resources/entityIndexService';
 
-import { fileExists, getConfiguredDirectory, getContextDirectories, sanitizePath, validatePathWithinDirectory, validatePathWithinOutputDirectory, validateNotRemoteMode, resolveTranscriptPath } from './shared.js';
+import { createToolContext, fileExists, getConfiguredDirectory, getContextDirectories, sanitizePath, validatePathWithinDirectory, validatePathWithinOutputDirectory, validateNotRemoteMode, resolveTranscriptPath } from './shared.js';
 import * as Metadata from '@redaksjon/protokoll-engine';
 import { Transcript as TranscriptUtils } from '@redaksjon/protokoll-engine';
 const { ensurePklExtension, transcriptExists } = TranscriptUtils;
@@ -142,18 +141,7 @@ async function resolveStorageTranscriptPath(
 }
 
 async function getProjectLookupContext(contextDirectory?: string) {
-    const ServerConfig = await import('../serverConfig');
-
-    const serverContext = ServerConfig.getContext();
-    if (serverContext?.hasContext()) {
-        return serverContext;
-    }
-
-    const contextDirectories = await getContextDirectories();
-    return Context.create({
-        startingDir: contextDirectory || process.cwd(),
-        contextDirectories,
-    });
+    return createToolContext(contextDirectory);
 }
 
 export const transcriptResolutionTestHelpers = {
@@ -1859,8 +1847,13 @@ export async function handleCombineTranscripts(args: {
         absolutePaths.push(absolute);
     }
 
-    // Get context directories from server config (from protokoll-config.yaml)
-    const contextDirectories = await getContextDirectories();
+    // Resolve context directories from server config (preferred) and
+    // fall back to active server context directories when available.
+    const serverContext = ServerConfig.getContext();
+    let contextDirectories = await getContextDirectories();
+    if ((!contextDirectories || contextDirectories.length === 0) && serverContext?.hasContext()) {
+        contextDirectories = serverContext.getContextDirs();
+    }
     
     const result = await Transcript.combineTranscripts(absolutePaths, {
         title: args.title,
@@ -2094,11 +2087,7 @@ export async function handleProvideFeedback(args: {
     const transcript = PklTranscript.open(pklPath, { readOnly: false });
     try {
         const transcriptContent = transcript.content;
-        const contextDirectories = await getContextDirectories();
-        const context = await Context.create({
-            startingDir: args.contextDirectory || dirname(pklPath),
-            contextDirectories,
-        });
+        const context = await createToolContext(args.contextDirectory);
         const reasoning = Reasoning.create({ model: args.model || DEFAULT_MODEL });
 
         // Create a feedback context
@@ -2182,7 +2171,7 @@ export async function handleEnhanceTranscript(args: {
         }
 
         const model = args.model || DEFAULT_MODEL;
-        const reasoningLevel = 'medium' as const;
+        const reasoningLevel = 'low' as const;
         const maxIterations = 20;
         const startedAt = Date.now();
         let toolCallCount = 0;
@@ -2197,10 +2186,26 @@ export async function handleEnhanceTranscript(args: {
         });
 
         // Build context and routing similar to the standard pipeline.
-        const contextDirectories = await getContextDirectories();
-        const context = await Context.create({
-            startingDir: args.contextDirectory || dirname(pklPath),
-            contextDirectories,
+        const context = await createToolContext(args.contextDirectory);
+        const projectCount = typeof (context as any).getAllProjects === 'function'
+            ? (context as any).getAllProjects().length
+            : 0;
+        const peopleCount = typeof (context as any).getAllPeople === 'function'
+            ? (context as any).getAllPeople().length
+            : 0;
+        const termCount = typeof (context as any).getAllTerms === 'function'
+            ? (context as any).getAllTerms().length
+            : 0;
+        const companyCount = typeof (context as any).getAllCompanies === 'function'
+            ? (context as any).getAllCompanies().length
+            : 0;
+        logger.info('transcript.enhance.context.loaded', {
+            requestId,
+            transcriptPath: args.transcriptPath,
+            projectCount,
+            peopleCount,
+            termCount,
+            companyCount,
         });
         const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
         const defaultStructure = 'month' as const;
@@ -2315,6 +2320,17 @@ export async function handleEnhanceTranscript(args: {
             }
         }
 
+        logger.info('transcript.enhance.agentic.start', {
+            requestId,
+            transcriptPath: args.transcriptPath,
+            routedProject: routeResult.projectId || null,
+            routedConfidence: routeResult.confidence,
+            preIdentifiedPeople: preIdentifiedEntities.people.size,
+            preIdentifiedProjects: preIdentifiedEntities.projects.size,
+            preIdentifiedTerms: preIdentifiedEntities.terms.size,
+            sourceLength: simpleReplaceResult.text.length,
+        });
+
         // Run agentic enhancement exactly like pipeline enhancement stage.
         const reasoning = Reasoning.create({ model, reasoningLevel });
         const toolContext: Agentic.ToolContext & {
@@ -2346,6 +2362,13 @@ export async function handleEnhanceTranscript(args: {
             },
             onToolCallStart: (tool, input) => {
                 toolCallCount++;
+                logger.info('transcript.enhance.agentic.tool_start', {
+                    requestId,
+                    transcriptPath: args.transcriptPath,
+                    callIndex: toolCallCount,
+                    tool,
+                    input,
+                });
                 transcript.enhancementLog.logStep(new Date(), 'enhance', 'tool_start', {
                     callIndex: toolCallCount,
                     tool,
@@ -2353,6 +2376,13 @@ export async function handleEnhanceTranscript(args: {
                 });
             },
             onToolCallComplete: (entry) => {
+                logger.info('transcript.enhance.agentic.tool_complete', {
+                    requestId,
+                    transcriptPath: args.transcriptPath,
+                    tool: entry.tool,
+                    durationMs: entry.durationMs,
+                    success: entry.success,
+                });
                 transcript.enhancementLog.logStep(entry.timestamp, 'enhance', 'tool_complete', {
                     tool: entry.tool,
                     input: entry.input,
@@ -2362,6 +2392,12 @@ export async function handleEnhanceTranscript(args: {
                 });
             },
             onModelCallStart: (entry) => {
+                logger.info('transcript.enhance.agentic.model_call_start', {
+                    requestId,
+                    transcriptPath: args.transcriptPath,
+                    callIndex: entry.callIndex,
+                    phase: entry.phase,
+                });
                 transcript.enhancementLog.logStep(entry.timestamp, 'enhance', 'model_call_start', {
                     callIndex: entry.callIndex,
                     phase: entry.phase,
@@ -2375,6 +2411,13 @@ export async function handleEnhanceTranscript(args: {
                 response: Record<string, unknown>;
                 timestamp: Date;
             }) => {
+                logger.info('transcript.enhance.agentic.model_call_complete', {
+                    requestId,
+                    transcriptPath: args.transcriptPath,
+                    callIndex: entry.callIndex,
+                    phase: entry.phase,
+                    durationMs: entry.durationMs,
+                });
                 transcript.enhancementLog.logStep(entry.timestamp, 'enhance', 'model_call_complete', {
                     callIndex: entry.callIndex,
                     phase: entry.phase,

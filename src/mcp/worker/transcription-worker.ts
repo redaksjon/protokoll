@@ -39,7 +39,7 @@ export interface WorkerConfig {
     contextInstance?: ContextInstance;
     uploadDirectory: string;       // Where uploaded audio files are stored
     outputStorage?: FileStorageProvider; // Optional storage provider for uploads in non-filesystem backends
-    scanInterval?: number;         // Milliseconds between queue scans (default: 5000)
+    scanInterval?: number;         // Milliseconds between queue scans (default: 60000)
     model?: string;                // AI model for enhancement
     transcriptionModel?: string;   // Whisper model
 }
@@ -495,7 +495,7 @@ export class TranscriptionWorker {
                     await this.processNextTranscript(uploaded[0]);
                 } else {
                     // No work, wait before next scan
-                    await new Promise(resolve => setTimeout(resolve, this.config.scanInterval || 5000));
+                    await new Promise(resolve => setTimeout(resolve, this.config.scanInterval || 60_000));
                 }
             } catch (error) {
                 logger.error('worker.loop.error', {

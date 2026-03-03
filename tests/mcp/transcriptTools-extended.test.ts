@@ -30,10 +30,13 @@ import * as ServerConfigModule from '../../src/mcp/serverConfig';
 // Mock serverConfig for validateNotRemoteMode and getContextDirectories
 vi.mock('../../src/mcp/serverConfig', () => ({
     getServerConfig: vi.fn().mockReturnValue({ configFile: { contextDirectories: [] } }),
+    isInitialized: vi.fn().mockReturnValue(false),
     isRemoteMode: vi.fn().mockReturnValue(false),
+    getWorkspaceRoot: vi.fn().mockReturnValue('/test/workspace'),
     getInputDirectory: vi.fn().mockReturnValue('/test/input'),
     getOutputDirectory: vi.fn().mockReturnValue('/test/output'),
     getProcessedDirectory: vi.fn().mockReturnValue('/test/processed'),
+    getStorageConfig: vi.fn().mockReturnValue({ backend: 'filesystem' }),
     getOutputStorage: vi.fn().mockReturnValue({ name: 'local' }),
     getContext: vi.fn(),
 }));

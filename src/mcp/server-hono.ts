@@ -1018,7 +1018,7 @@ app.post('/mcp', async (c) => {
         && typeof (jsonRpcMessage.params as { name?: unknown }).name === 'string'
         ? String((jsonRpcMessage.params as { name: string }).name)
         : null;
-    requestLogger.info('incoming', {
+    requestLogger.debug('incoming', {
         method: 'POST',
         route: '/mcp',
         sessionId: session.sessionId,
@@ -1056,7 +1056,7 @@ app.post('/mcp', async (c) => {
                     rpcMethod: jsonRpcMessage.method,
                 });
         }
-        requestLogger.info('complete', {
+        requestLogger.debug('complete', {
             method: 'POST',
             route: '/mcp',
             sessionId: session.sessionId,
@@ -1082,7 +1082,7 @@ app.post('/mcp', async (c) => {
                 totalSubscriptions: session.subscriptions.size,
             });
         }
-        requestLogger.info('complete', {
+        requestLogger.debug('complete', {
             method: 'POST',
             route: '/mcp',
             sessionId: session.sessionId,
@@ -1105,7 +1105,7 @@ app.post('/mcp', async (c) => {
                 totalSubscriptions: session.subscriptions.size,
             });
         }
-        requestLogger.info('complete', {
+        requestLogger.debug('complete', {
             method: 'POST',
             route: '/mcp',
             sessionId: session.sessionId,
@@ -1128,7 +1128,7 @@ app.post('/mcp', async (c) => {
         elapsedMs: Date.now() - requestStartedAt,
     });
     const response = await session.transport.handleRequest(c);
-    requestLogger.info('complete', {
+    requestLogger.debug('complete', {
         method: 'POST',
         route: '/mcp',
         sessionId: session.sessionId,
@@ -1264,7 +1264,7 @@ async function ensureTranscriptionWorkerStarted(): Promise<void> {
             contextInstance: context ?? undefined,
             uploadDirectory,
             outputStorage: ServerConfig.getOutputStorage(),
-            scanInterval: 5000,
+            scanInterval: 60_000,
             model: (startupConfig as any).model,
             transcriptionModel: (startupConfig as any).transcriptionModel,
         });

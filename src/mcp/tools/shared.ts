@@ -41,6 +41,7 @@ import type { ProtokollContextInstance } from '@/context';
 import type { Person, Project, Term, Company, IgnoredTerm, Entity } from '@/context/types';
 import { parseUri, isProtokolUri } from '../uri';
 import { parseGcsUri } from '../storage/gcsUri';
+import { listContextEntitiesFromGcs } from '../resources/entityIndexService';
 
 // ============================================================================
 // Shared Utilities
@@ -139,10 +140,204 @@ export async function getContextDirectories(): Promise<string[] | undefined> {
  * Falls back to standard .protokoll discovery from the given directory.
  */
 export async function createToolContext(contextDirectory?: string): Promise<ProtokollContextInstance> {
+    const resolveByIdentifier = <T extends { id: string; slug?: string; name: string }>(
+        entities: T[],
+        identifier: string | null | undefined,
+    ): T | undefined => {
+        const normalized = typeof identifier === 'string' ? identifier.trim().toLowerCase() : '';
+        if (!normalized) return undefined;
+        const uuidPrefix = normalized.match(/^([a-f0-9]{8})/)?.[1];
+        for (const entity of entities) {
+            const idLower = entity.id.toLowerCase();
+            const slugLower = entity.slug?.toLowerCase();
+            const nameSlug = entity.name
+                .toLowerCase()
+                .trim()
+                .replace(/[^a-z0-9]+/g, '-')
+                .replace(/-+/g, '-')
+                .replace(/^-|-$/g, '');
+            if (idLower === normalized || slugLower === normalized || nameSlug === normalized) {
+                return entity;
+            }
+            if (idLower.startsWith(normalized) || normalized.startsWith(idLower)) {
+                return entity;
+            }
+            if (uuidPrefix && idLower.startsWith(uuidPrefix)) {
+                return entity;
+            }
+        }
+        return undefined;
+    };
+
+    const buildGcsFallbackContext = async (
+        baseContext?: ProtokollContextInstance,
+    ): Promise<ProtokollContextInstance> => {
+        const people = (await listContextEntitiesFromGcs('person')) as Person[];
+        const projects = (await listContextEntitiesFromGcs('project')) as Project[];
+        const terms = (await listContextEntitiesFromGcs('term')) as Term[];
+        const companies = (await listContextEntitiesFromGcs('company')) as Company[];
+        const ignored = (await listContextEntitiesFromGcs('ignored')) as IgnoredTerm[];
+
+        logger.info('tool.context.gcs_entity_index_fallback.loaded', {
+            projectCount: projects.length,
+            peopleCount: people.length,
+            termCount: terms.length,
+            companyCount: companies.length,
+            ignoredCount: ignored.length,
+        });
+
+        const searchAcross = [...people, ...projects, ...terms, ...companies, ...ignored] as Entity[];
+        const contextDirs = baseContext?.getContextDirs?.() || ['gcs://context'];
+
+        const fallbackContext = {
+            load: async () => {
+                if (baseContext?.load) {
+                    await baseContext.load();
+                }
+            },
+            reload: async () => {
+                if (baseContext?.reload) {
+                    await baseContext.reload();
+                }
+            },
+            getDiscoveredDirs: () => [],
+            getConfig: () => (baseContext?.getConfig?.() || {}),
+            getContextDirs: () => contextDirs,
+            getPerson: (id: string) => resolveByIdentifier(people, id),
+            getProject: (id: string) => resolveByIdentifier(projects, id),
+            getCompany: (id: string) => resolveByIdentifier(companies, id),
+            getTerm: (id: string) => resolveByIdentifier(terms, id),
+            getIgnored: (id: string) => resolveByIdentifier(ignored, id),
+            getAllPeople: () => people,
+            getAllProjects: () => projects,
+            getAllCompanies: () => companies,
+            getAllTerms: () => terms,
+            getAllIgnored: () => ignored,
+            isIgnored: (term: string) => {
+                const normalized = term.toLowerCase().trim();
+                return ignored.some((entry) =>
+                    entry.name.toLowerCase() === normalized || entry.id.toLowerCase() === normalized
+                );
+            },
+            search: (query: string) => {
+                const q = query.toLowerCase().trim();
+                if (!q) return [];
+                return searchAcross.filter((entity: any) => {
+                    const byName = typeof entity.name === 'string' && entity.name.toLowerCase().includes(q);
+                    const bySoundsLike = Array.isArray(entity.sounds_like)
+                        && entity.sounds_like.some((s: string) => typeof s === 'string' && s.toLowerCase().includes(q));
+                    return byName || bySoundsLike;
+                });
+            },
+            findBySoundsLike: (phonetic: string) => {
+                const key = phonetic.toLowerCase().trim();
+                if (!key) return undefined;
+                return searchAcross.find((entity: any) => Array.isArray(entity.sounds_like)
+                    && entity.sounds_like.some((s: string) => typeof s === 'string' && s.toLowerCase() === key));
+            },
+            searchWithContext: (query: string) => {
+                const q = query.toLowerCase().trim();
+                if (!q) return [];
+                return searchAcross.filter((entity) => entity.name.toLowerCase().includes(q));
+            },
+            getRelatedProjects: () => [],
+            saveEntity: async (entity: Entity, allowUpdate?: boolean) => {
+                if (!baseContext?.saveEntity) {
+                    throw new Error('GCS fallback context cannot persist entities');
+                }
+                return baseContext.saveEntity(entity, allowUpdate);
+            },
+            deleteEntity: async (entity: Entity) => {
+                if (!baseContext?.deleteEntity) {
+                    return false;
+                }
+                return baseContext.deleteEntity(entity);
+            },
+            getEntityFilePath: (entity: Entity) => baseContext?.getEntityFilePath?.(entity),
+            hasContext: () => searchAcross.length > 0,
+            getSmartAssistanceConfig: () => ({
+                enabled: false,
+                phoneticModel: '',
+                analysisModel: '',
+                soundsLikeOnAdd: false,
+                triggerPhrasesOnAdd: false,
+                promptForSource: false,
+                termsEnabled: false,
+                termSoundsLikeOnAdd: false,
+                termDescriptionOnAdd: false,
+                termTopicsOnAdd: false,
+                termProjectSuggestions: false,
+                timeout: 0,
+            }),
+        };
+
+        return fallbackContext as unknown as ProtokollContextInstance;
+    };
+
     const ServerConfig = await import('../serverConfig');
     const serverContext = ServerConfig.getContext();
+    const storageConfig = ServerConfig.getStorageConfig();
     if (serverContext?.hasContext()) {
-        return serverContext;
+        const projectCount = serverContext.getAllProjects().length;
+        const peopleCount = serverContext.getAllPeople().length;
+        const termCount = serverContext.getAllTerms().length;
+        const companyCount = serverContext.getAllCompanies().length;
+        const totalEntities = projectCount + peopleCount + termCount + companyCount;
+
+        if (storageConfig.backend === 'gcs') {
+            // In some remote/GCS runs the preloaded server context can be partially
+            // hydrated (for example only a handful of people). Cross-check against
+            // the indexed GCS view and prefer it when the cached context is clearly
+            // incomplete so sounds_like replacement remains comprehensive.
+            try {
+                const [indexedPeople, indexedProjects, indexedTerms, indexedCompanies] = await Promise.all([
+                    listContextEntitiesFromGcs('person') as Promise<Person[]>,
+                    listContextEntitiesFromGcs('project') as Promise<Project[]>,
+                    listContextEntitiesFromGcs('term') as Promise<Term[]>,
+                    listContextEntitiesFromGcs('company') as Promise<Company[]>,
+                ]);
+                const indexedTotal = indexedPeople.length
+                    + indexedProjects.length
+                    + indexedTerms.length
+                    + indexedCompanies.length;
+                if (indexedTotal > totalEntities) {
+                    logger.warn('tool.context.server_context_partial_using_entity_index_fallback', {
+                        serverProjectCount: projectCount,
+                        serverPeopleCount: peopleCount,
+                        serverTermCount: termCount,
+                        serverCompanyCount: companyCount,
+                        indexedProjectCount: indexedProjects.length,
+                        indexedPeopleCount: indexedPeople.length,
+                        indexedTermCount: indexedTerms.length,
+                        indexedCompanyCount: indexedCompanies.length,
+                        serverContextDirs: serverContext.getContextDirs(),
+                    });
+                    return buildGcsFallbackContext(serverContext);
+                }
+            } catch (error) {
+                logger.warn('tool.context.server_context_index_crosscheck_failed', {
+                    error: error instanceof Error ? error.message : String(error),
+                    serverProjectCount: projectCount,
+                    serverPeopleCount: peopleCount,
+                    serverTermCount: termCount,
+                    serverCompanyCount: companyCount,
+                });
+            }
+        }
+
+        // For filesystem (or fully hydrated GCS) keep the preloaded server context.
+        if (totalEntities > 0 || storageConfig.backend !== 'gcs') {
+            return serverContext;
+        }
+
+        logger.warn('tool.context.empty_server_context_reloading', {
+            backend: storageConfig.backend,
+            projectCount,
+            peopleCount,
+            termCount,
+            companyCount,
+            contextDirs: serverContext.getContextDirs(),
+        });
     }
 
     const configFile = ServerConfig.isInitialized()
@@ -156,7 +351,6 @@ export async function createToolContext(contextDirectory?: string): Promise<Prot
         ? rawDirs.map((d: string) => (isAbsolute(d) ? d : resolve(effectiveDir, d)))
         : undefined;
 
-    const storageConfig = ServerConfig.getStorageConfig();
     if (storageConfig.backend === 'gcs' && storageConfig.gcs) {
         const contextUri = storageConfig.gcs.contextUri
             || (storageConfig.gcs.contextBucket
@@ -166,14 +360,29 @@ export async function createToolContext(contextDirectory?: string): Promise<Prot
             throw new Error('GCS storage is enabled but context URI/bucket configuration is missing.');
         }
         const parsedContextUri = parseGcsUri(contextUri);
-        return Context.create({
+        const gcsContext = await Context.create({
             startingDir: effectiveDir,
             gcs: {
                 bucketName: parsedContextUri.bucket,
                 basePath: parsedContextUri.prefix,
+                projectId: storageConfig.gcs.projectId,
                 credentialsFile: storageConfig.gcs.credentialsFile,
             },
         });
+
+        const gcsEntityCount = gcsContext.getAllProjects().length
+            + gcsContext.getAllPeople().length
+            + gcsContext.getAllTerms().length
+            + gcsContext.getAllCompanies().length;
+        if (gcsEntityCount > 0) {
+            return gcsContext;
+        }
+
+        logger.warn('tool.context.gcs_context_empty_using_entity_index_fallback', {
+            bucket: parsedContextUri.bucket,
+            prefix: parsedContextUri.prefix,
+        });
+        return buildGcsFallbackContext(gcsContext);
     }
 
     return Context.create({

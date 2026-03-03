@@ -58,6 +58,15 @@ export async function readEntityResource(
         effectiveDir,
     });
     const context = await createToolContext(contextDirectory);
+    try {
+        await context.reload();
+    } catch (error) {
+        logger.debug('entity.read.context_reload_failed', {
+            entityType,
+            entityId,
+            error: error instanceof Error ? error.message : String(error),
+        });
+    }
 
     if (!context.hasContext()) {
         const searchDir = contextDirectory || process.cwd();
@@ -69,25 +78,47 @@ export async function readEntityResource(
         throw new Error(`No Protokoll context found. Expected .protokoll/ or context dirs in ${searchDir}`);
     }
 
-    let entity;
-    switch (entityType) {
-        case 'person':
-            entity = context.getPerson(entityId);
-            break;
-        case 'project':
-            entity = context.getProject(entityId);
-            break;
-        case 'term':
-            entity = context.getTerm(entityId);
-            break;
-        case 'company':
-            entity = context.getCompany(entityId);
-            break;
-        case 'ignored':
-            entity = context.getIgnored(entityId);
-            break;
-        default:
-            throw new Error(`Unknown entity type: ${entityType}`);
+    const lookupEntity = (
+        candidate: ContextInstance,
+    ): ReturnType<ContextInstance['getPerson']> | ReturnType<ContextInstance['getProject']> | ReturnType<ContextInstance['getTerm']> | ReturnType<ContextInstance['getCompany']> | ReturnType<ContextInstance['getIgnored']> => {
+        switch (entityType) {
+            case 'person':
+                return candidate.getPerson(entityId);
+            case 'project':
+                return candidate.getProject(entityId);
+            case 'term':
+                return candidate.getTerm(entityId);
+            case 'company':
+                return candidate.getCompany(entityId);
+            case 'ignored':
+                return candidate.getIgnored(entityId);
+            default:
+                throw new Error(`Unknown entity type: ${entityType}`);
+        }
+    };
+
+    let entity = lookupEntity(context);
+
+    if (!entity && ServerConfig.isInitialized()) {
+        const serverContext = ServerConfig.getContext();
+        if (serverContext?.hasContext() && serverContext !== context) {
+            try {
+                await serverContext.reload();
+            } catch (error) {
+                logger.debug('entity.read.server_context_reload_failed', {
+                    entityType,
+                    entityId,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            }
+            entity = lookupEntity(serverContext);
+            if (entity) {
+                logger.info('entity.read.server_context_fallback_hit', {
+                    entityType,
+                    entityId,
+                });
+            }
+        }
     }
 
     if (!entity) {
