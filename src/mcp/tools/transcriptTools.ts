@@ -62,6 +62,36 @@ interface StoredSummary {
     generatedAt: string;
 }
 
+interface TranscriptCommentInput {
+    id: string;
+    text: string;
+    createdAt: string;
+    updatedAt?: string;
+}
+
+type TranscriptMetadataWithComments = TranscriptMetadata & {
+    comments?: TranscriptCommentInput[];
+};
+
+function normalizeTranscriptComments(comments: unknown): TranscriptCommentInput[] {
+    if (!Array.isArray(comments)) {
+        return [];
+    }
+
+    return comments
+        .filter((entry) => !!entry && typeof entry === 'object')
+        .map((entry) => {
+            const candidate = entry as Record<string, unknown>;
+            const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
+            const text = typeof candidate.text === 'string' ? candidate.text.trim() : '';
+            const createdAt = typeof candidate.createdAt === 'string' ? candidate.createdAt.trim() : '';
+            const updatedAt = typeof candidate.updatedAt === 'string' ? candidate.updatedAt.trim() : undefined;
+            return { id, text, createdAt, updatedAt };
+        })
+        .filter((entry) => entry.id.length > 0 && entry.text.length > 0 && entry.createdAt.length > 0)
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
 function toStoragePathCandidates(transcriptPath: string): string[] {
     const normalizedInput = transcriptPath.trim();
     if (!normalizedInput) {
@@ -521,6 +551,20 @@ export const editTranscriptTool: Tool = {
                 type: 'array',
                 items: { type: 'string' },
                 description: 'Tags to remove from the transcript',
+            },
+            comments: {
+                type: 'array',
+                description: 'Replace transcript comments metadata with this full list.',
+                items: {
+                    type: 'object',
+                    properties: {
+                        id: { type: 'string' },
+                        text: { type: 'string' },
+                        createdAt: { type: 'string', description: 'ISO-8601 timestamp' },
+                        updatedAt: { type: 'string', description: 'ISO-8601 timestamp (optional)' },
+                    },
+                    required: ['id', 'text', 'createdAt'],
+                },
             },
             status: {
                 type: 'string',
@@ -1085,6 +1129,7 @@ export async function handleReadTranscript(args: {
             routing: transcriptData.metadata.routing || null,
             history: transcriptData.metadata.history || [],
             tasks: transcriptData.metadata.tasks || [],
+            comments: (transcriptData.metadata as TranscriptMetadataWithComments).comments || [],
             entities: transcriptData.metadata.entities || {},
         },
         content: transcriptData.content,
@@ -1473,6 +1518,7 @@ export async function handleEditTranscript(args: {
     projectId?: string;
     tagsToAdd?: string[];
     tagsToRemove?: string[];
+    comments?: TranscriptCommentInput[];
     status?: string;
     contextDirectory?: string;
 }) {
@@ -1497,7 +1543,7 @@ export async function handleEditTranscript(args: {
         try {
             const transcript = PklTranscript.open(access.pklPath, { readOnly: false });
             try {
-                const metadataUpdates: Partial<TranscriptMetadata> = {};
+                const metadataUpdates: Partial<TranscriptMetadataWithComments> = {};
 
                 if (args.title) {
                     metadataUpdates.title = args.title.trim();
@@ -1571,9 +1617,13 @@ export async function handleEditTranscript(args: {
                         changes.push(`status unchanged (already ${args.status})`);
                     }
                 }
+                if (args.comments) {
+                    metadataUpdates.comments = normalizeTranscriptComments(args.comments);
+                    changes.push(`comments updated (${metadataUpdates.comments.length})`);
+                }
 
                 if (Object.keys(metadataUpdates).length > 0) {
-                    transcript.updateMetadata(metadataUpdates);
+                    transcript.updateMetadata(metadataUpdates as Partial<TranscriptMetadata>);
                 }
             } finally {
                 transcript.close();
@@ -1604,8 +1654,8 @@ export async function handleEditTranscript(args: {
         );
     }
 
-    if (!args.title && !args.projectId && !args.tagsToAdd && !args.tagsToRemove && !args.status) {
-        throw new Error('Must specify at least one of: title, projectId, tagsToAdd, tagsToRemove, or status');
+    if (!args.title && !args.projectId && !args.tagsToAdd && !args.tagsToRemove && !args.comments && !args.status) {
+        throw new Error('Must specify at least one of: title, projectId, tagsToAdd, tagsToRemove, comments, or status');
     }
 
     let finalOutputPath = absolutePath;
@@ -1667,6 +1717,16 @@ export async function handleEditTranscript(args: {
         }
     }
 
+    if (args.comments) {
+        const pklPath = ensurePklExtension(finalOutputPath);
+        const transcript = PklTranscript.open(pklPath, { readOnly: false });
+        try {
+            transcript.updateMetadata({ comments: normalizeTranscriptComments(args.comments) } as Partial<TranscriptMetadata>);
+        } finally {
+            transcript.close();
+        }
+    }
+
     // Convert to relative paths for response
     const relativeOriginalPath = await sanitizePath(absolutePath || '', outputDirectory);
     const relativeOutputPath = await sanitizePath(finalOutputPath || '', outputDirectory);
@@ -1678,6 +1738,7 @@ export async function handleEditTranscript(args: {
     if (args.projectId) changes.push(`project changed`);
     if (args.tagsToAdd?.length) changes.push(`${args.tagsToAdd.length} tag(s) added`);
     if (args.tagsToRemove?.length) changes.push(`${args.tagsToRemove.length} tag(s) removed`);
+    if (args.comments) changes.push(`comments updated (${normalizeTranscriptComments(args.comments).length})`);
     if (statusChanged) changes.push(`status: ${previousStatus} → ${args.status}`);
     if (!statusChanged && args.status) changes.push(`status unchanged (already ${args.status})`);
 

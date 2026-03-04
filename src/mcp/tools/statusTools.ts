@@ -6,8 +6,8 @@
 // eslint-disable-next-line import/extensions
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { 
-    isValidStatus, 
-    VALID_STATUSES,
+    isValidStatus as isEngineValidStatus,
+    VALID_STATUSES as ENGINE_VALID_STATUSES,
 } from '@redaksjon/protokoll-engine';
 import { getConfiguredDirectory, sanitizePath, resolveTranscriptPath } from './shared';
 import { PklTranscript } from '@redaksjon/protokoll-format';
@@ -17,6 +17,18 @@ import type { Task as PklTask, TranscriptStatus } from '@redaksjon/protokoll-for
 // Helper Functions
 // ============================================================================
 
+// Keep MCP surface forward-compatible when protokoll depends on an engine
+// version that does not yet include a newly introduced status.
+type SupportedStatus = TranscriptStatus | 'deleted';
+
+const engineStatuses = ENGINE_VALID_STATUSES as readonly string[];
+const VALID_STATUSES: SupportedStatus[] = engineStatuses.includes('deleted')
+    ? [...ENGINE_VALID_STATUSES] as SupportedStatus[]
+    : [...ENGINE_VALID_STATUSES, 'deleted'];
+
+const isValidStatus = (status: string): status is SupportedStatus =>
+    isEngineValidStatus(status) || status === 'deleted';
+
 // ============================================================================
 // Tool Definitions
 // ============================================================================
@@ -25,7 +37,7 @@ export const setStatusTool: Tool = {
     name: 'protokoll_set_status',
     description:
         'Change the lifecycle status of a transcript. ' +
-        'Valid statuses: initial, enhanced, reviewed, in_progress, closed, archived. ' +
+        'Valid statuses: initial, enhanced, reviewed, in_progress, closed, archived, deleted. ' +
         'Status transitions are recorded in history with timestamps. ' +
         'Use this to track transcript progress through your workflow.',
     inputSchema: {
@@ -47,7 +59,8 @@ export const setStatusTool: Tool = {
                     'reviewed: User has reviewed. ' +
                     'in_progress: Has tasks to complete. ' +
                     'closed: All work done. ' +
-                    'archived: Long-term storage.',
+                    'archived: Long-term storage. ' +
+                    'deleted: Soft-delete marker (not physically removed).',
             },
             contextDirectory: {
                 type: 'string',
@@ -155,7 +168,7 @@ export async function handleSetStatus(args: {
         );
     }
     
-    const newStatus = args.status as TranscriptStatus;
+    const newStatus = args.status as SupportedStatus;
     
     // Find the transcript
     const absolutePath = await resolveTranscriptPath(args.transcriptPath, args.contextDirectory);
@@ -180,7 +193,7 @@ export async function handleSetStatus(args: {
         }
         
         // Update status
-        transcript.updateMetadata({ status: newStatus });
+        transcript.updateMetadata({ status: newStatus } as any);
         
         const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
         const relativePath = await sanitizePath(absolutePath, outputDirectory);

@@ -1266,7 +1266,7 @@ routing:
             await expect(handleEditTranscript({
                 transcriptPath: toRelativePath(transcriptPath),
                 contextDirectory: protokollDir
-            })).rejects.toThrow('Must specify at least one of: title, projectId, tagsToAdd, tagsToRemove, or status');
+            })).rejects.toThrow('Must specify at least one of: title, projectId, tagsToAdd, tagsToRemove, comments, or status');
         });
     });
 

@@ -30,6 +30,7 @@ import { streamSSE } from 'hono/streaming';
 import { bodyLimit } from 'hono/body-limit';
 import { join, extname, basename, dirname } from 'node:path';
 import { mkdir, readFile, access } from 'node:fs/promises';
+import { glob } from 'glob';
 // eslint-disable-next-line import/extensions
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
@@ -66,6 +67,33 @@ import { Transcript as TranscriptOps } from '@redaksjon/protokoll-engine';
 import { PklTranscript } from '@redaksjon/protokoll-format';
 
 const { createUploadTranscript, findTranscriptByUuid } = TranscriptOps;
+
+async function findTranscriptByAudioHashInDirectory(
+    audioHash: string,
+    searchDirectory: string
+): Promise<{ uuid: string; status?: string } | null> {
+    const files = await glob('**/*.pkl', { cwd: searchDirectory, absolute: true, nodir: true });
+    for (const filePath of files) {
+        try {
+            const transcript = PklTranscript.open(filePath, { readOnly: true });
+            const metadata = transcript.metadata as {
+                id?: string;
+                status?: string;
+                audioHash?: string;
+            };
+            transcript.close();
+            if (metadata.audioHash === audioHash && metadata.id) {
+                return {
+                    uuid: metadata.id,
+                    status: metadata.status,
+                };
+            }
+        } catch {
+            // Ignore unreadable transcript files while scanning for duplicates.
+        }
+    }
+    return null;
+}
 
 /**
  * Configure LOGGING_CONFIG as early as possible so top-level logger creation
@@ -934,9 +962,35 @@ app.post('/audio/upload',
             // Calculate file hash
             const buffer = await file.arrayBuffer();
             const hash = createHash('sha256').update(Buffer.from(buffer)).digest('hex');
+            const uploadObjectPath = `uploads/${hash}.${ext}`;
+
+            // Detect duplicate audio by content hash and return the existing transcript.
+            // This prevents duplicate processing when the same bytes are uploaded again.
+            const hashObjectExists = await outputStorage.exists(uploadObjectPath);
+            if (hashObjectExists) {
+                const existingTranscript = await findTranscriptByAudioHashInDirectory(hash, outputDir);
+                if (existingTranscript) {
+                    uploadLogger.info('audio.upload.duplicate_detected', {
+                        originalFilename: file.name,
+                        transcriptUuid: existingTranscript.uuid,
+                        bytes: buffer.byteLength,
+                        objectPath: uploadObjectPath,
+                        storageBackend: outputStorage.name,
+                    });
+
+                    return c.json({
+                        success: true,
+                        duplicate: true,
+                        uuid: existingTranscript.uuid,
+                        message: 'Duplicate audio detected. Returning existing transcript.',
+                        filename: file.name,
+                        size: buffer.byteLength,
+                        existingStatus: existingTranscript.status ?? null,
+                    });
+                }
+            }
             
             // Save uploaded file with hash-based name
-            const uploadObjectPath = `uploads/${hash}.${ext}`;
             await outputStorage.writeFile(uploadObjectPath, Buffer.from(buffer));
             
             // Extract optional title and project hints from form data
@@ -1040,7 +1094,10 @@ app.get('/audio/:uuid', async (c) => {
         // Set appropriate headers
         c.header('Content-Type', getAudioMimeType(ext));
         c.header('Content-Length', audioBuffer.length.toString());
-        c.header('Content-Disposition', `attachment; filename="${metadata.audioFile || `${uuid}${ext}`}"`);
+        const downloadFilename = (metadata as { originalFilename?: string }).originalFilename
+            || metadata.audioFile
+            || `${uuid}${ext}`;
+        c.header('Content-Disposition', `attachment; filename="${downloadFilename}"`);
         
         // Return full audio content.
         return c.body(audioBuffer as any);
