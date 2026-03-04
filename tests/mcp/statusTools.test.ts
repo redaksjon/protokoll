@@ -5,8 +5,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { 
     handleSetStatus, 
     handleCreateTask, 
-    handleCompleteTask, 
-    handleDeleteTask 
+    handleCompleteTask,
+    handleDeleteTask,
+    setStatusTool,
 } from '../../src/mcp/tools/statusTools';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
@@ -148,6 +149,12 @@ describe('statusTools', () => {
     });
     
     describe('handleSetStatus', () => {
+        it('should expose deleted in setStatus tool schema enum', () => {
+            const statuses = setStatusTool.inputSchema.properties?.status?.enum as string[] | undefined;
+            expect(statuses).toBeDefined();
+            expect(statuses).toContain('deleted');
+        });
+
         it('should change status from reviewed to in_progress', async () => {
             await createTestTranscript(transcriptsDir, 'test.pkl', {
                 title: 'Test Transcript',
@@ -267,6 +274,67 @@ describe('statusTools', () => {
             
             // History preservation is implementation-dependent
             // Just verify the status change was successful
+        });
+
+        it('should change status to deleted (soft-delete)', async () => {
+            await createTestTranscript(transcriptsDir, 'test.pkl', {
+                title: 'Test Transcript',
+                status: 'reviewed',
+                content: 'Content here.',
+            });
+
+            const result = await handleSetStatus({
+                transcriptPath: 'test.pkl',
+                status: 'deleted',
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.previousStatus).toBe('reviewed');
+            expect(result.newStatus).toBe('deleted');
+            expect(result.changed).toBe(true);
+
+            const { metadata, content } = readTestTranscript(path.join(transcriptsDir, 'test.pkl'));
+            expect(metadata.status).toBe('deleted');
+            expect(content).toContain('Content here.');
+        });
+
+        it('should be a no-op when status is already deleted', async () => {
+            await createTestTranscript(transcriptsDir, 'test.pkl', {
+                title: 'Already Deleted',
+                status: 'deleted',
+                content: 'Still here.',
+            });
+
+            const result = await handleSetStatus({
+                transcriptPath: 'test.pkl',
+                status: 'deleted',
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.previousStatus).toBe('deleted');
+            expect(result.newStatus).toBe('deleted');
+            expect(result.changed).toBe(false);
+        });
+
+        it('should default previous status to reviewed when setting deleted from missing status', async () => {
+            const pklPath = path.join(transcriptsDir, 'test-missing-status.pkl');
+            const transcript = PklTranscript.create(pklPath, {
+                title: 'No Status Yet',
+                tags: [],
+            });
+            transcript.updateContent('Content remains intact.');
+            transcript.close();
+
+            const result = await handleSetStatus({
+                transcriptPath: 'test-missing-status.pkl',
+                status: 'deleted',
+            });
+
+            expect(result.previousStatus).toBe('reviewed');
+            expect(result.newStatus).toBe('deleted');
+            const { metadata, content } = readTestTranscript(pklPath);
+            expect(metadata.status).toBe('deleted');
+            expect(content).toContain('Content remains intact.');
         });
     });
     

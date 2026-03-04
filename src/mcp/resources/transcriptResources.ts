@@ -171,6 +171,7 @@ export async function readTranscriptResource(transcriptPath: string): Promise<Mc
                 duration: metadata.duration,
                 entities: metadata.entities || {},
                 tasks: metadata.tasks || [],
+                comments: metadata.comments || [],
                 history: metadata.history || [],
                 routing: metadata.destination ? {
                     destination: metadata.destination,
@@ -287,6 +288,7 @@ async function readTranscriptResourceFromStorage(
                 duration: metadata.duration,
                 entities: metadata.entities || {},
                 tasks: metadata.tasks || [],
+                comments: metadata.comments || [],
                 history: metadata.history || [],
                 routing: metadata.destination ? {
                     destination: metadata.destination,
