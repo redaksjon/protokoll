@@ -55,6 +55,28 @@ describe('rbac authorizer', () => {
         expect(result.reason).toBe('auth_any_role');
     });
 
+    it('propagates key-level allowed_projects into auth context', () => {
+        const scopedAuthorizer = createRbacAuthorizer({
+            users: [
+                { user_id: 'scoped-user', roles: ['editor'], enabled: true },
+            ],
+            keys: [
+                {
+                    key_id: 'scoped-key',
+                    user_id: 'scoped-user',
+                    secret_hash: createScryptHash('scoped-secret'),
+                    enabled: true,
+                    allowed_projects: ['scoped-project-id'],
+                },
+            ],
+        });
+
+        const auth = scopedAuthorizer.authenticate(createHeaders({ 'X-API-Key': 'scoped-secret' }));
+        expect(auth.ok).toBe(true);
+        if (!auth.ok) return;
+        expect(auth.context.allowed_projects).toEqual(['scoped-project-id']);
+    });
+
     it('authenticates X-API-Key and enforces admin role', () => {
         const auth = authorizer.authenticate(createHeaders({ 'X-API-Key': adminSecret }));
         expect(auth.ok).toBe(true);
