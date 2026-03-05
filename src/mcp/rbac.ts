@@ -15,6 +15,7 @@ export interface RbacKey {
     secret_hash: string;
     enabled: boolean;
     expires_at?: string;
+    allowed_projects?: string[];
 }
 
 export interface RbacPolicyRule {
@@ -28,6 +29,7 @@ export interface AuthContext {
     user_id: string;
     roles: string[];
     key_id: string;
+    allowed_projects?: string[];
 }
 
 export interface RouteDecision {
@@ -178,6 +180,7 @@ function parseKeys(value: unknown): RbacKey[] {
             secret_hash: secretHash,
             enabled: asBooleanWithDefault(obj.enabled, true),
             expires_at: asString(obj.expires_at) ?? undefined,
+            allowed_projects: asStringArray(obj.allowed_projects),
         };
     });
 }
@@ -353,6 +356,9 @@ export function createRbacAuthorizer(config: {
                     user_id: user.user_id,
                     roles: [...user.roles],
                     key_id: key.key_id,
+                    allowed_projects: key.allowed_projects && key.allowed_projects.length > 0
+                        ? [...key.allowed_projects]
+                        : undefined,
                 },
             };
         },

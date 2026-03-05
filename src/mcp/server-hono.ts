@@ -21,6 +21,7 @@
 
 import 'dotenv/config';
 import { randomUUID, createHash } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { Command } from 'commander';
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
@@ -30,7 +31,9 @@ import { streamSSE } from 'hono/streaming';
 import { bodyLimit } from 'hono/body-limit';
 import { join, extname, basename, dirname } from 'node:path';
 import { mkdir, readFile, access } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { glob } from 'glob';
+import { load as parseYaml } from 'js-yaml';
 // eslint-disable-next-line import/extensions
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
@@ -50,7 +53,9 @@ import { z } from 'zod';
 import * as Resources from './resources';
 import * as Prompts from './prompts';
 import { tools, handleToolCall } from './tools';
+import * as TranscriptTools from './tools/transcriptTools';
 import * as ServerConfig from './serverConfig';
+import { parseUri } from './uri';
 import * as Roots from './roots';
 import type { McpRoot } from './types';
 import { DEFAULT_CONFIG_FILE, createQuietLogger } from './configDiscovery';
@@ -211,6 +216,201 @@ function buildEnvStorageConfig(): Record<string, unknown> | undefined {
     if (backend) storage.backend = backend;
     if (hasGcsValue) storage.gcs = gcs;
     return storage;
+}
+
+function readAbsolutePath(value: unknown): string | undefined {
+    if (typeof value !== 'string') return undefined;
+    const trimmed = value.trim();
+    if (!trimmed.startsWith('/')) return undefined;
+    return trimmed;
+}
+
+function readAbsolutePathList(value: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+    return value
+        .filter((entry): entry is string => typeof entry === 'string')
+        .map(entry => entry.trim())
+        .filter(entry => entry.startsWith('/'));
+}
+
+function commonAncestor(paths: string[]): string | null {
+    if (paths.length === 0) {
+        return null;
+    }
+    const normalized = paths.map(pathValue => resolve(pathValue));
+    const [first, ...rest] = normalized;
+    let current = first;
+    while (current !== dirname(current)) {
+        const matches = rest.every((entry) => entry === current || entry.startsWith(`${current}/`));
+        if (matches) {
+            return current;
+        }
+        current = dirname(current);
+    }
+    return rest.every((entry) => entry === current || entry.startsWith(`${current}/`)) ? current : null;
+}
+
+function hasStorageConfig(config: Record<string, unknown>): boolean {
+    return typeof config.storage === 'object' && config.storage !== null;
+}
+
+async function mergeStorageFromCanonicalConfig(
+    config: Record<string, unknown>,
+    explicitConfigPath: string | undefined,
+): Promise<Record<string, unknown>> {
+    if (hasStorageConfig(config)) {
+        return config;
+    }
+
+    const roots = [
+        readAbsolutePath(config.inputDirectory),
+        readAbsolutePath(config.outputDirectory),
+        readAbsolutePath(config.processedDirectory),
+        ...readAbsolutePathList(config.contextDirectories),
+    ].filter((value): value is string => Boolean(value));
+    if (roots.length === 0) {
+        return config;
+    }
+
+    const ancestor = commonAncestor(roots.map((value) => dirname(value)));
+    if (!ancestor) {
+        return config;
+    }
+
+    const canonicalConfigPath = resolve(ancestor, DEFAULT_CONFIG_FILE);
+    if (explicitConfigPath && resolve(explicitConfigPath) === canonicalConfigPath) {
+        return config;
+    }
+
+    try {
+        const rawCanonicalConfig = await readFile(canonicalConfigPath, 'utf8');
+        const parsed = parseYaml(rawCanonicalConfig);
+        if (!parsed || typeof parsed !== 'object') {
+            return config;
+        }
+        const candidate = parsed as Record<string, unknown>;
+        if (!hasStorageConfig(candidate)) {
+            return config;
+        }
+        lifecycleLogger.info('startup.storage.recovered_from_canonical_config', {
+            canonicalConfigPath,
+            inferredFromRoots: roots,
+        });
+        return {
+            ...config,
+            storage: candidate.storage,
+        };
+    } catch {
+        return config;
+    }
+}
+
+function exportStorageConfigToEnv(config: Record<string, unknown>): void {
+    const storage = (config.storage && typeof config.storage === 'object')
+        ? config.storage as Record<string, unknown>
+        : null;
+    if (!storage) {
+        return;
+    }
+    const backend = typeof storage.backend === 'string' ? storage.backend.trim() : '';
+    if (backend !== 'gcs') {
+        return;
+    }
+    const gcs = (storage.gcs && typeof storage.gcs === 'object')
+        ? storage.gcs as Record<string, unknown>
+        : {};
+
+    const setIfMissing = (name: string, value: unknown) => {
+        if (typeof process.env[name] === 'string' && process.env[name]!.trim().length > 0) {
+            return;
+        }
+        if (typeof value === 'string' && value.trim().length > 0) {
+            process.env[name] = value.trim();
+        }
+    };
+
+    setIfMissing('PROTOKOLL_STORAGE_BACKEND', 'gcs');
+    setIfMissing('PROTOKOLL_STORAGE_GCS_PROJECT_ID', gcs.projectId);
+    setIfMissing('PROTOKOLL_STORAGE_GCS_INPUT_URI', gcs.inputUri);
+    setIfMissing('PROTOKOLL_STORAGE_GCS_OUTPUT_URI', gcs.outputUri);
+    setIfMissing('PROTOKOLL_STORAGE_GCS_CONTEXT_URI', gcs.contextUri);
+    setIfMissing('PROTOKOLL_STORAGE_GCS_INPUT_BUCKET', gcs.inputBucket);
+    setIfMissing('PROTOKOLL_STORAGE_GCS_INPUT_PREFIX', gcs.inputPrefix);
+    setIfMissing('PROTOKOLL_STORAGE_GCS_OUTPUT_BUCKET', gcs.outputBucket);
+    setIfMissing('PROTOKOLL_STORAGE_GCS_OUTPUT_PREFIX', gcs.outputPrefix);
+    setIfMissing('PROTOKOLL_STORAGE_GCS_CONTEXT_BUCKET', gcs.contextBucket);
+    setIfMissing('PROTOKOLL_STORAGE_GCS_CONTEXT_PREFIX', gcs.contextPrefix);
+    setIfMissing('PROTOKOLL_STORAGE_GCS_CREDENTIALS_FILE', gcs.credentialsFile);
+}
+
+function readCredentialsEnvPath(): string | undefined {
+    const candidates = [
+        process.env.PROTOKOLL_STORAGE_GCS_CREDENTIALS_FILE,
+        process.env.PROTOKOLL_LOCAL_GCS_CREDENTIALS_FILE,
+        process.env.GOOGLE_APPLICATION_CREDENTIALS,
+    ];
+    for (const candidate of candidates) {
+        if (typeof candidate === 'string' && candidate.trim().length > 0) {
+            const trimmed = candidate.trim();
+            return trimmed.startsWith('~/')
+                ? resolve(homedir(), trimmed.slice(2))
+                : trimmed;
+        }
+    }
+    return undefined;
+}
+
+async function injectLocalGcsCredentialsIfMissing(
+    config: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+    const storage = (config.storage && typeof config.storage === 'object')
+        ? config.storage as Record<string, unknown>
+        : null;
+    if (!storage) {
+        return config;
+    }
+    if (storage.backend !== 'gcs') {
+        return config;
+    }
+
+    const gcs = (storage.gcs && typeof storage.gcs === 'object')
+        ? storage.gcs as Record<string, unknown>
+        : {};
+    const existingCredentials = readNonEmptyString(gcs.credentialsFile);
+    if (existingCredentials) {
+        return config;
+    }
+
+    const explicitFromEnv = readCredentialsEnvPath();
+    const defaultLocalPath = resolve(homedir(), '.ssh/gcp-discursive-riotplan-service.json');
+    const credentialCandidates = [
+        explicitFromEnv,
+        defaultLocalPath,
+    ].filter((value): value is string => Boolean(value));
+
+    for (const candidate of credentialCandidates) {
+        try {
+            await access(candidate);
+            lifecycleLogger.info('startup.storage.gcs.credentials.injected', {
+                path: candidate,
+                source: candidate === explicitFromEnv ? 'env' : 'local_default',
+            });
+            return {
+                ...config,
+                storage: {
+                    ...storage,
+                    gcs: {
+                        ...gcs,
+                        credentialsFile: candidate,
+                    },
+                },
+            };
+        } catch {
+            // Continue to the next candidate path.
+        }
+    }
+
+    return config;
 }
 
 function describeRawStorageConfig(config: Record<string, unknown>): string[] {
@@ -386,6 +586,343 @@ function getAuthorizationHeaderSummary(c: any): string {
     if (hasAuthorization) return 'bearer';
     if (hasApiKey) return 'x-api-key';
     return 'none';
+}
+
+const authContextStore = new AsyncLocalStorage<AuthContext | null>();
+
+function getActiveAuthContext(): AuthContext | null {
+    return authContextStore.getStore() ?? null;
+}
+
+function normalizeAllowedProjects(auth: AuthContext | null): string[] {
+    if (!auth?.allowed_projects || auth.allowed_projects.length === 0) {
+        return [];
+    }
+    return auth.allowed_projects
+        .map((value) => value.trim())
+        .filter(Boolean);
+}
+
+function isProjectAllowed(projectId: string | null | undefined, allowedProjects: string[]): boolean {
+    if (!projectId) return false;
+    const normalized = projectId.trim().toLowerCase();
+    return allowedProjects.some((allowed) => allowed.toLowerCase() === normalized);
+}
+
+function hasProjectScope(auth: AuthContext | null): boolean {
+    return normalizeAllowedProjects(auth).length > 0;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+    return (value && typeof value === 'object')
+        ? value as Record<string, unknown>
+        : {};
+}
+
+function extractTranscriptRefs(args: Record<string, unknown>): string[] {
+    const refs: string[] = [];
+    const directKeys = ['transcriptPath', 'sourceTranscriptPath', 'targetTranscriptPath'];
+    for (const key of directKeys) {
+        const value = args[key];
+        if (typeof value === 'string' && value.trim().length > 0) {
+            refs.push(value.trim());
+        }
+    }
+
+    const listValue = args.transcriptPaths;
+    if (Array.isArray(listValue)) {
+        for (const entry of listValue) {
+            if (typeof entry === 'string' && entry.trim().length > 0) {
+                refs.push(entry.trim());
+            }
+        }
+    }
+
+    return refs;
+}
+
+async function enforceProjectScopeForTool(
+    toolName: string,
+    args: unknown,
+    authContext: AuthContext | null,
+): Promise<unknown> {
+    const allowedProjects = normalizeAllowedProjects(authContext);
+    if (allowedProjects.length === 0) {
+        return args;
+    }
+
+    const scopedArgs = asRecord(args);
+    const contextDirectory = typeof scopedArgs.contextDirectory === 'string'
+        ? scopedArgs.contextDirectory
+        : undefined;
+
+    if (toolName === 'protokoll_list_transcripts') {
+        const entityType = typeof scopedArgs.entityType === 'string' ? scopedArgs.entityType.trim() : '';
+        const entityId = typeof scopedArgs.entityId === 'string' ? scopedArgs.entityId.trim() : '';
+
+        if (entityType && entityType !== 'project') {
+            throw new Error('This API key is project-scoped. Use entityType="project" with an allowed entityId.');
+        }
+        if (entityId) {
+            if (!isProjectAllowed(entityId, allowedProjects)) {
+                throw new Error(`Project-scoped key cannot access project "${entityId}".`);
+            }
+            return {
+                ...scopedArgs,
+                entityType: 'project',
+                entityId,
+            };
+        }
+        if (allowedProjects.length === 1) {
+            return {
+                ...scopedArgs,
+                entityType: 'project',
+                entityId: allowedProjects[0],
+            };
+        }
+        throw new Error('This API key is scoped to multiple projects. Provide entityType="project" and an allowed entityId.');
+    }
+
+    if (toolName === 'protokoll_create_note' || toolName === 'protokoll_process_audio') {
+        const providedProject = typeof scopedArgs.projectId === 'string' ? scopedArgs.projectId.trim() : '';
+        if (providedProject) {
+            if (!isProjectAllowed(providedProject, allowedProjects)) {
+                throw new Error(`Project-scoped key cannot write to project "${providedProject}".`);
+            }
+            return args;
+        }
+        if (allowedProjects.length === 1) {
+            return {
+                ...scopedArgs,
+                projectId: allowedProjects[0],
+            };
+        }
+        throw new Error('This API key is scoped to multiple projects. Provide an explicit allowed projectId.');
+    }
+
+    if (toolName === 'protokoll_add_term') {
+        const provided = Array.isArray(scopedArgs.projects)
+            ? scopedArgs.projects.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+            : [];
+        if (provided.length > 0) {
+            for (const projectId of provided) {
+                if (!isProjectAllowed(projectId, allowedProjects)) {
+                    throw new Error(`Project-scoped key cannot attach term to project "${projectId}".`);
+                }
+            }
+            return args;
+        }
+        if (allowedProjects.length === 1) {
+            return {
+                ...scopedArgs,
+                projects: [allowedProjects[0]],
+            };
+        }
+        throw new Error('This API key is scoped to multiple projects. Provide explicit allowed projects when creating a term.');
+    }
+
+    if (toolName === 'protokoll_edit_term') {
+        const replaceProjects = Array.isArray(scopedArgs.projects)
+            ? scopedArgs.projects.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+            : null;
+        const addProjects = Array.isArray(scopedArgs.add_projects)
+            ? scopedArgs.add_projects.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+            : [];
+        const removeProjects = Array.isArray(scopedArgs.remove_projects)
+            ? scopedArgs.remove_projects.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+            : [];
+
+        const validateProjectList = (values: string[], action: string) => {
+            for (const projectId of values) {
+                if (!isProjectAllowed(projectId, allowedProjects)) {
+                    throw new Error(`Project-scoped key cannot ${action} project "${projectId}".`);
+                }
+            }
+        };
+
+        if (replaceProjects) validateProjectList(replaceProjects, 'set');
+        if (addProjects.length > 0) validateProjectList(addProjects, 'add');
+        if (removeProjects.length > 0) validateProjectList(removeProjects, 'remove');
+        return args;
+    }
+
+    if (toolName === 'protokoll_add_person' || toolName === 'protokoll_add_company') {
+        if (allowedProjects.length !== 1) {
+            throw new Error('This API key is scoped to multiple projects. Person/company creation currently requires a single allowed project.');
+        }
+        return args;
+    }
+
+    if (toolName === 'protokoll_edit_project' || toolName === 'protokoll_update_project') {
+        const projectId = typeof scopedArgs.id === 'string' ? scopedArgs.id.trim() : '';
+        if (!projectId || !isProjectAllowed(projectId, allowedProjects)) {
+            throw new Error('Project-scoped key can only modify its allowed project.');
+        }
+        return args;
+    }
+
+    if (toolName === 'protokoll_add_project' || toolName === 'protokoll_delete_entity') {
+        throw new Error('Project-scoped keys cannot create or delete projects/entities.');
+    }
+
+    if (toolName === 'protokoll_get_entity') {
+        const entityType = typeof scopedArgs.entityType === 'string' ? scopedArgs.entityType.trim() : '';
+        const entityId = typeof scopedArgs.entityId === 'string' ? scopedArgs.entityId.trim() : '';
+        if (entityType !== 'project') {
+            throw new Error('Project-scoped keys can only read project entities from context.');
+        }
+        if (!isProjectAllowed(entityId, allowedProjects)) {
+            throw new Error(`Project-scoped key cannot access project "${entityId}".`);
+        }
+        return args;
+    }
+
+    if (toolName === 'protokoll_list_projects') {
+        return args;
+    }
+
+    if (
+        toolName === 'protokoll_context_status'
+        || toolName === 'protokoll_list_people'
+        || toolName === 'protokoll_list_terms'
+        || toolName === 'protokoll_list_companies'
+        || toolName === 'protokoll_search_context'
+    ) {
+        throw new Error(`Project-scoped key cannot call ${toolName}. Use project-scoped transcript/note tools and explicit project lookups.`);
+    }
+
+    if (toolName === 'protokoll_edit_transcript') {
+        const requestedProject = typeof scopedArgs.projectId === 'string' ? scopedArgs.projectId.trim() : '';
+        if (requestedProject && !isProjectAllowed(requestedProject, allowedProjects)) {
+            throw new Error(`Project-scoped key cannot move transcripts to project "${requestedProject}".`);
+        }
+    }
+
+    if (toolName === 'protokoll_get_transcript_by_uuid') {
+        const uuid = typeof scopedArgs.uuid === 'string' ? scopedArgs.uuid.trim() : '';
+        if (uuid) {
+            const readResult = await TranscriptTools.handleReadTranscript({ transcriptPath: uuid, contextDirectory });
+            const metadata = asRecord((readResult as Record<string, unknown>).metadata);
+            const projectId = typeof metadata.projectId === 'string' ? metadata.projectId.trim() : '';
+            if (!isProjectAllowed(projectId, allowedProjects)) {
+                throw new Error(`Project-scoped key cannot access transcript from project "${projectId || 'unassigned'}".`);
+            }
+        }
+        return args;
+    }
+
+    const transcriptRefs = extractTranscriptRefs(scopedArgs);
+    if (transcriptRefs.length === 0) {
+        return args;
+    }
+
+    for (const transcriptRef of transcriptRefs) {
+        const readResult = await TranscriptTools.handleReadTranscript({
+            transcriptPath: transcriptRef,
+            contextDirectory,
+        });
+        const metadata = asRecord((readResult as Record<string, unknown>).metadata);
+        const projectId = typeof metadata.projectId === 'string' ? metadata.projectId.trim() : '';
+        if (!isProjectAllowed(projectId, allowedProjects)) {
+            throw new Error(`Project-scoped key cannot access transcript from project "${projectId || 'unassigned'}".`);
+        }
+    }
+
+    return args;
+}
+
+function filterProjectScopedToolResult(
+    toolName: string,
+    result: unknown,
+    authContext: AuthContext | null,
+): unknown {
+    const allowedProjects = normalizeAllowedProjects(authContext);
+    if (allowedProjects.length === 0) {
+        return result;
+    }
+
+    if (toolName === 'protokoll_list_projects') {
+        const payload = asRecord(result);
+        const projectsRaw = payload.projects;
+        const projects = Array.isArray(projectsRaw)
+            ? projectsRaw.filter((project) => {
+                const item = asRecord(project);
+                const id = typeof item.id === 'string' ? item.id.trim() : '';
+                return isProjectAllowed(id, allowedProjects);
+            })
+            : [];
+        return {
+            ...payload,
+            projects,
+            total: projects.length,
+            count: projects.length,
+        };
+    }
+
+    return result;
+}
+
+async function postProcessProjectScopedCreate(
+    toolName: string,
+    args: unknown,
+    result: unknown,
+    authContext: AuthContext | null,
+): Promise<void> {
+    const allowedProjects = normalizeAllowedProjects(authContext);
+    if (allowedProjects.length !== 1) {
+        return;
+    }
+    const scopedProjectId = allowedProjects[0];
+    const payload = asRecord(result);
+    const entity = asRecord(payload.entity);
+    const entityId = typeof entity.id === 'string' ? entity.id.trim() : '';
+    if (!entityId) {
+        return;
+    }
+
+    if (toolName === 'protokoll_add_person') {
+        await handleToolCall('protokoll_edit_project', {
+            id: scopedProjectId,
+            add_associated_people: [entityId],
+            contextDirectory: asRecord(args).contextDirectory,
+        });
+    }
+
+    if (toolName === 'protokoll_add_company') {
+        await handleToolCall('protokoll_edit_project', {
+            id: scopedProjectId,
+            add_associated_companies: [entityId],
+            contextDirectory: asRecord(args).contextDirectory,
+        });
+    }
+}
+
+function filterProjectEntitiesResourceJson(
+    contents: { uri: string; mimeType?: string; text?: string },
+    allowedProjects: string[],
+) {
+    if (!contents.text) {
+        return contents;
+    }
+    try {
+        const parsed = JSON.parse(contents.text) as Record<string, unknown>;
+        const entities = Array.isArray(parsed.entities) ? parsed.entities : [];
+        const filtered = entities.filter((entity) => {
+            const item = asRecord(entity);
+            const id = typeof item.id === 'string' ? item.id.trim() : '';
+            return isProjectAllowed(id, allowedProjects);
+        });
+        return {
+            ...contents,
+            text: JSON.stringify({
+                ...parsed,
+                entities: filtered,
+                count: filtered.length,
+            }, null, 2),
+        };
+    } catch {
+        return contents;
+    }
 }
 
 async function configureRbacIfSecured(config: Record<string, unknown>): Promise<void> {
@@ -707,13 +1244,19 @@ function createMcpServer(): Server {
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { name, arguments: args } = request.params;
         const startedAt = Date.now();
+        const authContext = getActiveAuthContext();
         requestLogger.info('tool.call.start', {
             toolName: name,
             args: summarizeToolArgs(args),
+            userId: authContext?.user_id ?? null,
+            keyId: authContext?.key_id ?? null,
         });
 
         try {
-            const result = await handleToolCall(name, args);
+            const scopedArgs = await enforceProjectScopeForTool(name, args, authContext);
+            const toolResult = await handleToolCall(name, scopedArgs);
+            await postProcessProjectScopedCreate(name, scopedArgs, toolResult, authContext);
+            const result = filterProjectScopedToolResult(name, toolResult, authContext);
 
             // Send push notifications to sessions subscribed to affected entity resources
             sendEntityChangeNotifications(name, args).catch((err) => {
@@ -757,15 +1300,112 @@ function createMcpServer(): Server {
 
     // List available resources
     server.setRequestHandler(ListResourcesRequestSchema, async () => {
-        return Resources.handleListResources();
+        const listed = await Resources.handleListResources();
+        const authContext = getActiveAuthContext();
+        if (!hasProjectScope(authContext)) {
+            return listed;
+        }
+
+        const filteredResources = listed.resources.filter((resource) => {
+            try {
+                const parsed = parseUri(resource.uri);
+                if (parsed.resourceType === 'entities-list') {
+                    return (parsed as any).entityType === 'project';
+                }
+                if (parsed.resourceType === 'entity') {
+                    return (parsed as any).entityType === 'project'
+                        && isProjectAllowed((parsed as any).entityId, normalizeAllowedProjects(authContext));
+                }
+                if (parsed.resourceType === 'audio-inbound' || parsed.resourceType === 'audio-processed') {
+                    return false;
+                }
+                return true;
+            } catch {
+                return true;
+            }
+        });
+
+        return {
+            ...listed,
+            resources: filteredResources,
+        };
     });
 
     // Read a resource
     server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
         const { uri } = request.params;
+        const authContext = getActiveAuthContext();
+        const allowedProjects = normalizeAllowedProjects(authContext);
+
+        if (allowedProjects.length > 0) {
+            const parsed = parseUri(uri);
+
+            if (parsed.resourceType === 'audio-inbound' || parsed.resourceType === 'audio-processed' || parsed.resourceType === 'config') {
+                throw new Error(`Project-scoped key cannot access ${parsed.resourceType} resources`);
+            }
+
+            if (parsed.resourceType === 'entity') {
+                const entity = parsed as any;
+                if (entity.entityType !== 'project') {
+                    throw new Error('Project-scoped key can only read project entities');
+                }
+                if (!isProjectAllowed(entity.entityId, allowedProjects)) {
+                    throw new Error(`Project-scoped key cannot access project "${entity.entityId}"`);
+                }
+            }
+
+            if (parsed.resourceType === 'entities-list') {
+                const entityList = parsed as any;
+                if (entityList.entityType !== 'project') {
+                    throw new Error('Project-scoped key can only list project entities');
+                }
+            }
+
+            if (parsed.resourceType === 'transcript') {
+                const transcriptUri = parsed as any;
+                const transcriptResult = await TranscriptTools.handleReadTranscript({
+                    transcriptPath: transcriptUri.transcriptPath,
+                });
+                const metadata = asRecord((transcriptResult as Record<string, unknown>).metadata);
+                const projectId = typeof metadata.projectId === 'string' ? metadata.projectId.trim() : '';
+                if (!isProjectAllowed(projectId, allowedProjects)) {
+                    throw new Error(`Project-scoped key cannot access transcript from project "${projectId || 'unassigned'}"`);
+                }
+            }
+
+            if (parsed.resourceType === 'transcripts-list') {
+                const list = parsed as any;
+                const requestedProjectId = typeof list.projectId === 'string' ? list.projectId.trim() : '';
+                if (requestedProjectId.length > 0 && !isProjectAllowed(requestedProjectId, allowedProjects)) {
+                    throw new Error(`Project-scoped key cannot list transcripts for project "${requestedProjectId}"`);
+                }
+
+                if (requestedProjectId.length === 0) {
+                    if (allowedProjects.length !== 1) {
+                        throw new Error('Project-scoped key with multiple projects must specify projectId in transcript list resource');
+                    }
+                    const contents = await Resources.readTranscriptsListResource({
+                        directory: list.directory,
+                        startDate: list.startDate,
+                        endDate: list.endDate,
+                        limit: list.limit,
+                        offset: list.offset,
+                        projectId: allowedProjects[0],
+                    });
+                    return { contents: [contents] };
+                }
+            }
+        }
 
         try {
             const contents = await Resources.handleReadResource(uri);
+            if (allowedProjects.length > 0) {
+                const parsed = parseUri(uri);
+                if (parsed.resourceType === 'entities-list') {
+                    const filtered = filterProjectEntitiesResourceJson(contents as any, allowedProjects);
+                    return { contents: [filtered] };
+                }
+            }
             return { contents: [contents] };
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
@@ -997,7 +1637,19 @@ app.post('/audio/upload',
             const rawTitle = body['title'];
             const rawProject = body['project'];
             const title = (typeof rawTitle === 'string' && rawTitle.trim()) ? rawTitle.trim() : undefined;
-            const project = (typeof rawProject === 'string' && rawProject.trim()) ? rawProject.trim() : undefined;
+            let project = (typeof rawProject === 'string' && rawProject.trim()) ? rawProject.trim() : undefined;
+            const authContext = c.get(AUTH_CONTEXT_KEY) as AuthContext | undefined;
+            if (hasProjectScope(authContext ?? null)) {
+                const allowedProjects = normalizeAllowedProjects(authContext ?? null);
+                if (!project && allowedProjects.length === 1) {
+                    project = allowedProjects[0];
+                }
+                if (!project || !isProjectAllowed(project, allowedProjects)) {
+                    return c.json({
+                        error: 'Project-scoped key cannot upload outside allowed projects',
+                    }, 403);
+                }
+            }
 
             // PKL transcript creation uses a local sqlite-backed file path.
             // Ensure the configured output directory exists even when audio bytes are stored in GCS.
@@ -1075,6 +1727,15 @@ app.get('/audio/:uuid', async (c) => {
         const transcript = PklTranscript.open(filePath, { readOnly: true });
         const metadata = transcript.metadata;
         await transcript.close();
+
+        const authContext = c.get(AUTH_CONTEXT_KEY) as AuthContext | undefined;
+        if (hasProjectScope(authContext ?? null)) {
+            const allowedProjects = normalizeAllowedProjects(authContext ?? null);
+            const projectId = typeof metadata.projectId === 'string' ? metadata.projectId : null;
+            if (!isProjectAllowed(projectId, allowedProjects)) {
+                return c.json({ error: 'Project-scoped key cannot access this transcript audio' }, 403);
+            }
+        }
         
         if (!metadata.audioHash) {
             return c.json({ error: 'No audio file associated with this transcript' }, 404);
@@ -1163,6 +1824,7 @@ app.get('/auth/whoami', async (c) => {
         user_id: auth.user_id,
         roles: auth.roles,
         key_id: auth.key_id,
+        allowed_projects: auth.allowed_projects ?? [],
     });
 });
 
@@ -1439,7 +2101,11 @@ app.post('/mcp', async (c) => {
         rpcId: jsonRpcMessage.id ?? null,
         elapsedMs: Date.now() - requestStartedAt,
     });
-    const response = await session.transport.handleRequest(c);
+    const requestAuthContext = (c.get(AUTH_CONTEXT_KEY) as AuthContext | undefined) ?? null;
+    const response = await authContextStore.run(
+        requestAuthContext,
+        () => session.transport.handleRequest(c),
+    );
     requestLogger.debug('complete', {
         method: 'POST',
         route: '/mcp',
@@ -1640,6 +2306,15 @@ async function main() {
     await cardigantime.configure(program); // adds -c/--config-directory
     program.parse();
     const args = program.opts();
+    const securedFromCli = program.getOptionValueSource('secured') === 'cli'
+        ? Boolean(args.secured)
+        : undefined;
+    const debugFromCli = program.getOptionValueSource('debug') === 'cli'
+        ? Boolean(args.debug)
+        : undefined;
+    const verboseFromCli = program.getOptionValueSource('verbose') === 'cli'
+        ? Boolean(args.verbose)
+        : undefined;
 
     // Apply working directory before config loading
     if (args.cwd) {
@@ -1673,7 +2348,7 @@ async function main() {
     }
 
     // Load config — CLI args merge with file values via CardiganTime
-    const cardigantimeConfig = await cardigantime.read({
+    let cardigantimeConfig = await cardigantime.read({
         ...args,
         inputDirectory: (args.inputDirectory as string | undefined) ?? process.env.PROTOKOLL_INPUT_DIRECTORY,
         outputDirectory: (args.outputDirectory as string | undefined) ?? process.env.PROTOKOLL_OUTPUT_DIRECTORY,
@@ -1687,15 +2362,23 @@ async function main() {
         classifyModel: (args.classifyModel as string | undefined) ?? process.env.PROTOKOLL_CLASSIFY_MODEL,
         composeModel: (args.composeModel as string | undefined) ?? process.env.PROTOKOLL_COMPOSE_MODEL,
         transcriptionModel: (args.transcriptionModel as string | undefined) ?? process.env.PROTOKOLL_TRANSCRIPTION_MODEL,
-        secured: (args.secured as boolean | undefined) ?? parseBooleanEnv(process.env.PROTOKOLL_HTTP_SECURED),
+        secured: securedFromCli ?? parseBooleanEnv(process.env.PROTOKOLL_HTTP_SECURED),
         rbacUsersPath: (args.rbacUsersPath as string | undefined) ?? process.env.RBAC_USERS_PATH,
         rbacKeysPath: (args.rbacKeysPath as string | undefined) ?? process.env.RBAC_KEYS_PATH,
         rbacPolicyPath: (args.rbacPolicyPath as string | undefined) ?? process.env.RBAC_POLICY_PATH,
         rbacReloadSeconds: (args.rbacReloadSeconds as string | undefined) ?? process.env.RBAC_RELOAD_SECONDS,
-        debug: (args.debug as boolean | undefined) ?? parseBooleanEnv(process.env.PROTOKOLL_DEBUG),
-        verbose: (args.verbose as boolean | undefined) ?? parseBooleanEnv(process.env.PROTOKOLL_VERBOSE),
+        debug: debugFromCli ?? parseBooleanEnv(process.env.PROTOKOLL_DEBUG),
+        verbose: verboseFromCli ?? parseBooleanEnv(process.env.PROTOKOLL_VERBOSE),
         storage: buildEnvStorageConfig(),
     });
+    cardigantimeConfig = await mergeStorageFromCanonicalConfig(
+        cardigantimeConfig as Record<string, unknown>,
+        args.config as string | undefined
+    ) as typeof cardigantimeConfig;
+    cardigantimeConfig = await injectLocalGcsCredentialsIfMissing(
+        cardigantimeConfig as Record<string, unknown>
+    ) as typeof cardigantimeConfig;
+    exportStorageConfigToEnv(cardigantimeConfig as Record<string, unknown>);
 
     configureHttpLogLevel((cardigantimeConfig as any).debug === true);
 
