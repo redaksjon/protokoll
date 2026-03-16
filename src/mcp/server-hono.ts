@@ -30,9 +30,9 @@ import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
 import { bodyLimit } from 'hono/body-limit';
 import { join, extname, basename, dirname } from 'node:path';
-import { mkdir, readFile, access } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rm, access } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { homedir } from 'node:os';
-import { glob } from 'glob';
 import { load as parseYaml } from 'js-yaml';
 // eslint-disable-next-line import/extensions
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -70,23 +70,80 @@ import {
 } from './rbac';
 import { Transcript as TranscriptOps } from '@redaksjon/protokoll-engine';
 import { PklTranscript } from '@redaksjon/protokoll-format';
+import type { FileStorageProvider } from './storage/fileProviders';
 
 const { createUploadTranscript, findTranscriptByUuid } = TranscriptOps;
 
+type TranscriptMetadataLookup = {
+    id?: string;
+    status?: string;
+    audioHash?: string;
+    projectId?: string;
+    audioFile?: string;
+    originalFilename?: string;
+};
+
+function isTranscriptPklPath(pathValue: string): boolean {
+    const normalized = pathValue.replace(/^\/+/, '').replace(/\\/g, '/').toLowerCase();
+    return normalized.endsWith('.pkl')
+        && !normalized.startsWith('uploads/')
+        && !normalized.startsWith('.intermediate/')
+        && !normalized.includes('/uploads/')
+        && !normalized.includes('/.intermediate/');
+}
+
+async function withTempPklFile<T>(contents: Buffer, action: (tempPath: string) => Promise<T>): Promise<T> {
+    const tempPath = `${tmpdir()}/protokoll-mcp-http-${Date.now()}-${Math.random().toString(36).slice(2)}.pkl`;
+    await writeFile(tempPath, contents);
+    try {
+        return await action(tempPath);
+    } finally {
+        await rm(tempPath, { force: true });
+    }
+}
+
+async function readTranscriptMetadata(
+    outputStorage: FileStorageProvider,
+    outputDirectory: string,
+    transcriptPath: string,
+): Promise<TranscriptMetadataLookup> {
+    if (outputStorage.name === 'filesystem') {
+        const absolutePath = transcriptPath.startsWith('/')
+            ? transcriptPath
+            : join(outputDirectory, transcriptPath);
+        const transcript = PklTranscript.open(absolutePath, { readOnly: true });
+        try {
+            return transcript.metadata as TranscriptMetadataLookup;
+        } finally {
+            transcript.close();
+        }
+    }
+
+    const bytes = await outputStorage.readFile(transcriptPath);
+    return withTempPklFile(bytes, async (tempPath) => {
+        const transcript = PklTranscript.open(tempPath, { readOnly: true });
+        try {
+            return transcript.metadata as TranscriptMetadataLookup;
+        } finally {
+            transcript.close();
+        }
+    });
+}
+
+async function listTranscriptPaths(outputStorage: FileStorageProvider): Promise<string[]> {
+    const listed = await outputStorage.listFiles('', '.pkl');
+    return listed.filter(isTranscriptPklPath);
+}
+
 async function findTranscriptByAudioHashInDirectory(
     audioHash: string,
-    searchDirectory: string
+    searchDirectory: string,
+    outputStorage: FileStorageProvider,
 ): Promise<{ uuid: string; status?: string } | null> {
-    const files = await glob('**/*.pkl', { cwd: searchDirectory, absolute: true, nodir: true });
+    const files = await listTranscriptPaths(outputStorage);
     for (const filePath of files) {
         try {
-            const transcript = PklTranscript.open(filePath, { readOnly: true });
-            const metadata = transcript.metadata as {
-                id?: string;
-                status?: string;
-                audioHash?: string;
-            };
-            transcript.close();
+            const metadata = await readTranscriptMetadata(outputStorage, searchDirectory, filePath);
             if (metadata.audioHash === audioHash && metadata.id) {
                 return {
                     uuid: metadata.id,
@@ -97,6 +154,35 @@ async function findTranscriptByAudioHashInDirectory(
             // Ignore unreadable transcript files while scanning for duplicates.
         }
     }
+    return null;
+}
+
+async function findTranscriptByUuidInStorage(
+    uuid: string,
+    outputStorage: FileStorageProvider,
+    outputDirectory: string,
+): Promise<{ path: string; metadata: TranscriptMetadataLookup } | null> {
+    if (outputStorage.name === 'filesystem') {
+        const localPath = await findTranscriptByUuid(uuid, [outputDirectory]);
+        if (!localPath) {
+            return null;
+        }
+        const metadata = await readTranscriptMetadata(outputStorage, outputDirectory, localPath);
+        return { path: localPath, metadata };
+    }
+
+    const files = await listTranscriptPaths(outputStorage);
+    for (const filePath of files) {
+        try {
+            const metadata = await readTranscriptMetadata(outputStorage, outputDirectory, filePath);
+            if (metadata.id === uuid) {
+                return { path: filePath, metadata };
+            }
+        } catch {
+            // Ignore unreadable transcript files while scanning for UUID matches.
+        }
+    }
+
     return null;
 }
 
@@ -382,10 +468,15 @@ async function injectLocalGcsCredentialsIfMissing(
     }
 
     const explicitFromEnv = readCredentialsEnvPath();
-    const defaultLocalPath = resolve(homedir(), '.ssh/gcp-discursive-riotplan-service.json');
+    const configuredDefaultPath = readEnvString('PROTOKOLL_GCS_CREDENTIALS_DEFAULT_PATH');
+    const defaultPath = configuredDefaultPath
+        ? (configuredDefaultPath.startsWith('~/')
+            ? resolve(homedir(), configuredDefaultPath.slice(2))
+            : configuredDefaultPath)
+        : undefined;
     const credentialCandidates = [
         explicitFromEnv,
-        defaultLocalPath,
+        defaultPath,
     ].filter((value): value is string => Boolean(value));
 
     for (const candidate of credentialCandidates) {
@@ -393,7 +484,7 @@ async function injectLocalGcsCredentialsIfMissing(
             await access(candidate);
             lifecycleLogger.info('startup.storage.gcs.credentials.injected', {
                 path: candidate,
-                source: candidate === explicitFromEnv ? 'env' : 'local_default',
+                source: candidate === explicitFromEnv ? 'env' : 'configured_default',
             });
             return {
                 ...config,
@@ -1003,6 +1094,7 @@ interface SessionData {
 }
 
 const sessions = new Map<string, SessionData>();
+const pendingSessionCreations = new Map<string, Promise<SessionData>>();
 
 // ============================================================================
 // Push Notification Helpers
@@ -1608,7 +1700,7 @@ app.post('/audio/upload',
             // This prevents duplicate processing when the same bytes are uploaded again.
             const hashObjectExists = await outputStorage.exists(uploadObjectPath);
             if (hashObjectExists) {
-                const existingTranscript = await findTranscriptByAudioHashInDirectory(hash, outputDir);
+                const existingTranscript = await findTranscriptByAudioHashInDirectory(hash, outputDir, outputStorage);
                 if (existingTranscript) {
                     uploadLogger.info('audio.upload.duplicate_detected', {
                         originalFilename: file.name,
@@ -1718,15 +1810,13 @@ app.get('/audio/:uuid', async (c) => {
         const outputStorage = ServerConfig.getOutputStorage();
         
         // Find transcript by UUID
-        const filePath = await findTranscriptByUuid(uuid, [outputDir]);
-        if (!filePath) {
+        const transcriptRecord = await findTranscriptByUuidInStorage(uuid, outputStorage, outputDir);
+        if (!transcriptRecord) {
             return c.json({ error: `Transcript not found for UUID: ${uuid}` }, 404);
         }
         
         // Get metadata to find original audio file
-        const transcript = PklTranscript.open(filePath, { readOnly: true });
-        const metadata = transcript.metadata;
-        await transcript.close();
+        const metadata = transcriptRecord.metadata;
 
         const authContext = c.get(AUTH_CONTEXT_KEY) as AuthContext | undefined;
         if (hasProjectScope(authContext ?? null)) {
@@ -1961,6 +2051,24 @@ app.post('/mcp', async (c) => {
         return newSession;
     };
 
+    const getOrCreateSession = async (sessionId: string): Promise<SessionData> => {
+        const existingSession = sessions.get(sessionId);
+        if (existingSession) {
+            return existingSession;
+        }
+
+        const pendingCreation = pendingSessionCreations.get(sessionId);
+        if (pendingCreation) {
+            return pendingCreation;
+        }
+
+        const creationPromise = createSession(sessionId).finally(() => {
+            pendingSessionCreations.delete(sessionId);
+        });
+        pendingSessionCreations.set(sessionId, creationPromise);
+        return creationPromise;
+    };
+
     let session: SessionData;
 
     if (isInitialize) {
@@ -1975,7 +2083,7 @@ app.post('/mcp', async (c) => {
                 rpcMethod: jsonRpcMessage.method ?? null,
                 rpcId: jsonRpcMessage.id ?? null,
             });
-            session = await createSession(requestedSessionId);
+            session = await getOrCreateSession(requestedSessionId);
         }
         session.lastActivity = Date.now();
         sessionLogger.debug('reused', { sessionId: session.sessionId });

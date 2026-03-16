@@ -182,11 +182,10 @@ describe('server-hono audio endpoints', () => {
             mkdir: vi.fn().mockResolvedValue(undefined),
             exists: vi.fn().mockResolvedValue(true),
             writeFile: vi.fn().mockResolvedValue(undefined),
-            listFiles: vi.fn().mockResolvedValue([]),
+            listFiles: vi.fn().mockResolvedValue(['/test/output/existing.pkl']),
             readFile: vi.fn().mockResolvedValue(Buffer.from('audio-data')),
         };
         mocks.getOutputStorage.mockReturnValue(outputStorage);
-        mocks.glob.mockResolvedValue(['/test/output/existing.pkl']);
         mocks.pklOpen.mockImplementation(() => ({
             metadata: {
                 id: 'uuid-existing',
@@ -213,11 +212,10 @@ describe('server-hono audio endpoints', () => {
             mkdir: vi.fn().mockResolvedValue(undefined),
             exists: vi.fn().mockResolvedValue(true),
             writeFile: vi.fn().mockResolvedValue(undefined),
-            listFiles: vi.fn().mockResolvedValue([]),
+            listFiles: vi.fn().mockResolvedValue(['/test/output/bad.pkl']),
             readFile: vi.fn().mockResolvedValue(Buffer.from('audio-data')),
         };
         mocks.getOutputStorage.mockReturnValue(outputStorage);
-        mocks.glob.mockResolvedValue(['/test/output/bad.pkl']);
         mocks.pklOpen.mockImplementation(() => {
             throw new Error('corrupt transcript');
         });
