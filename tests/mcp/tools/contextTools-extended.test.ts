@@ -150,6 +150,53 @@ describe('contextTools handlers (extended)', () => {
                 },
             });
         });
+
+        it('returns project-scoped entity counts when allowedProjectIds are provided', async () => {
+            mockContext.getAllProjects.mockReturnValue([
+                {
+                    id: 'proj-1',
+                    name: 'Project One',
+                    active: true,
+                    classification: {
+                        associated_people: ['alice'],
+                        associated_companies: ['acme'],
+                    },
+                    routing: {},
+                },
+                {
+                    id: 'proj-2',
+                    name: 'Project Two',
+                    active: true,
+                    classification: {
+                        associated_people: ['bob'],
+                        associated_companies: ['beta'],
+                    },
+                    routing: {},
+                },
+            ]);
+            mockContext.getAllPeople.mockReturnValue([
+                { id: 'alice', name: 'Alice' },
+                { id: 'bob', name: 'Bob' },
+            ]);
+            mockContext.getAllTerms.mockReturnValue([
+                { id: 'term-1', name: 'Term One', projects: ['proj-1'] },
+                { id: 'term-2', name: 'Term Two', projects: ['proj-2'] },
+            ]);
+            mockContext.getAllCompanies.mockReturnValue([
+                { id: 'acme', name: 'Acme' },
+                { id: 'beta', name: 'Beta' },
+            ]);
+            mockContext.getAllIgnored.mockReturnValue([{ id: 'ignore-1', name: 'Ignore One' }]);
+
+            const result = await handleContextStatus({ allowedProjectIds: ['proj-1'] });
+            expect(result.entityCounts).toEqual({
+                projects: 1,
+                people: 1,
+                terms: 1,
+                companies: 1,
+                ignored: 0,
+            });
+        });
     });
 
     describe('handleListProjects', () => {
@@ -202,6 +249,24 @@ describe('contextTools handlers (extended)', () => {
             expect(result.projects).toHaveLength(1);
             expect(result.projects[0].id).toBe('alpha-project');
         });
+
+        it('filters projects by allowedProjectIds before pagination', async () => {
+            mockContext.getAllProjects.mockReturnValue([
+                { id: 'proj-1', name: 'Project 1', active: true, routing: {}, classification: {} },
+                { id: 'proj-2', name: 'Project 2', active: true, routing: {}, classification: {} },
+                { id: 'proj-3', name: 'Project 3', active: true, routing: {}, classification: {} },
+            ]);
+
+            const result = await handleListProjects({
+                allowedProjectIds: ['proj-2', 'proj-3'],
+                limit: 1,
+                offset: 0,
+            });
+
+            expect(result.total).toBe(2);
+            expect(result.count).toBe(1);
+            expect(result.projects[0].id).toBe('proj-2');
+        });
     });
 
     describe('handleListPeople', () => {
@@ -243,6 +308,26 @@ describe('contextTools handlers (extended)', () => {
             expect(result.total).toBe(1);
             expect(result.people[0].id).toBe('alice');
         });
+
+        it('filters people by allowed project associations', async () => {
+            mockContext.getAllProjects.mockReturnValue([
+                {
+                    id: 'proj-1',
+                    name: 'Project One',
+                    active: true,
+                    routing: {},
+                    classification: { associated_people: ['alice'] },
+                },
+            ]);
+            mockContext.getAllPeople.mockReturnValue([
+                { id: 'alice', name: 'Alice', company: 'Acme', role: 'Engineer', sounds_like: [] },
+                { id: 'bob', name: 'Bob', company: 'Acme', role: 'Manager', sounds_like: [] },
+            ]);
+
+            const result = await handleListPeople({ allowedProjectIds: ['proj-1'] });
+            expect(result.total).toBe(1);
+            expect(result.people[0].id).toBe('alice');
+        });
     });
 
     describe('handleListTerms', () => {
@@ -259,6 +344,20 @@ describe('contextTools handlers (extended)', () => {
                 expansion: 'Application Programming Interface',
             });
         });
+
+        it('filters terms by allowed project membership', async () => {
+            mockContext.getAllProjects.mockReturnValue([
+                { id: 'proj-1', name: 'Project One', active: true, routing: {}, classification: {} },
+            ]);
+            mockContext.getAllTerms.mockReturnValue([
+                { id: 'term-1', name: 'Term One', projects: ['proj-1'] },
+                { id: 'term-2', name: 'Term Two', projects: ['proj-2'] },
+            ]);
+
+            const result = await handleListTerms({ allowedProjectIds: ['proj-1'] });
+            expect(result.total).toBe(1);
+            expect(result.terms[0].id).toBe('term-1');
+        });
     });
 
     describe('handleListCompanies', () => {
@@ -274,6 +373,26 @@ describe('contextTools handlers (extended)', () => {
                 name: 'Acme',
                 fullName: 'Acme Corp',
             });
+        });
+
+        it('filters companies by allowed project associations', async () => {
+            mockContext.getAllProjects.mockReturnValue([
+                {
+                    id: 'proj-1',
+                    name: 'Project One',
+                    active: true,
+                    routing: {},
+                    classification: { associated_companies: ['acme'] },
+                },
+            ]);
+            mockContext.getAllCompanies.mockReturnValue([
+                { id: 'acme', name: 'Acme', fullName: 'Acme Corp', industry: 'Tech', sounds_like: [] },
+                { id: 'beta', name: 'Beta', fullName: 'Beta Corp', industry: 'Tech', sounds_like: [] },
+            ]);
+
+            const result = await handleListCompanies({ allowedProjectIds: ['proj-1'] });
+            expect(result.total).toBe(1);
+            expect(result.companies[0].id).toBe('acme');
         });
     });
 
@@ -300,6 +419,36 @@ describe('contextTools handlers (extended)', () => {
             expect(result.total).toBe(3);
             expect(result.count).toBe(2);
             expect(result.results[0].id).toBe('p2');
+        });
+
+        it('filters search results to project-scoped entities', async () => {
+            mockContext.getAllProjects.mockReturnValue([
+                {
+                    id: 'proj-1',
+                    name: 'Project One',
+                    active: true,
+                    routing: {},
+                    classification: {
+                        associated_people: ['alice'],
+                        associated_companies: ['acme'],
+                    },
+                },
+            ]);
+            mockContext.search.mockReturnValue([
+                { id: 'proj-1', name: 'Project One', type: 'project' },
+                { id: 'alice', name: 'Alice', type: 'person' },
+                { id: 'term-1', name: 'Term One', type: 'term', projects: ['proj-1'] },
+                { id: 'beta', name: 'Beta', type: 'company' },
+                { id: 'ignored-1', name: 'Ignore Me', type: 'ignored' },
+            ]);
+
+            const result = await handleSearchContext({
+                query: 'project',
+                allowedProjectIds: ['proj-1'],
+            });
+
+            expect(result.total).toBe(3);
+            expect(result.results.map((entry) => entry.id)).toEqual(['proj-1', 'alice', 'term-1']);
         });
     });
 
@@ -333,6 +482,56 @@ describe('contextTools handlers (extended)', () => {
             expect(mockFindPersonResilient).toHaveBeenCalledWith(mockContext, 'test-entity');
         });
 
+        it('allows project-scoped access to an associated person', async () => {
+            mockContext.getAllProjects.mockReturnValue([
+                {
+                    id: 'proj-1',
+                    name: 'Project One',
+                    active: true,
+                    routing: {},
+                    classification: { associated_people: ['alice'] },
+                },
+            ]);
+            mockFindPersonResilient.mockReturnValue({
+                id: 'alice',
+                name: 'Alice',
+                type: 'person' as const,
+            });
+
+            const result = await handleGetEntity({
+                entityType: 'person',
+                entityId: 'alice',
+                allowedProjectIds: ['proj-1'],
+            });
+
+            expect(result).toMatchObject({ id: 'alice', name: 'Alice', type: 'person' });
+        });
+
+        it('denies project-scoped access to a person outside allowed projects', async () => {
+            mockContext.getAllProjects.mockReturnValue([
+                {
+                    id: 'proj-1',
+                    name: 'Project One',
+                    active: true,
+                    routing: {},
+                    classification: { associated_people: ['alice'] },
+                },
+            ]);
+            mockFindPersonResilient.mockReturnValue({
+                id: 'bob',
+                name: 'Bob',
+                type: 'person' as const,
+            });
+
+            await expect(
+                handleGetEntity({
+                    entityType: 'person',
+                    entityId: 'bob',
+                    allowedProjectIds: ['proj-1'],
+                })
+            ).rejects.toThrow('Project-scoped key cannot access person "bob".');
+        });
+
         it('returns entity for term type', async () => {
             mockFindTermResilient.mockReturnValue(mockEntity);
 
@@ -342,6 +541,46 @@ describe('contextTools handlers (extended)', () => {
             });
             expect(result).toMatchObject({ id: 'test-entity', name: 'Test Entity' });
             expect(mockFindTermResilient).toHaveBeenCalledWith(mockContext, 'test-entity');
+        });
+
+        it('allows project-scoped access to a term in an allowed project', async () => {
+            mockContext.getAllProjects.mockReturnValue([
+                { id: 'proj-1', name: 'Project One', active: true, routing: {}, classification: {} },
+            ]);
+            mockFindTermResilient.mockReturnValue({
+                id: 'term-1',
+                name: 'Term One',
+                type: 'term' as const,
+                projects: ['proj-1'],
+            });
+
+            const result = await handleGetEntity({
+                entityType: 'term',
+                entityId: 'term-1',
+                allowedProjectIds: ['proj-1'],
+            });
+
+            expect(result).toMatchObject({ id: 'term-1', name: 'Term One', type: 'term' });
+        });
+
+        it('denies project-scoped access to a term outside allowed projects', async () => {
+            mockContext.getAllProjects.mockReturnValue([
+                { id: 'proj-1', name: 'Project One', active: true, routing: {}, classification: {} },
+            ]);
+            mockFindTermResilient.mockReturnValue({
+                id: 'term-2',
+                name: 'Term Two',
+                type: 'term' as const,
+                projects: ['proj-2'],
+            });
+
+            await expect(
+                handleGetEntity({
+                    entityType: 'term',
+                    entityId: 'term-2',
+                    allowedProjectIds: ['proj-1'],
+                })
+            ).rejects.toThrow('Project-scoped key cannot access term "term-2".');
         });
 
         it('returns entity for company type', async () => {
@@ -355,6 +594,31 @@ describe('contextTools handlers (extended)', () => {
             expect(mockFindCompanyResilient).toHaveBeenCalledWith(mockContext, 'test-entity');
         });
 
+        it('allows project-scoped access to an associated company', async () => {
+            mockContext.getAllProjects.mockReturnValue([
+                {
+                    id: 'proj-1',
+                    name: 'Project One',
+                    active: true,
+                    routing: {},
+                    classification: { associated_companies: ['acme'] },
+                },
+            ]);
+            mockFindCompanyResilient.mockReturnValue({
+                id: 'acme',
+                name: 'Acme',
+                type: 'company' as const,
+            });
+
+            const result = await handleGetEntity({
+                entityType: 'company',
+                entityId: 'acme',
+                allowedProjectIds: ['proj-1'],
+            });
+
+            expect(result).toMatchObject({ id: 'acme', name: 'Acme', type: 'company' });
+        });
+
         it('returns entity for ignored type', async () => {
             mockFindIgnoredResilient.mockReturnValue(mockEntity);
 
@@ -364,6 +628,25 @@ describe('contextTools handlers (extended)', () => {
             });
             expect(result).toMatchObject({ id: 'test-entity', name: 'Test Entity' });
             expect(mockFindIgnoredResilient).toHaveBeenCalledWith(mockContext, 'test-entity');
+        });
+
+        it('denies project-scoped access to ignored entities', async () => {
+            mockContext.getAllProjects.mockReturnValue([
+                { id: 'proj-1', name: 'Project One', active: true, routing: {}, classification: {} },
+            ]);
+            mockFindIgnoredResilient.mockReturnValue({
+                id: 'ignored-1',
+                name: 'Ignore Me',
+                type: 'ignored' as const,
+            });
+
+            await expect(
+                handleGetEntity({
+                    entityType: 'ignored',
+                    entityId: 'ignored-1',
+                    allowedProjectIds: ['proj-1'],
+                })
+            ).rejects.toThrow('Project-scoped key cannot access ignored "ignored-1".');
         });
 
         it('throws for unknown entity type', async () => {
