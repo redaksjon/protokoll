@@ -25,6 +25,20 @@ function isValidUUID(str: string): boolean {
     return uuidRegex.test(str);
 }
 
+function resolveCanonicalEntityId(providedId: string | undefined): string {
+    if (providedId === undefined) {
+        return randomUUID();
+    }
+    const normalized = providedId.trim();
+    if (!normalized) {
+        return randomUUID();
+    }
+    if (!isValidUUID(normalized)) {
+        throw new Error(`Invalid id "${providedId}". Entity IDs must be UUIDs.`);
+    }
+    return normalized;
+}
+
 async function assertContextAvailableForEntityEdit(context: { hasContext(): boolean }): Promise<void> {
     if (context.hasContext()) {
         return;
@@ -742,8 +756,7 @@ export async function handleAddPerson(args: {
         throw new Error('No .protokoll directory found. Initialize context first.');
     }
 
-    // Generate UUID for new entities, or use provided ID if it's a valid UUID
-    const id = args.id && isValidUUID(args.id) ? args.id : randomUUID();
+    const id = resolveCanonicalEntityId(args.id);
     const slug = slugify(args.name);
 
     if (context.getPerson(id)) {
@@ -860,8 +873,7 @@ export async function handleAddProject(args: {
         throw new Error('No .protokoll directory found. Initialize context first.');
     }
 
-    // Generate UUID for new entities, or use provided ID if it's a valid UUID
-    const id = args.id && isValidUUID(args.id) ? args.id : randomUUID();
+    const id = resolveCanonicalEntityId(args.id);
     const slug = slugify(args.name);
 
     if (context.getProject(id)) {
@@ -1272,8 +1284,7 @@ export async function handleAddTerm(args: {
         throw new Error('No .protokoll directory found. Initialize context first.');
     }
 
-    // Generate UUID for new entities, or use provided ID if it's a valid UUID
-    const id = args.id && isValidUUID(args.id) ? args.id : randomUUID();
+    const id = resolveCanonicalEntityId(args.id);
     const slug = slugify(args.term);
 
     if (context.getTerm(id)) {
@@ -1570,8 +1581,7 @@ export async function handleAddCompany(args: {
         throw new Error('No .protokoll directory found. Initialize context first.');
     }
 
-    // Generate UUID for new entities, or use provided ID if it's a valid UUID
-    const id = args.id && isValidUUID(args.id) ? args.id : randomUUID();
+    const id = resolveCanonicalEntityId(args.id);
     const slug = slugify(args.name);
 
     if (context.getCompany(id)) {

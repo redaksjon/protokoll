@@ -461,8 +461,9 @@ routing:
     describe('handleListProjects', () => {
         it('should list projects', async () => {
             // Create a project using the handler
+            const testId = testUUID('list-test');
             await handleAddProject({
-                id: 'list-test',
+                id: testId,
                 name: 'List Test Project',
                 destination: '/tmp/list-test',
                 sounds_like: [],  // Bypass smart assistance
@@ -478,8 +479,10 @@ routing:
 
         it('should filter inactive projects by default', async () => {
             // Create active and inactive projects
+            const activeProjectId = testUUID('active-filter-test');
+            const inactiveProjectId = testUUID('inactive-filter-test');
             await handleAddProject({
-                id: 'active-filter-test',
+                id: activeProjectId,
                 name: 'Active Project',
                 destination: '/tmp/active',
                 sounds_like: [],  // Bypass smart assistance
@@ -489,12 +492,12 @@ routing:
             });
             // Create inactive project by writing file directly (can't set inactive via handler)
             await fs.writeFile(
-                path.join(protokollDir, 'context', 'projects', 'inactive-filter-test.yaml'),
-                'id: inactive-filter-test\nname: Inactive Project\nactive: false\ntype: project'
+                path.join(protokollDir, 'context', 'projects', `${inactiveProjectId.substring(0, 8)}-inactive-filter-test.yaml`),
+                `id: ${inactiveProjectId}\nname: Inactive Project\nactive: false\ntype: project`
             );
 
             const result = await handleListProjects({ contextDirectory: protokollDir });
-            const inactiveProject = result.projects.find((p: { id: string }) => p.id === 'inactive-filter-test');
+            const inactiveProject = result.projects.find((p: { id: string }) => p.id === inactiveProjectId);
             expect(inactiveProject).toBeUndefined();
         });
 
@@ -529,8 +532,9 @@ routing:
 
     describe('handleListPeople', () => {
         it('should list people', async () => {
+            const testId = testUUID('list-person-test');
             await handleAddPerson({
-                id: 'list-person-test',
+                id: testId,
                 name: 'Test Person',
                 contextDirectory: protokollDir
             });
@@ -543,8 +547,9 @@ routing:
 
     describe('handleListTerms', () => {
         it('should list terms', async () => {
+            const testId = testUUID('list-term-test');
             await handleAddTerm({
-                id: 'list-term-test',
+                id: testId,
                 term: 'Test Term',
                 contextDirectory: protokollDir
             });
@@ -557,8 +562,9 @@ routing:
 
     describe('handleListCompanies', () => {
         it('should list companies', async () => {
+            const testId = testUUID('list-company-test');
             await handleAddCompany({
-                id: 'list-company-test',
+                id: testId,
                 name: 'Test Company',
                 contextDirectory: protokollDir
             });
@@ -571,8 +577,9 @@ routing:
 
     describe('handleSearchContext', () => {
         it('should search across context entities', async () => {
+            const testId = testUUID('searchable-person');
             await handleAddPerson({
-                id: 'searchable-person',
+                id: testId,
                 name: 'Searchable Person',
                 contextDirectory: protokollDir
             });
@@ -824,15 +831,16 @@ routing:
     describe('handleDeleteEntity', () => {
         it('should delete an existing person', async () => {
             // First add a person using the handler so it's properly saved
+            const testId = testUUID('to-delete');
             await handleAddPerson({
-                id: 'to-delete',
+                id: testId,
                 name: 'To Delete',
                 contextDirectory: protokollDir
             });
 
             const result = await handleDeleteEntity({
                 entityType: 'person',
-                entityId: 'to-delete',
+                entityId: testId,
                 contextDirectory: protokollDir
             });
 
