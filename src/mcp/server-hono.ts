@@ -857,29 +857,29 @@ async function enforceProjectScopeForTool(
     }
 
     if (toolName === 'protokoll_get_entity') {
-        const entityType = typeof scopedArgs.entityType === 'string' ? scopedArgs.entityType.trim() : '';
         const entityId = typeof scopedArgs.entityId === 'string' ? scopedArgs.entityId.trim() : '';
-        if (entityType !== 'project') {
-            throw new Error('Project-scoped keys can only read project entities from context.');
-        }
-        if (!isProjectAllowed(entityId, allowedProjects)) {
+        const entityType = typeof scopedArgs.entityType === 'string' ? scopedArgs.entityType.trim() : '';
+        if (entityType === 'project' && !isProjectAllowed(entityId, allowedProjects)) {
             throw new Error(`Project-scoped key cannot access project "${entityId}".`);
         }
-        return args;
-    }
-
-    if (toolName === 'protokoll_list_projects') {
-        return args;
+        return {
+            ...scopedArgs,
+            allowedProjectIds: allowedProjects,
+        };
     }
 
     if (
-        toolName === 'protokoll_context_status'
+        toolName === 'protokoll_list_projects'
+        || toolName === 'protokoll_context_status'
         || toolName === 'protokoll_list_people'
         || toolName === 'protokoll_list_terms'
         || toolName === 'protokoll_list_companies'
         || toolName === 'protokoll_search_context'
     ) {
-        throw new Error(`Project-scoped key cannot call ${toolName}. Use project-scoped transcript/note tools and explicit project lookups.`);
+        return {
+            ...scopedArgs,
+            allowedProjectIds: allowedProjects,
+        };
     }
 
     if (toolName === 'protokoll_edit_transcript') {
@@ -927,29 +927,8 @@ function filterProjectScopedToolResult(
     result: unknown,
     authContext: AuthContext | null,
 ): unknown {
-    const allowedProjects = normalizeAllowedProjects(authContext);
-    if (allowedProjects.length === 0) {
-        return result;
-    }
-
-    if (toolName === 'protokoll_list_projects') {
-        const payload = asRecord(result);
-        const projectsRaw = payload.projects;
-        const projects = Array.isArray(projectsRaw)
-            ? projectsRaw.filter((project) => {
-                const item = asRecord(project);
-                const id = typeof item.id === 'string' ? item.id.trim() : '';
-                return isProjectAllowed(id, allowedProjects);
-            })
-            : [];
-        return {
-            ...payload,
-            projects,
-            total: projects.length,
-            count: projects.length,
-        };
-    }
-
+    void toolName;
+    void authContext;
     return result;
 }
 
