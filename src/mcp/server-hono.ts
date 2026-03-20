@@ -868,6 +868,19 @@ async function enforceProjectScopeForTool(
         };
     }
 
+    if (toolName === 'protokoll_list_project_plans') {
+        const projectId = typeof scopedArgs.projectId === 'string' ? scopedArgs.projectId.trim() : '';
+        if (!projectId || !isProjectAllowed(projectId, allowedProjects)) {
+            throw new Error(
+                `Project-scoped key cannot list plans for project "${projectId || '(missing)'}".`,
+            );
+        }
+        return {
+            ...scopedArgs,
+            allowedProjectIds: allowedProjects,
+        };
+    }
+
     if (
         toolName === 'protokoll_list_projects'
         || toolName === 'protokoll_context_status'

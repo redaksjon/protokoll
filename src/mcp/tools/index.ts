@@ -51,6 +51,7 @@ export const tools: Tool[] = [
     // Context Management
     ContextTools.contextStatusTool,
     ContextTools.listProjectsTool,
+    ContextTools.listProjectPlansTool,
     ContextTools.listPeopleTool,
     ContextTools.listTermsTool,
     ContextTools.listCompaniesTool,
@@ -150,6 +151,10 @@ export async function handleToolCall(name: string, args: unknown): Promise<unkno
             return ContextTools.handleContextStatus(args as Parameters<typeof ContextTools.handleContextStatus>[0]);
         case 'protokoll_list_projects':
             return ContextTools.handleListProjects(args as Parameters<typeof ContextTools.handleListProjects>[0]);
+        case 'protokoll_list_project_plans':
+            return ContextTools.handleListProjectPlans(
+                args as Parameters<typeof ContextTools.handleListProjectPlans>[0],
+            );
         case 'protokoll_list_people':
             return ContextTools.handleListPeople(args as Parameters<typeof ContextTools.handleListPeople>[0]);
         case 'protokoll_list_terms':
