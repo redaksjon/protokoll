@@ -14,9 +14,37 @@ import * as yaml from 'js-yaml';
 import { resolve, isAbsolute } from 'node:path';
 import Logging from '@fjell/logging';
 import { findContextEntityInGcs, listContextEntitiesFromGcs } from './entityIndexService';
+import { entityIdLookupOrder } from '../util/scopedEntityId';
 
 type EntityType = 'person' | 'project' | 'term' | 'company' | 'ignored';
 const logger = Logging.getLogger('@redaksjon/protokoll-mcp').get('entity-resources');
+
+/** YAML keys that may hold large plan lists — omitted from entity resources; use protokoll_list_project_plans. */
+const PROJECT_PLAN_ARRAY_KEYS = ['related_plans', 'plans', 'riotplan_plans'] as const;
+
+function stripProjectPlanArraysForResource(entity: unknown): Record<string, unknown> {
+    const base =
+        entity && typeof entity === 'object' && !Array.isArray(entity)
+            ? { ...(entity as Record<string, unknown>) }
+            : {};
+    let totalRows = 0;
+    for (const k of PROJECT_PLAN_ARRAY_KEYS) {
+        const v = base[k];
+        if (Array.isArray(v)) {
+            totalRows += v.length;
+        }
+    }
+    for (const k of PROJECT_PLAN_ARRAY_KEYS) {
+        const v = base[k];
+        if (Array.isArray(v) && v.length > 0) {
+            delete base[k];
+        }
+    }
+    if (totalRows > 0) {
+        base.related_plans_total = totalRows;
+    }
+    return base;
+}
 
 const ENTITY_DIRECTORY: Record<EntityType, string> = {
     person: 'people',
@@ -39,14 +67,24 @@ export async function readEntityResource(
     if ((entityType as EntityType) in ENTITY_DIRECTORY && ServerConfig.isInitialized()) {
         const storageConfig = ServerConfig.getStorageConfig();
         if (storageConfig.backend === 'gcs') {
-            const gcsEntity = await findContextEntityInGcs(entityType as EntityType, entityId);
-            if (gcsEntity) {
-                const yamlContent = yaml.dump(gcsEntity);
-                return {
-                    uri: buildEntityUri(entityType as any, entityId),
-                    mimeType: 'application/yaml',
-                    text: yamlContent,
-                };
+            for (const tryId of entityIdLookupOrder(entityId)) {
+                const gcsEntity = await findContextEntityInGcs(entityType as EntityType, tryId);
+                if (gcsEntity) {
+                    const idForUri =
+                        typeof (gcsEntity as { id?: unknown }).id === 'string'
+                            ? String((gcsEntity as { id: string }).id).trim()
+                            : tryId;
+                    const toDump =
+                        entityType === 'project'
+                            ? stripProjectPlanArraysForResource(gcsEntity)
+                            : gcsEntity;
+                    const yamlContent = yaml.dump(toDump);
+                    return {
+                        uri: buildEntityUri(entityType as any, idForUri),
+                        mimeType: 'application/yaml',
+                        text: yamlContent,
+                    };
+                }
             }
         }
     }
@@ -78,45 +116,61 @@ export async function readEntityResource(
         throw new Error(`No Protokoll context found. Expected .protokoll/ or context dirs in ${searchDir}`);
     }
 
-    const lookupEntity = (
+    const lookupEntityById = (
         candidate: ContextInstance,
+        forId: string,
     ): ReturnType<ContextInstance['getPerson']> | ReturnType<ContextInstance['getProject']> | ReturnType<ContextInstance['getTerm']> | ReturnType<ContextInstance['getCompany']> | ReturnType<ContextInstance['getIgnored']> => {
         switch (entityType) {
             case 'person':
-                return candidate.getPerson(entityId);
+                return candidate.getPerson(forId);
             case 'project':
-                return candidate.getProject(entityId);
+                return candidate.getProject(forId);
             case 'term':
-                return candidate.getTerm(entityId);
+                return candidate.getTerm(forId);
             case 'company':
-                return candidate.getCompany(entityId);
+                return candidate.getCompany(forId);
             case 'ignored':
-                return candidate.getIgnored(entityId);
+                return candidate.getIgnored(forId);
             default:
                 throw new Error(`Unknown entity type: ${entityType}`);
         }
     };
 
-    let entity = lookupEntity(context);
+    const serverContext = ServerConfig.isInitialized() ? ServerConfig.getContext() : undefined;
+    if (serverContext?.hasContext() && serverContext !== context) {
+        try {
+            await serverContext.reload();
+        } catch (error) {
+            logger.debug('entity.read.server_context_reload_failed', {
+                entityType,
+                entityId,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
 
-    if (!entity && ServerConfig.isInitialized()) {
-        const serverContext = ServerConfig.getContext();
+    let entity:
+        | ReturnType<ContextInstance['getPerson']>
+        | ReturnType<ContextInstance['getProject']>
+        | ReturnType<ContextInstance['getTerm']>
+        | ReturnType<ContextInstance['getCompany']>
+        | ReturnType<ContextInstance['getIgnored']>
+        | undefined;
+
+    for (const tryId of entityIdLookupOrder(entityId)) {
+        entity = lookupEntityById(context, tryId);
+        if (entity) {
+            break;
+        }
         if (serverContext?.hasContext() && serverContext !== context) {
-            try {
-                await serverContext.reload();
-            } catch (error) {
-                logger.debug('entity.read.server_context_reload_failed', {
-                    entityType,
-                    entityId,
-                    error: error instanceof Error ? error.message : String(error),
-                });
-            }
-            entity = lookupEntity(serverContext);
+            entity = lookupEntityById(serverContext, tryId);
             if (entity) {
                 logger.info('entity.read.server_context_fallback_hit', {
                     entityType,
                     entityId,
+                    tryId,
                 });
+                break;
             }
         }
     }
@@ -138,16 +192,20 @@ export async function readEntityResource(
         throw new Error(`${entityType} "${entityId}" not found`);
     }
 
+    const canonicalId = entity.id;
+
     logger.info('entity.read.found', {
         entityType,
         entityId,
+        canonicalId: canonicalId !== entityId ? canonicalId : undefined,
     });
 
-    // Convert to YAML for readability
-    const yamlContent = yaml.dump(entity);
+    // Convert to YAML for readability (strip heavy plan arrays from project resources)
+    const payload = entityType === 'project' ? stripProjectPlanArraysForResource(entity) : entity;
+    const yamlContent = yaml.dump(payload);
 
     return {
-        uri: buildEntityUri(entityType as any, entityId),
+        uri: buildEntityUri(entityType as any, canonicalId),
         mimeType: 'application/yaml',
         text: yamlContent,
     };

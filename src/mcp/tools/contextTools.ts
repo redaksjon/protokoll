@@ -7,6 +7,7 @@ import type { ContextInstance } from '@/context';
 import type { Company, Entity, EntityType, Person, Project, Term } from '@/context/types';
 import { formatEntity, createToolContext } from './shared';
 import { listContextEntitiesFromGcs } from '../resources/entityIndexService';
+import { resolveCanonicalEntityId } from '../util/scopedEntityId';
 import { 
     findPersonResilient, 
     findCompanyResilient, 
@@ -42,7 +43,10 @@ async function getContextInstance(contextDirectory?: string): Promise<ContextIns
 }
 
 function normalizeProjectId(value: string | null | undefined): string {
-    return typeof value === 'string' ? value.trim().toLowerCase() : '';
+    if (typeof value !== 'string') {
+        return '';
+    }
+    return resolveCanonicalEntityId(value).trim().toLowerCase();
 }
 
 function createAllowedProjectSet(allowedProjectIds?: string[]): Set<string> {
@@ -60,6 +64,28 @@ function isProjectInScope(projectId: string | null | undefined, allowedProjectId
 
 function hasScopedProjectReference(projectIds: string[] | undefined, allowedProjectIds: Set<string>): boolean {
     return (projectIds || []).some((projectId) => isProjectInScope(projectId, allowedProjectIds));
+}
+
+/** Collapse duplicate rows that share the same canonical UUID (e.g. "uuid" vs "server:uuid"). */
+function dedupeByCanonicalEntityId<T extends { id: string }>(items: T[]): T[] {
+    const groups = new Map<string, T[]>();
+    for (const item of items) {
+        const key = resolveCanonicalEntityId(item.id).toLowerCase();
+        const arr = groups.get(key) ?? [];
+        arr.push(item);
+        groups.set(key, arr);
+    }
+    const out: T[] = [];
+    for (const group of groups.values()) {
+        if (group.length === 1) {
+            out.push(group[0]);
+            continue;
+        }
+        const preferred =
+            group.find((r) => r.id === resolveCanonicalEntityId(r.id)) ?? group[0];
+        out.push(preferred);
+    }
+    return out;
 }
 
 async function loadProjects(context: ContextInstance): Promise<Project[]> {
@@ -493,7 +519,7 @@ export async function handleListProjects(args: {
 }) {
     const context = await getContextInstance(args.contextDirectory);
     const scope = await buildProjectScopeState(context, args.allowedProjectIds);
-    let projects = scope?.projects ?? await loadProjects(context);
+    let projects = dedupeByCanonicalEntityId(scope?.projects ?? await loadProjects(context));
     if (!args.includeInactive) {
         projects = projects.filter(p => p.active !== false);
     }
@@ -520,7 +546,7 @@ export async function handleListProjects(args: {
         offset,
         count: paginatedProjects.length,
         projects: paginatedProjects.map(p => ({
-            id: p.id,
+            id: resolveCanonicalEntityId(p.id),
             name: p.name,
             active: p.active !== false,
             destination: p.routing?.destination,
@@ -540,7 +566,7 @@ export async function handleListPeople(args: {
 }) {
     const context = await getContextInstance(args.contextDirectory);
     const scope = await buildProjectScopeState(context, args.allowedProjectIds);
-    let people = await loadPeople(context);
+    let people = dedupeByCanonicalEntityId(await loadPeople(context));
     if (scope) {
         people = people.filter((person) => scope.associatedPeople.has(person.id));
     }
@@ -568,7 +594,7 @@ export async function handleListPeople(args: {
         offset,
         count: paginatedPeople.length,
         people: paginatedPeople.map(p => ({
-            id: p.id,
+            id: resolveCanonicalEntityId(p.id),
             name: p.name,
             company: p.company,
             role: p.role,
@@ -586,7 +612,7 @@ export async function handleListTerms(args: {
 }) {
     const context = await getContextInstance(args.contextDirectory);
     const scope = await buildProjectScopeState(context, args.allowedProjectIds);
-    let terms = await loadTerms(context);
+    let terms = dedupeByCanonicalEntityId(await loadTerms(context));
     if (scope) {
         terms = terms.filter((term) => hasScopedProjectReference(term.projects, scope.allowedProjectIds));
     }
@@ -614,7 +640,7 @@ export async function handleListTerms(args: {
         offset,
         count: paginatedTerms.length,
         terms: paginatedTerms.map(t => ({
-            id: t.id,
+            id: resolveCanonicalEntityId(t.id),
             name: t.name,
             expansion: t.expansion,
             domain: t.domain,
@@ -632,7 +658,7 @@ export async function handleListCompanies(args: {
 }) {
     const context = await getContextInstance(args.contextDirectory);
     const scope = await buildProjectScopeState(context, args.allowedProjectIds);
-    let companies = await loadCompanies(context);
+    let companies = dedupeByCanonicalEntityId(await loadCompanies(context));
     if (scope) {
         companies = companies.filter((company) => scope.associatedCompanies.has(company.id));
     }
@@ -660,7 +686,7 @@ export async function handleListCompanies(args: {
         offset,
         count: paginatedCompanies.length,
         companies: paginatedCompanies.map(c => ({
-            id: c.id,
+            id: resolveCanonicalEntityId(c.id),
             name: c.name,
             fullName: c.fullName,
             industry: c.industry,
@@ -708,29 +734,31 @@ export async function handleGetEntity(args: {
     const context = await getContextInstance(args.contextDirectory);
     const scope = await buildProjectScopeState(context, args.allowedProjectIds);
 
+    const entityId = resolveCanonicalEntityId(args.entityId.trim());
+
     let entity: Entity;
     switch (args.entityType) {
         case 'project':
-            entity = findProjectResilient(context, args.entityId);
+            entity = findProjectResilient(context, entityId);
             break;
         case 'person':
-            entity = findPersonResilient(context, args.entityId);
+            entity = findPersonResilient(context, entityId);
             break;
         case 'term':
-            entity = findTermResilient(context, args.entityId);
+            entity = findTermResilient(context, entityId);
             break;
         case 'company':
-            entity = findCompanyResilient(context, args.entityId);
+            entity = findCompanyResilient(context, entityId);
             break;
         case 'ignored':
-            entity = findIgnoredResilient(context, args.entityId);
+            entity = findIgnoredResilient(context, entityId);
             break;
         default:
             throw new Error(`Unknown entity type: ${args.entityType}`);
     }
 
     if (scope && !isEntityVisibleInProjectScope(entity, scope)) {
-        throw new Error(`Project-scoped key cannot access ${args.entityType} "${args.entityId}".`);
+        throw new Error(`Project-scoped key cannot access ${args.entityType} "${entityId}".`);
     }
 
     const filePath = context.getEntityFilePath(entity);
@@ -785,4 +813,174 @@ export async function handlePredictEntities(args: {
     });
     
     return { success: true, predictions };
+}
+
+// --- Project plan summaries (Riotplan / extended project YAML) ----------------------------
+
+const PROJECT_PLAN_ARRAY_KEYS = ['related_plans', 'plans', 'riotplan_plans'] as const;
+
+function humanizePlanSlug(slug: string): string {
+    const trimmed = slug.trim();
+    const withoutPrefix = trimmed.replace(/^[0-9a-f]{8}-/i, '');
+    const words = withoutPrefix.split(/[-_/]+/).filter(Boolean);
+    if (words.length === 0) {
+        return trimmed;
+    }
+    return words
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+        .join(' ');
+}
+
+function pickString(obj: Record<string, unknown>, keys: string[]): string {
+    for (const k of keys) {
+        const v = obj[k];
+        if (typeof v === 'string' && v.trim().length > 0) {
+            return v.trim();
+        }
+    }
+    return '';
+}
+
+function pickCreatedMs(obj: Record<string, unknown>): number {
+    const raw = pickString(obj, ['createdAt', 'created_at', 'created', 'date', 'startedAt', 'started_at']);
+    if (!raw) {
+        return NaN;
+    }
+    const t = Date.parse(raw);
+    return Number.isNaN(t) ? NaN : t;
+}
+
+function normalizePlanRow(raw: unknown, index: number): {
+    id: string;
+    title: string;
+    stage: string;
+    createdAt: string | null;
+    createdMs: number;
+} {
+    if (typeof raw === 'string') {
+        const id = raw.trim();
+        return {
+            id: id || `row-${index}`,
+            title: humanizePlanSlug(id),
+            stage: '',
+            createdAt: null,
+            createdMs: NaN,
+        };
+    }
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        const o = raw as Record<string, unknown>;
+        const id =
+            pickString(o, ['id', 'planId', 'plan_id', 'folder', 'slug', 'path', 'name']) || `row-${index}`;
+        const explicitTitle = pickString(o, ['title', 'label', 'displayName', 'planTitle', 'summary']);
+        const title =
+            explicitTitle.length > 0
+                ? explicitTitle
+                : humanizePlanSlug(
+                    pickString(o, ['folder', 'slug', 'path', 'id', 'planId', 'plan_id']) || id,
+                );
+        const stage = pickString(o, ['stage', 'status', 'state', 'phase', 'category']);
+        const createdRaw = pickString(o, ['createdAt', 'created_at', 'created', 'date', 'startedAt']);
+        const createdMs = pickCreatedMs(o);
+        return {
+            id,
+            title,
+            stage,
+            createdAt: createdRaw || null,
+            createdMs,
+        };
+    }
+    return {
+        id: `row-${index}`,
+        title: '',
+        stage: '',
+        createdAt: null,
+        createdMs: NaN,
+    };
+}
+
+function collectPlanRowsFromProjectRecord(record: Record<string, unknown>): unknown[] {
+    const rows: unknown[] = [];
+    for (const k of PROJECT_PLAN_ARRAY_KEYS) {
+        const v = record[k];
+        if (Array.isArray(v)) {
+            rows.push(...v);
+        }
+    }
+    return rows;
+}
+
+export const listProjectPlansTool: Tool = {
+    name: 'protokoll_list_project_plans',
+    description:
+        'List plans associated with a project entity (from related_plans / plans / riotplan_plans on the project YAML). ' +
+        'Supports limit/offset pagination. Used by clients instead of embedding full plan lists in the project resource.',
+    inputSchema: {
+        type: 'object',
+        properties: {
+            projectId: {
+                type: 'string',
+                description: 'Project entity UUID',
+            },
+            limit: {
+                type: 'number',
+                description: 'Page size (default 25, max 100)',
+            },
+            offset: {
+                type: 'number',
+                description: 'Number of plans to skip (default 0)',
+            },
+            contextDirectory: {
+                type: 'string',
+                description: 'Path to the .protokoll context directory',
+            },
+        },
+        required: ['projectId'],
+    },
+};
+
+export async function handleListProjectPlans(args: {
+    projectId: string;
+    limit?: number;
+    offset?: number;
+    contextDirectory?: string;
+    allowedProjectIds?: string[];
+}) {
+    const context = await getContextInstance(args.contextDirectory);
+    const scope = await buildProjectScopeState(context, args.allowedProjectIds);
+
+    const projectId = resolveCanonicalEntityId(args.projectId.trim());
+    const entity = findProjectResilient(context, projectId);
+    if (scope && !isEntityVisibleInProjectScope(entity, scope)) {
+        throw new Error(`Project-scoped key cannot access project "${projectId}".`);
+    }
+
+    const record = entity as unknown as Record<string, unknown>;
+    const allRows = collectPlanRowsFromProjectRecord(record);
+    const normalized = allRows.map((r, i) => normalizePlanRow(r, i));
+    normalized.sort((a, b) => {
+        const da = Number.isNaN(a.createdMs) ? -Infinity : a.createdMs;
+        const db = Number.isNaN(b.createdMs) ? -Infinity : b.createdMs;
+        if (db !== da) {
+            return db - da;
+        }
+        return a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
+    });
+
+    const limit = Math.min(100, Math.max(1, args.limit ?? 25));
+    const offset = Math.max(0, args.offset ?? 0);
+    const page = normalized.slice(offset, offset + limit);
+    const plans = page.map((p) => ({
+        id: p.id,
+        title: p.title,
+        stage: p.stage,
+        createdAt: p.createdAt,
+    }));
+
+    return {
+        total: normalized.length,
+        limit,
+        offset,
+        count: plans.length,
+        plans,
+    };
 }

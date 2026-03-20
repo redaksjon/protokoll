@@ -251,7 +251,7 @@ export const editProjectTool: Tool = {
     description:
         'Edit an existing project with manual modifications. Unlike protokoll_update_project (which regenerates from a source), ' +
         'this allows direct edits: adding specific sounds_like variants, changing routing, modifying classification, managing relationships, etc. ' +
-        'For array fields (sounds_like, topics, explicit_phrases, associated_people, associated_companies, children, siblings, related_terms), ' +
+        'For array fields (sounds_like, urls, topics, explicit_phrases, associated_people, associated_companies, children, siblings, related_terms), ' +
         'use add_* to append or remove_* to delete specific values, or use the base field name to replace the entire array.',
     inputSchema: {
         type: 'object',
@@ -300,6 +300,21 @@ export const editProjectTool: Tool = {
                 type: 'array',
                 items: { type: 'string' },
                 description: 'Remove these sounds_like variants',
+            },
+            urls: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Replace all project URLs with this list (e.g. org homepage, documentation)',
+            },
+            add_urls: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Append these URLs to the project urls list',
+            },
+            remove_urls: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Remove these URLs from the project urls list',
             },
             topics: {
                 type: 'array',
@@ -998,18 +1013,29 @@ export async function handleEditProject(args: {
     remove_siblings?: string[];
     add_related_terms?: string[];
     remove_related_terms?: string[];
+    urls?: string[];
+    add_urls?: string[];
+    remove_urls?: string[];
     contextDirectory?: string;
 }) {
     const context = await createToolContext(args.contextDirectory);
     await assertContextAvailableForEntityEdit(context);
 
     const existingProject = findProjectResilient(context, args.id);
+    const existingProjectUrls = (existingProject as { urls?: string[] }).urls;
 
     const updatedSoundsLike = mergeArray(
         existingProject.sounds_like,
         args.sounds_like,
         args.add_sounds_like,
         args.remove_sounds_like
+    );
+
+    const updatedUrls = mergeArray(
+        existingProjectUrls,
+        args.urls,
+        args.add_urls,
+        args.remove_urls
     );
 
     const updatedTopics = mergeArray(
@@ -1116,6 +1142,12 @@ export async function handleEditProject(args: {
         delete updatedProject.sounds_like;
     }
 
+    if (updatedUrls !== undefined) {
+        (updatedProject as { urls?: string[] }).urls = updatedUrls;
+    } else if (existingProjectUrls && (args.urls !== undefined || args.remove_urls)) {
+        delete (updatedProject as { urls?: string[] }).urls;
+    }
+
     // Handle classification arrays
     if (updatedTopics !== undefined) {
         updatedProject.classification.topics = updatedTopics;
@@ -1178,6 +1210,9 @@ export async function handleEditProject(args: {
     if (args.sounds_like !== undefined) changes.push(`sounds_like replaced with ${args.sounds_like.length} items`);
     if (args.add_sounds_like?.length) changes.push(`added ${args.add_sounds_like.length} sounds_like variants`);
     if (args.remove_sounds_like?.length) changes.push(`removed ${args.remove_sounds_like.length} sounds_like variants`);
+    if (args.urls !== undefined) changes.push(`urls replaced with ${args.urls.length} items`);
+    if (args.add_urls?.length) changes.push(`added ${args.add_urls.length} urls`);
+    if (args.remove_urls?.length) changes.push(`removed ${args.remove_urls.length} urls`);
     if (args.topics !== undefined) changes.push(`topics replaced with ${args.topics.length} items`);
     if (args.add_topics?.length) changes.push(`added ${args.add_topics.length} topics`);
     if (args.remove_topics?.length) changes.push(`removed ${args.remove_topics.length} topics`);
