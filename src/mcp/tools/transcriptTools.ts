@@ -3077,7 +3077,7 @@ export async function handleCorrectToEntity(args: {
             try {
                 transcript.enhancementLog.logStep(
                     new Date(),
-                    'user-correction',
+                    'enhance',
                     'correction_applied',
                     {
                         original: args.selectedText,
