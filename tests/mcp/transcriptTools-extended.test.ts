@@ -731,6 +731,9 @@ describe('transcriptTools - extended handlers', () => {
 
             const contextCreateSpy = vi.spyOn(ContextModule, 'create').mockResolvedValue({
                 getAllProjects: () => [],
+                getAllPeople: () => [],
+                getAllTerms: () => [],
+                getAllCompanies: () => [],
                 getProject: (id: string) => ({ id, name: `Project ${id}` }),
                 getPerson: () => undefined,
                 getTerm: () => undefined,
@@ -876,6 +879,9 @@ describe('transcriptTools - extended handlers', () => {
 
             const contextCreateSpy = vi.spyOn(ContextModule, 'create').mockResolvedValue({
                 getAllProjects: () => [],
+                getAllPeople: () => [],
+                getAllTerms: () => [],
+                getAllCompanies: () => [],
                 getProject: () => undefined,
                 getPerson: () => undefined,
                 getTerm: () => undefined,
@@ -900,6 +906,9 @@ describe('transcriptTools - extended handlers', () => {
 
             const contextCreateSpy = vi.spyOn(ContextModule, 'create').mockResolvedValue({
                 getAllProjects: () => [],
+                getAllPeople: () => [],
+                getAllTerms: () => [],
+                getAllCompanies: () => [],
                 getProject: () => undefined,
                 getPerson: () => undefined,
                 getTerm: () => undefined,
