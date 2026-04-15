@@ -104,11 +104,8 @@ function Install() {
                         <div className="code-line"><span className="code-comment"># Required: OpenAI API key for Whisper transcription</span></div>
                         <div className="code-line">OPENAI_API_KEY=sk-...</div>
                         <div className="code-line"></div>
-                        <div className="code-line"><span className="code-comment"># Optional: Protokoll license key (if applicable)</span></div>
-                        <div className="code-line">PROTOKOLL_LICENSE_KEY=pk_live_...</div>
-                        <div className="code-line"></div>
                         <div className="code-line"><span className="code-comment"># Optional: Default output directory for transcripts</span></div>
-                        <div className="code-line">PROTOKOLL_OUTPUT_DIR=~/notes</div>
+                        <div className="code-line">PROTOKOLL_OUTPUT_DIRECTORY=~/notes</div>
                     </div>
                 </div>
             </section>
@@ -127,7 +124,7 @@ function Install() {
                         <div className="terminal-body">
                             <div className="terminal-line">
                                 <span className="terminal-prompt">$</span>
-                                <span className="terminal-input">protokoll</span>
+                                <span className="terminal-input">protokoll-mcp-http</span>
                             </div>
                             <div className="terminal-line">
                                 <span className="terminal-highlight">[Protokoll MCP Server]</span>

@@ -947,6 +947,10 @@ section {
     color: var(--color-text-dim);
 }
 
+.code-string {
+    color: #7ec699;
+}
+
 .quickstart-note {
     max-width: 700px;
     margin: 3rem auto 0;
@@ -1491,6 +1495,10 @@ section {
     
     .demo-after {
         background: linear-gradient(135deg, rgba(5, 150, 105, 0.08) 0%, rgba(124, 58, 237, 0.08) 100%);
+    }
+
+    .code-string {
+        color: #2e7d32;
     }
 }
 

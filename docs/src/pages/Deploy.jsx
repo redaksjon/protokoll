@@ -33,10 +33,10 @@ function Deploy() {
                         <div className="terminal-body">
                             <div className="terminal-line">
                                 <span className="terminal-prompt">$</span>
-                                <span className="terminal-input">protokoll</span>
+                                <span className="terminal-input">protokoll-mcp-http</span>
                             </div>
                             <div className="terminal-line">
-                                <span className="terminal-dim">[Protokoll MCP Server]</span>
+                                <span className="terminal-dim">[Protokoll MCP HTTP Server]</span>
                             </div>
                             <div className="terminal-line">
                                 <span className="terminal-dim">Server running at http://localhost:3000</span>
@@ -70,14 +70,13 @@ function Deploy() {
                         <div className="code-line"></div>
                         <div className="code-line">EXPOSE 3000</div>
                         <div className="code-line"></div>
-                        <div className="code-line">CMD ["protokoll"]</div>
+                        <div className="code-line">CMD ["protokoll-mcp-http", "--host", "0.0.0.0"]</div>
                     </div>
 
                     <h3>Environment File</h3>
                     <div className="code-block">
                         <div className="code-line">OPENAI_API_KEY=sk-...</div>
-                        <div className="code-line">PROTOKOLL_PORT=3000</div>
-                        <div className="code-line">PROTOKOLL_HOST=0.0.0.0</div>
+                        <div className="code-line">MCP_PORT=3000</div>
                     </div>
 
                     <h3>Build and Run</h3>
@@ -218,9 +217,14 @@ function Deploy() {
                             </div>
                             <div className="terminal-line">
                                 <span className="terminal-prompt">$</span>
-                                <span className="terminal-input">PROTOKOLL_HOST=0.0.0.0 protokoll &</span>
+                                <span className="terminal-input">protokoll-mcp-http --host 0.0.0.0 &</span>
                             </div>
                         </div>
+                    </div>
+
+                    <div className="callout callout-info">
+                        <h4>Host Binding</h4>
+                        <p>By default, Protokoll binds to <code>127.0.0.1</code> (localhost only). Use <code>--host 0.0.0.0</code> to accept external connections. For production, always use a reverse proxy with TLS.</p>
                     </div>
 
                     <h3>4. Set Up a Reverse Proxy (Optional)</h3>
@@ -277,7 +281,7 @@ function Deploy() {
                                 <div className="code-line">    name: protokoll</div>
                                 <div className="code-line">    env: node</div>
                                 <div className="code-line">    buildCommand: npm install -g @redaksjon/protokoll</div>
-                                <div className="code-line">    startCommand: protokoll</div>
+                                <div className="code-line">    startCommand: protokoll-mcp-http-mcp-http</div>
                             </div>
                             <p>Add <code>OPENAI_API_KEY</code> as an environment variable in Render dashboard.</p>
                         </div>

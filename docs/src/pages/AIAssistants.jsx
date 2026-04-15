@@ -62,7 +62,7 @@ function AIAssistants() {
                         <div className="code-line">  <span className="code-string">"mcpServers"</span>: {`{`}</div>
                         <div className="code-line">    <span className="code-string">"protokoll"</span>: {`{`}</div>
                         <div className="code-line">      <span className="code-string">"command"</span>: <span className="code-string">"npx"</span>,</div>
-                        <div className="code-line">      <span className="code-string">"args"</span>: [<span className="code-string">"-y"</span>, <span className="code-string">"-p"</span>, <span className="code-string">"@redaksjon/protokoll"</span>, <span className="code-string">"protokoll-mcp"</span>]</div>
+                        <div className="code-line">      <span className="code-string">"args"</span>: [<span className="code-string">"-y"</span>, <span className="code-string">"-p"</span>, <span className="code-string">"@redaksjon/protokoll"</span>, <span className="code-string">"protokoll-mcp-http"</span>]</div>
                         <div className="code-line">    {`}`}</div>
                         <div className="code-line">  {`}`}</div>
                         <div className="code-line">{`}`}</div>
@@ -91,7 +91,7 @@ function AIAssistants() {
                         <div className="code-line">  <span className="code-string">"mcpServers"</span>: {`{`}</div>
                         <div className="code-line">    <span className="code-string">"protokoll"</span>: {`{`}</div>
                         <div className="code-line">      <span className="code-string">"command"</span>: <span className="code-string">"npx"</span>,</div>
-                        <div className="code-line">      <span className="code-string">"args"</span>: [<span className="code-string">"-y"</span>, <span className="code-string">"-p"</span>, <span className="code-string">"@redaksjon/protokoll"</span>, <span className="code-string">"protokoll-mcp"</span>]</div>
+                        <div className="code-line">      <span className="code-string">"args"</span>: [<span className="code-string">"-y"</span>, <span className="code-string">"-p"</span>, <span className="code-string">"@redaksjon/protokoll"</span>, <span className="code-string">"protokoll-mcp-http"</span>]</div>
                         <div className="code-line">    {`}`}</div>
                         <div className="code-line">  {`}`}</div>
                         <div className="code-line">{`}`}</div>
@@ -107,7 +107,7 @@ function AIAssistants() {
                         <div className="code-line">{`{`}</div>
                         <div className="code-line">  <span className="code-string">"mcpServers"</span>: {`{`}</div>
                         <div className="code-line">    <span className="code-string">"protokoll"</span>: {`{`}</div>
-                        <div className="code-line">      <span className="code-string">"command"</span>: <span className="code-string">"protokoll-mcp"</span></div>
+                        <div className="code-line">      <span className="code-string">"command"</span>: <span className="code-string">"protokoll-mcp-http"</span></div>
                         <div className="code-line">    {`}`}</div>
                         <div className="code-line">  {`}`}</div>
                         <div className="code-line">{`}`}</div>
@@ -118,7 +118,7 @@ function AIAssistants() {
                         <div className="code-line">  <span className="code-string">"mcpServers"</span>: {`{`}</div>
                         <div className="code-line">    <span className="code-string">"protokoll"</span>: {`{`}</div>
                         <div className="code-line">      <span className="code-string">"command"</span>: <span className="code-string">"npx"</span>,</div>
-                        <div className="code-line">      <span className="code-string">"args"</span>: [<span className="code-string">"-y"</span>, <span className="code-string">"-p"</span>, <span className="code-string">"@redaksjon/protokoll"</span>, <span className="code-string">"protokoll-mcp"</span>]</div>
+                        <div className="code-line">      <span className="code-string">"args"</span>: [<span className="code-string">"-y"</span>, <span className="code-string">"-p"</span>, <span className="code-string">"@redaksjon/protokoll"</span>, <span className="code-string">"protokoll-mcp-http"</span>]</div>
                         <div className="code-line">    {`}`}</div>
                         <div className="code-line">  {`}`}</div>
                         <div className="code-line">{`}`}</div>
