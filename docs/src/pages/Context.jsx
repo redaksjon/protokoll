@@ -39,7 +39,7 @@ function Context() {
                             <div className="context-file context-indent-3">kubernetes.yaml</div>
                             <div className="context-folder context-indent-2">companies/</div>
                             <div className="context-file context-indent-3">acme-corp.yaml</div>
-                            <div className="context-file context-indent-2">.protokoll.yaml</div>
+                            <div className="context-file context-indent-2">protokoll-config.yaml</div>
                         </div>
                     </div>
                 </div>
@@ -66,41 +66,21 @@ sounds_like:
 context: "Met at the CloudConf 2025"`}</pre>
                     </div>
 
-                    <h3>Using the CLI</h3>
-                    <div className="terminal-demo">
-                        <div className="terminal-header">
-                            <span className="terminal-dot red"></span>
-                            <span className="terminal-dot yellow"></span>
-                            <span className="terminal-dot green"></span>
-                            <span className="terminal-title">protokoll person add</span>
-                        </div>
-                        <div className="terminal-body">
-                            <div className="terminal-line">
-                                <span className="terminal-highlight">[Add New Person]</span>
-                            </div>
-                            <div className="terminal-line">
-                                <span className="terminal-dim">Full name: </span>
-                                <span className="terminal-user">Priya Sharma</span>
-                            </div>
-                            <div className="terminal-line">
-                                <span className="terminal-dim">ID (Enter for "priya-sharma"): </span>
-                            </div>
-                            <div className="terminal-line">
-                                <span className="terminal-dim">Company ID: </span>
-                                <span className="terminal-user">acme-corp</span>
-                            </div>
-                            <div className="terminal-line">
-                                <span className="terminal-dim">Role: </span>
-                                <span className="terminal-user">Engineering Manager</span>
-                            </div>
-                            <div className="terminal-line">
-                                <span className="terminal-dim">Sounds like: </span>
-                                <span className="terminal-user">pre a, pria, preeya</span>
-                            </div>
-                            <div className="terminal-line">
-                                <span className="terminal-success">Person "Priya Sharma" saved successfully.</span>
-                            </div>
-                        </div>
+                    <h3>Using MCP Tools</h3>
+                    <p>Protokoll is an MCP server — you invoke these tools through your AI assistant, not via a CLI.</p>
+                    <div className="code-block">
+                        <div className="code-line"><span className="code-comment"># Add a person</span></div>
+                        <div className="code-line">protokoll_add_person</div>
+                        <div className="code-line"></div>
+                        <div className="code-line"><span className="code-comment"># Key parameters:</span></div>
+                        <div className="code-line"><span className="code-dim">  name: "Priya Sharma"</span></div>
+                        <div className="code-line"><span className="code-dim">  id: "priya-sharma"</span></div>
+                        <div className="code-line"><span className="code-dim">  company: "acme-corp"</span></div>
+                        <div className="code-line"><span className="code-dim">  role: "Engineering Manager"</span></div>
+                        <div className="code-line"><span className="code-dim">  sounds_like: ["pre a", "pria", "preeya"]</span></div>
+                        <div className="code-line"></div>
+                        <div className="code-line"><span className="code-comment"># List all people</span></div>
+                        <div className="code-line">protokoll_list_people</div>
                     </div>
                 </div>
             </section>
@@ -136,42 +116,16 @@ explicit_phrases:
 
                     <h3>Smart Project Creation</h3>
                     <p>Use AI to generate project metadata from a GitHub repo or documentation:</p>
-                    <div className="terminal-demo">
-                        <div className="terminal-header">
-                            <span className="terminal-dot red"></span>
-                            <span className="terminal-dot yellow"></span>
-                            <span className="terminal-dot green"></span>
-                            <span className="terminal-title">protokoll project add --smart</span>
-                        </div>
-                        <div className="terminal-body">
-                            <div className="terminal-line">
-                                <span className="terminal-highlight">[Add New Project - Smart Mode]</span>
-                            </div>
-                            <div className="terminal-line">
-                                <span className="terminal-dim">Fetching content from source...</span>
-                            </div>
-                            <div className="terminal-line">
-                                <span className="terminal-dim">Analyzing content...</span>
-                            </div>
-                            <div className="terminal-line">
-                                <span className="terminal-highlight">[Generated Metadata]</span>
-                            </div>
-                            <div className="terminal-line">
-                                <span className="terminal-dim">  Name: Protokoll</span>
-                            </div>
-                            <div className="terminal-line">
-                                <span className="terminal-dim">  Description: Intelligent audio transcription...</span>
-                            </div>
-                            <div className="terminal-line">
-                                <span className="terminal-dim">  Sounds like: protocol, pro to call...</span>
-                            </div>
-                            <div className="terminal-line">
-                                <span className="terminal-dim">  Topics: audio, transcription, mcp</span>
-                            </div>
-                            <div className="terminal-line">
-                                <span className="terminal-success">Project "Protokoll" saved successfully.</span>
-                            </div>
-                        </div>
+                    <div className="code-block">
+                        <div className="code-line"><span className="code-comment"># Add a project with smart assist</span></div>
+                        <div className="code-line">protokoll_add_project</div>
+                        <div className="code-line"></div>
+                        <div className="code-line"><span className="code-comment"># Key parameters:</span></div>
+                        <div className="code-line"><span className="code-dim">  name: "Protokoll"</span></div>
+                        <div className="code-line"><span className="code-dim">  useSmartAssist: true</span></div>
+                        <div className="code-line"></div>
+                        <div className="code-line"><span className="code-comment"># List all projects</span></div>
+                        <div className="code-line">protokoll_list_projects</div>
                     </div>
                 </div>
             </section>
@@ -201,16 +155,18 @@ topics:
   - cloud`}</pre>
                     </div>
 
-                    <h3>CLI Examples</h3>
+                    <h3>MCP Tool Examples</h3>
                     <div className="code-block">
-                        <div className="code-line"><span className="code-comment"># Add a term interactively</span></div>
-                        <div className="code-line">protokoll term add</div>
+                        <div className="code-line"><span className="code-comment"># Add a term</span></div>
+                        <div className="code-line">protokoll_add_term</div>
                         <div className="code-line"></div>
-                        <div className="code-line"><span className="code-comment"># Add with all options</span></div>
-                        <div className="code-line">protokoll term add --term "Kubernetes" --expansion "K8s" --domain devops</div>
+                        <div className="code-line"><span className="code-comment"># Key parameters:</span></div>
+                        <div className="code-line"><span className="code-dim">  term: "Kubernetes"</span></div>
+                        <div className="code-line"><span className="code-dim">  expansion: "K8s"</span></div>
+                        <div className="code-line"><span className="code-dim">  domain: "devops"</span></div>
                         <div className="code-line"></div>
                         <div className="code-line"><span className="code-comment"># List all terms</span></div>
-                        <div className="code-line">protokoll term list</div>
+                        <div className="code-line">protokoll_list_terms</div>
                     </div>
                 </div>
             </section>
@@ -237,10 +193,10 @@ sounds_like:
 
                     <div className="code-block">
                         <div className="code-line"><span className="code-comment"># Add a company</span></div>
-                        <div className="code-line">protokoll company add</div>
+                        <div className="code-line">protokoll_add_company</div>
                         <div className="code-line"></div>
                         <div className="code-line"><span className="code-comment"># List all companies</span></div>
-                        <div className="code-line">protokoll company list</div>
+                        <div className="code-line">protokoll_list_companies</div>
                     </div>
                 </div>
             </section>
@@ -250,45 +206,24 @@ sounds_like:
                     <h2>Context Management</h2>
                     
                     <h3>Check Status</h3>
-                    <div className="terminal-demo">
-                        <div className="terminal-header">
-                            <span className="terminal-dot red"></span>
-                            <span className="terminal-dot yellow"></span>
-                            <span className="terminal-dot green"></span>
-                            <span className="terminal-title">protokoll context status</span>
-                        </div>
-                        <div className="terminal-body">
-                            <div className="terminal-line">
-                                <span className="terminal-highlight">[Protokoll Context Status]</span>
-                            </div>
-                            <div className="terminal-line">
-                                <span className="terminal-dim">Context directory: /home/user/.protokoll</span>
-                            </div>
-                            <div className="terminal-line">
-                                <span className="terminal-dim">People: 12</span>
-                            </div>
-                            <div className="terminal-line">
-                                <span className="terminal-dim">Projects: 5</span>
-                            </div>
-                            <div className="terminal-line">
-                                <span className="terminal-dim">Terms: 28</span>
-                            </div>
-                            <div className="terminal-line">
-                                <span className="terminal-dim">Companies: 3</span>
-                            </div>
-                        </div>
+                    <div className="code-block">
+                        <div className="code-line"><span className="code-comment"># Check context status</span></div>
+                        <div className="code-line">protokoll_context_status</div>
                     </div>
 
                     <h3>Search Context</h3>
                     <div className="code-block">
                         <div className="code-line"><span className="code-comment"># Search across all entity types</span></div>
-                        <div className="code-line">protokoll context search "acme"</div>
+                        <div className="code-line">protokoll_search_context</div>
+                        <div className="code-line"></div>
+                        <div className="code-line"><span className="code-comment"># Key parameter:</span></div>
+                        <div className="code-line"><span className="code-dim">  query: "acme"</span></div>
                         <div className="code-line"></div>
                         <div className="code-line"><span className="code-comment"># List specific entity types</span></div>
-                        <div className="code-line">protokoll person list</div>
-                        <div className="code-line">protokoll project list</div>
-                        <div className="code-line">protokoll term list</div>
-                        <div className="code-line">protokoll company list</div>
+                        <div className="code-line">protokoll_list_people</div>
+                        <div className="code-line">protokoll_list_projects</div>
+                        <div className="code-line">protokoll_list_terms</div>
+                        <div className="code-line">protokoll_list_companies</div>
                     </div>
                 </div>
             </section>

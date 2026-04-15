@@ -72,13 +72,18 @@ function Install() {
                             </div>
                         </div>
                     </div>
+
+                    <div className="callout callout-info">
+                        <h4>Windows Support</h4>
+                        <p>Protokoll runs on Windows via WSL (recommended) or natively with Node.js 24+. For native Windows, install ffmpeg from <a href="https://ffmpeg.org/download.html" target="_blank" rel="noopener noreferrer">ffmpeg.org</a> and ensure both <code>node</code> and <code>ffmpeg</code> are on your PATH.</p>
+                    </div>
                 </div>
             </section>
 
             <section className="page-section">
                 <div className="container">
                     <h2>Configuration</h2>
-                    <p>Create a <code>.protokoll</code> configuration directory in your home folder:</p>
+                    <p>Create a directory for your server configuration and <code>.env</code> file. The <code>.env</code> file must be in the directory where you start the server, or you can use the <code>--cwd</code> flag to specify a different directory:</p>
                     <div className="terminal-demo">
                         <div className="terminal-header">
                             <span className="terminal-dot red"></span>
@@ -89,17 +94,26 @@ function Install() {
                         <div className="terminal-body">
                             <div className="terminal-line">
                                 <span className="terminal-prompt">$</span>
-                                <span className="terminal-input">mkdir -p ~/.protokoll</span>
+                                <span className="terminal-input">mkdir -p ~/protokoll-server && cd ~/protokoll-server</span>
                             </div>
                             <div className="terminal-line">
                                 <span className="terminal-prompt">$</span>
-                                <span className="terminal-input">cd ~/.protokoll</span>
+                                <span className="terminal-input">echo 'OPENAI_API_KEY=sk-...' &gt; .env</span>
+                            </div>
+                            <div className="terminal-line">
+                                <span className="terminal-prompt">$</span>
+                                <span className="terminal-input">protokoll-mcp-http</span>
                             </div>
                         </div>
                     </div>
 
+                    <div className="callout callout-warning">
+                        <h4>Where does <code>.env</code> need to live?</h4>
+                        <p>Protokoll uses <code>dotenv</code> to load environment variables, which reads the <code>.env</code> file from the <strong>current working directory</strong> (<code>process.cwd()</code>). If you start the server from a different directory than where your <code>.env</code> file is located, the variables won't be loaded. You can use the <code>--cwd</code> flag to explicitly set the working directory: <code>protokoll-mcp-http --cwd ~/protokoll-server</code></p>
+                    </div>
+
                     <h3>Environment Variables</h3>
-                    <p>Create a <code>.env</code> file in your configuration directory:</p>
+                    <p>Here are the variables you can set in your <code>.env</code> file:</p>
                     <div className="code-block">
                         <div className="code-line"><span className="code-comment"># Required: OpenAI API key for Whisper transcription</span></div>
                         <div className="code-line">OPENAI_API_KEY=sk-...</div>

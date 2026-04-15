@@ -57,26 +57,15 @@ function Deploy() {
                     
                     <h3>Dockerfile</h3>
                     <div className="code-block">
-                        <div className="code-line">FROM node:20-alpine</div>
+                        <div className="code-line">FROM node:24-alpine</div>
                         <div className="code-line"></div>
                         <div className="code-line">RUN npm install -g @redaksjon/protokoll</div>
                         <div className="code-line"></div>
                         <div className="code-line">WORKDIR /app</div>
                         <div className="code-line"></div>
-                        <div className="code-line">RUN mkdir -p /home/node/.protokoll</div>
-                        <div className="code-line">COPY .env /home/node/.protokoll/.env</div>
-                        <div className="code-line"></div>
-                        <div className="code-line">USER node</div>
-                        <div className="code-line"></div>
                         <div className="code-line">EXPOSE 3000</div>
                         <div className="code-line"></div>
                         <div className="code-line">CMD ["protokoll-mcp-http", "--host", "0.0.0.0"]</div>
-                    </div>
-
-                    <h3>Environment File</h3>
-                    <div className="code-block">
-                        <div className="code-line">OPENAI_API_KEY=sk-...</div>
-                        <div className="code-line">MCP_PORT=3000</div>
                     </div>
 
                     <h3>Build and Run</h3>
@@ -94,7 +83,19 @@ function Deploy() {
                             </div>
                             <div className="terminal-line">
                                 <span className="terminal-prompt">$</span>
-                                <span className="terminal-input">docker run -p 3000:3000 --env-file .env protokoll</span>
+                                <span className="terminal-input">docker run -p 3000:3000 \</span>
+                            </div>
+                            <div className="terminal-line">
+                                <span className="terminal-input">  -e OPENAI_API_KEY=sk-... \</span>
+                            </div>
+                            <div className="terminal-line">
+                                <span className="terminal-input">  -e PROTOKOLL_OUTPUT_DIRECTORY=/data/notes \</span>
+                            </div>
+                            <div className="terminal-line">
+                                <span className="terminal-input">  -v protokoll-data:/data \</span>
+                            </div>
+                            <div className="terminal-line">
+                                <span className="terminal-input">  protokoll</span>
                             </div>
                         </div>
                     </div>
@@ -173,7 +174,7 @@ function Deploy() {
                             </div>
                             <div className="terminal-line">
                                 <span className="terminal-prompt">$</span>
-                                <span className="terminal-input">curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -</span>
+                                <span className="terminal-input">curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -</span>
                             </div>
                             <div className="terminal-line">
                                 <span className="terminal-prompt">$</span>
@@ -209,15 +210,15 @@ function Deploy() {
                         <div className="terminal-body">
                             <div className="terminal-line">
                                 <span className="terminal-prompt">$</span>
-                                <span className="terminal-input">mkdir -p ~/.protokoll && cd ~/.protokoll</span>
+                                <span className="terminal-input">mkdir -p ~/.protokoll</span>
                             </div>
                             <div className="terminal-line">
                                 <span className="terminal-prompt">$</span>
-                                <span className="terminal-input">echo 'OPENAI_API_KEY=sk-...' &gt; .env</span>
+                                <span className="terminal-input">echo 'OPENAI_API_KEY=sk-...' &gt; ~/.protokoll/.env</span>
                             </div>
                             <div className="terminal-line">
                                 <span className="terminal-prompt">$</span>
-                                <span className="terminal-input">protokoll-mcp-http --host 0.0.0.0 &</span>
+                                <span className="terminal-input">protokoll-mcp-http --host 0.0.0.0 --cwd ~/.protokoll &</span>
                             </div>
                         </div>
                     </div>

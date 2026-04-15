@@ -54,15 +54,33 @@ function AIAssistants() {
                         <div className="code-line"></div>
                         <div className="code-line"><span className="code-comment"># Linux</span></div>
                         <div className="code-line">~/.config/Claude/claude_desktop_config.json</div>
+                        <div className="code-line"></div>
+                        <div className="code-line"><span className="code-comment"># Windows</span></div>
+                        <div className="code-line">%APPDATA%\Claude\claude_desktop_config.json</div>
                     </div>
 
                     <h3>Add the MCP Server</h3>
+
+                    <h4>Option A: Local (stdio)</h4>
+                    <p>Claude Desktop launches the MCP server for you via stdio. Use the <code>protokoll-mcp</code> binary:</p>
                     <div className="code-block">
                         <div className="code-line">{`{`}</div>
                         <div className="code-line">  <span className="code-string">"mcpServers"</span>: {`{`}</div>
                         <div className="code-line">    <span className="code-string">"protokoll"</span>: {`{`}</div>
                         <div className="code-line">      <span className="code-string">"command"</span>: <span className="code-string">"npx"</span>,</div>
-                        <div className="code-line">      <span className="code-string">"args"</span>: [<span className="code-string">"-y"</span>, <span className="code-string">"-p"</span>, <span className="code-string">"@redaksjon/protokoll"</span>, <span className="code-string">"protokoll-mcp-http"</span>]</div>
+                        <div className="code-line">      <span className="code-string">"args"</span>: [<span className="code-string">"-y"</span>, <span className="code-string">"-p"</span>, <span className="code-string">"@redaksjon/protokoll"</span>, <span className="code-string">"protokoll-mcp"</span>]</div>
+                        <div className="code-line">    {`}`}</div>
+                        <div className="code-line">  {`}`}</div>
+                        <div className="code-line">{`}`}</div>
+                    </div>
+
+                    <h4>Option B: Remote (HTTP)</h4>
+                    <p>Connect to an already-running Protokoll HTTP server:</p>
+                    <div className="code-block">
+                        <div className="code-line">{`{`}</div>
+                        <div className="code-line">  <span className="code-string">"mcpServers"</span>: {`{`}</div>
+                        <div className="code-line">    <span className="code-string">"protokoll"</span>: {`{`}</div>
+                        <div className="code-line">      <span className="code-string">"url"</span>: <span className="code-string">"http://localhost:3000/mcp"</span></div>
                         <div className="code-line">    {`}`}</div>
                         <div className="code-line">  {`}`}</div>
                         <div className="code-line">{`}`}</div>
@@ -70,7 +88,8 @@ function AIAssistants() {
 
                     <div className="callout callout-info">
                         <h4>Local vs Remote</h4>
-                        <p>The config above assumes your Protokoll server is running locally (default: <code>http://localhost:3000</code>). For remote servers, see the <Link to="/deploy">Deployment guide</Link>.</p>
+                        <p><strong>stdio (local):</strong> Claude Desktop launches the MCP server process for you and communicates over stdin/stdout. No separate server needs to be running. Use <code>protokoll-mcp</code> with the <code>command</code>/<code>args</code> format.</p>
+                        <p><strong>HTTP (remote):</strong> Connects to an already-running Protokoll HTTP server using a <code>url</code> field. You must start the server separately (e.g. <code>protokoll-mcp-http</code>). For remote servers, see the <Link to="/deploy">Deployment guide</Link>.</p>
                     </div>
                 </div>
             </section>
@@ -86,12 +105,27 @@ function AIAssistants() {
                     </div>
 
                     <h3>Add the MCP Server</h3>
+
+                    <h4>Option A: Local (stdio)</h4>
+                    <p>Cursor launches the MCP server for you via stdio. Use the <code>protokoll-mcp</code> binary:</p>
                     <div className="code-block">
                         <div className="code-line">{`{`}</div>
                         <div className="code-line">  <span className="code-string">"mcpServers"</span>: {`{`}</div>
                         <div className="code-line">    <span className="code-string">"protokoll"</span>: {`{`}</div>
                         <div className="code-line">      <span className="code-string">"command"</span>: <span className="code-string">"npx"</span>,</div>
-                        <div className="code-line">      <span className="code-string">"args"</span>: [<span className="code-string">"-y"</span>, <span className="code-string">"-p"</span>, <span className="code-string">"@redaksjon/protokoll"</span>, <span className="code-string">"protokoll-mcp-http"</span>]</div>
+                        <div className="code-line">      <span className="code-string">"args"</span>: [<span className="code-string">"-y"</span>, <span className="code-string">"-p"</span>, <span className="code-string">"@redaksjon/protokoll"</span>, <span className="code-string">"protokoll-mcp"</span>]</div>
+                        <div className="code-line">    {`}`}</div>
+                        <div className="code-line">  {`}`}</div>
+                        <div className="code-line">{`}`}</div>
+                    </div>
+
+                    <h4>Option B: Remote (HTTP)</h4>
+                    <p>Connect to an already-running Protokoll HTTP server:</p>
+                    <div className="code-block">
+                        <div className="code-line">{`{`}</div>
+                        <div className="code-line">  <span className="code-string">"mcpServers"</span>: {`{`}</div>
+                        <div className="code-line">    <span className="code-string">"protokoll"</span>: {`{`}</div>
+                        <div className="code-line">      <span className="code-string">"url"</span>: <span className="code-string">"http://localhost:3000/mcp"</span></div>
                         <div className="code-line">    {`}`}</div>
                         <div className="code-line">  {`}`}</div>
                         <div className="code-line">{`}`}</div>
@@ -102,23 +136,28 @@ function AIAssistants() {
             <section className="page-section">
                 <div className="container">
                     <h2>Other MCP Clients</h2>
-                    <p>Protokoll works with any MCP-compatible client. The general configuration format is:</p>
-                    <div className="code-block">
-                        <div className="code-line">{`{`}</div>
-                        <div className="code-line">  <span className="code-string">"mcpServers"</span>: {`{`}</div>
-                        <div className="code-line">    <span className="code-string">"protokoll"</span>: {`{`}</div>
-                        <div className="code-line">      <span className="code-string">"command"</span>: <span className="code-string">"protokoll-mcp-http"</span></div>
-                        <div className="code-line">    {`}`}</div>
-                        <div className="code-line">  {`}`}</div>
-                        <div className="code-line">{`}`}</div>
-                    </div>
-                    <p>Or with npx if installed globally:</p>
+                    <p>Protokoll works with any MCP-compatible client. Choose the transport that matches your setup:</p>
+
+                    <h3>stdio (Local)</h3>
+                    <p>The client launches the MCP server process for you and communicates over stdin/stdout:</p>
                     <div className="code-block">
                         <div className="code-line">{`{`}</div>
                         <div className="code-line">  <span className="code-string">"mcpServers"</span>: {`{`}</div>
                         <div className="code-line">    <span className="code-string">"protokoll"</span>: {`{`}</div>
                         <div className="code-line">      <span className="code-string">"command"</span>: <span className="code-string">"npx"</span>,</div>
-                        <div className="code-line">      <span className="code-string">"args"</span>: [<span className="code-string">"-y"</span>, <span className="code-string">"-p"</span>, <span className="code-string">"@redaksjon/protokoll"</span>, <span className="code-string">"protokoll-mcp-http"</span>]</div>
+                        <div className="code-line">      <span className="code-string">"args"</span>: [<span className="code-string">"-y"</span>, <span className="code-string">"-p"</span>, <span className="code-string">"@redaksjon/protokoll"</span>, <span className="code-string">"protokoll-mcp"</span>]</div>
+                        <div className="code-line">    {`}`}</div>
+                        <div className="code-line">  {`}`}</div>
+                        <div className="code-line">{`}`}</div>
+                    </div>
+
+                    <h3>HTTP (Remote)</h3>
+                    <p>Connect to an already-running Protokoll HTTP server:</p>
+                    <div className="code-block">
+                        <div className="code-line">{`{`}</div>
+                        <div className="code-line">  <span className="code-string">"mcpServers"</span>: {`{`}</div>
+                        <div className="code-line">    <span className="code-string">"protokoll"</span>: {`{`}</div>
+                        <div className="code-line">      <span className="code-string">"url"</span>: <span className="code-string">"http://localhost:3000/mcp"</span></div>
                         <div className="code-line">    {`}`}</div>
                         <div className="code-line">  {`}`}</div>
                         <div className="code-line">{`}`}</div>
@@ -130,38 +169,43 @@ function AIAssistants() {
                 <div className="container">
                     <h2>Available Tools</h2>
                     <p>Once connected, you can use these tools in your AI assistant:</p>
-                    <div className="tools-grid">
-                        <div className="tool-card">
-                            <h4>protokoll_process_audio</h4>
-                            <p>Transcribe an audio file with context-aware enhancement.</p>
+                    <div className="tools-categories">
+                        <div className="tool-category">
+                            <h4>Audio & Transcription</h4>
+                            <ul>
+                                <li><code>protokoll_process_audio</code> — Transcribe audio with context-aware enhancement</li>
+                                <li><code>protokoll_batch_process</code> — Process multiple audio files</li>
+                                <li><code>protokoll_enhance_transcript</code> — Re-enhance an existing transcript</li>
+                            </ul>
                         </div>
-                        <div className="tool-card">
-                            <h4>protokoll_list_transcripts</h4>
-                            <p>List all transcripts with filtering and search.</p>
+                        <div className="tool-category">
+                            <h4>Transcript Management</h4>
+                            <ul>
+                                <li><code>protokoll_list_transcripts</code> — List and search transcripts</li>
+                                <li><code>protokoll_read_transcript</code> — Read transcript content</li>
+                                <li><code>protokoll_edit_transcript</code> — Edit title, project, tags, status</li>
+                                <li><code>protokoll_provide_feedback</code> — Correct errors with natural language</li>
+                                <li><code>protokoll_summarize_transcript</code> — Generate audience-aware summaries</li>
+                            </ul>
                         </div>
-                        <div className="tool-card">
-                            <h4>protokoll_read_transcript</h4>
-                            <p>Read a transcript file with metadata.</p>
+                        <div className="tool-category">
+                            <h4>Context & Entities</h4>
+                            <ul>
+                                <li><code>protokoll_add_person</code> / <code>protokoll_edit_person</code> — Manage people</li>
+                                <li><code>protokoll_add_project</code> / <code>protokoll_edit_project</code> — Manage projects</li>
+                                <li><code>protokoll_add_term</code> / <code>protokoll_edit_term</code> — Manage terms</li>
+                                <li><code>protokoll_add_company</code> / <code>protokoll_edit_company</code> — Manage companies</li>
+                                <li><code>protokoll_search_context</code> — Search across all entities</li>
+                            </ul>
                         </div>
-                        <div className="tool-card">
-                            <h4>protokoll_context_status</h4>
-                            <p>Check your configured context (people, projects, terms).</p>
-                        </div>
-                        <div className="tool-card">
-                            <h4>protokoll_add_person</h4>
-                            <p>Add a person to your context for name recognition.</p>
-                        </div>
-                        <div className="tool-card">
-                            <h4>protokoll_add_project</h4>
-                            <p>Add a project to enable intelligent routing.</p>
-                        </div>
-                        <div className="tool-card">
-                            <h4>protokoll_add_term</h4>
-                            <p>Add technical terms for domain-specific vocabulary.</p>
-                        </div>
-                        <div className="tool-card">
-                            <h4>protokoll_provide_feedback</h4>
-                            <p>Correct transcript errors with natural language.</p>
+                        <div className="tool-category">
+                            <h4>Tasks & Notes</h4>
+                            <ul>
+                                <li><code>protokoll_create_note</code> — Create a new note/transcript</li>
+                                <li><code>protokoll_create_task</code> — Add follow-up tasks</li>
+                                <li><code>protokoll_identify_tasks_from_transcript</code> — Auto-suggest tasks</li>
+                                <li><code>protokoll_complete_task</code> — Mark tasks done</li>
+                            </ul>
                         </div>
                     </div>
                 </div>

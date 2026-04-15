@@ -1960,6 +1960,49 @@ section {
     margin-bottom: 0;
 }
 
+.tools-categories {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 1.5rem;
+    margin-top: 1.5rem;
+}
+
+.tool-category {
+    background: var(--color-bg-card);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 1.25rem;
+}
+
+.tool-category h4 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--color-primary);
+    margin-bottom: 0.75rem;
+}
+
+.tool-category ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.tool-category li {
+    font-size: 0.85rem;
+    color: var(--color-text-secondary);
+    padding: 0.3rem 0;
+    line-height: 1.5;
+}
+
+.tool-category code {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--color-text);
+    background: var(--color-bg-code);
+    padding: 0.15rem 0.4rem;
+    border-radius: 3px;
+}
+
 /* ========================================
    Platform Cards
    ======================================== */
