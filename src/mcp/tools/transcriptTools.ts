@@ -12,6 +12,7 @@ import Logging from '@fjell/logging';
 import { Agentic, Phases, Reasoning, Routing, Transcript } from '@redaksjon/protokoll-engine';
 import { DEFAULT_MODEL, MAX_CONTENT_LENGTH } from '@/constants';
 import { markTranscriptIndexDirtyForStorage, resolveTranscriptPathByFilename } from '../resources/transcriptIndexService';
+import type { FileStorageProvider } from '../storage/fileProviders';
 import { markContextEntityIndexDirty, findContextEntityInGcs } from '../resources/entityIndexService';
 
 import { createToolContext, fileExists, getConfiguredDirectory, getContextDirectories, sanitizePath, validatePathWithinDirectory, validatePathWithinOutputDirectory, validateNotRemoteMode, resolveTranscriptPath } from './shared.js';
@@ -130,7 +131,7 @@ function toStoragePathCandidates(transcriptPath: string): string[] {
 
 async function resolveStorageTranscriptPath(
     transcriptPath: string,
-    outputStorage: { exists(path: string): Promise<boolean>; name: string; cacheKey?: string; },
+    outputStorage: FileStorageProvider,
 ): Promise<string | null> {
     const candidates = toStoragePathCandidates(transcriptPath);
     for (const candidate of candidates) {
@@ -154,7 +155,7 @@ async function resolveStorageTranscriptPath(
     const ServerConfig = await import('../serverConfig');
     const outputDirectory = ServerConfig.getOutputDirectory();
     const matches = await resolveTranscriptPathByFilename(
-        outputStorage as any,
+        outputStorage,
         outputDirectory,
         basenameCandidates,
     );
@@ -2248,18 +2249,10 @@ export async function handleEnhanceTranscript(args: {
 
         // Build context and routing similar to the standard pipeline.
         const context = await createToolContext(args.contextDirectory);
-        const projectCount = typeof (context as any).getAllProjects === 'function'
-            ? (context as any).getAllProjects().length
-            : 0;
-        const peopleCount = typeof (context as any).getAllPeople === 'function'
-            ? (context as any).getAllPeople().length
-            : 0;
-        const termCount = typeof (context as any).getAllTerms === 'function'
-            ? (context as any).getAllTerms().length
-            : 0;
-        const companyCount = typeof (context as any).getAllCompanies === 'function'
-            ? (context as any).getAllCompanies().length
-            : 0;
+        const projectCount = context.getAllProjects().length;
+        const peopleCount = context.getAllPeople().length;
+        const termCount = context.getAllTerms().length;
+        const companyCount = context.getAllCompanies().length;
         logger.info('transcript.enhance.context.loaded', {
             requestId,
             transcriptPath: args.transcriptPath,
@@ -3084,16 +3077,16 @@ export async function handleCorrectToEntity(args: {
             try {
                 transcript.enhancementLog.logStep(
                     new Date(),
-                'user-correction' as any,
-                'correction_applied',
-                {
-                    original: args.selectedText,
-                    replacement: finalEntityName,
-                    entityId: finalEntityId,
-                    entityType: args.entityType,
-                    isNewEntity
-                },
-                [{ id: finalEntityId, name: finalEntityName, type: args.entityType }]
+                    'enhance',
+                    'correction_applied',
+                    {
+                        original: args.selectedText,
+                        replacement: finalEntityName,
+                        entityId: finalEntityId,
+                        entityType: args.entityType,
+                        isNewEntity
+                    },
+                    [{ id: finalEntityId, name: finalEntityName, type: args.entityType }]
                 );
             } catch {
             // Enhancement log is not critical
