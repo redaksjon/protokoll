@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 import Logging from '@fjell/logging';
 import { Agentic, Phases, Reasoning, Routing, Transcript } from '@redaksjon/protokoll-engine';
 import { DEFAULT_MODEL, MAX_CONTENT_LENGTH } from '@/constants';
-import { markTranscriptIndexDirtyForStorage, resolveTranscriptPathByFilename } from '../resources/transcriptIndexService';
+import { markTranscriptIndexDirtyForStorage, resolveTranscriptPathByFilename, listTranscriptsViaIndex } from '../resources/transcriptIndexService';
 import type { FileStorageProvider } from '../storage/fileProviders';
 import { markContextEntityIndexDirty, findContextEntityInGcs } from '../resources/entityIndexService';
 
@@ -1164,7 +1164,51 @@ export async function handleListTranscripts(args: {
         throw new Error(`Directory not found: ${directory}`);
     }
 
-    // Use protokoll-format storage API directly
+    // Use the GCS-aware index service when storage backend is GCS,
+    // otherwise fall back to protokoll-format filesystem listing
+    if (outputStorage.name === 'gcs') {
+        const indexResult = await listTranscriptsViaIndex({
+            outputStorage,
+            outputDirectory: directory,
+            startDate: args.startDate,
+            endDate: args.endDate,
+            projectId: args.entityType === 'project' ? args.entityId : undefined,
+            limit: args.limit ?? 50,
+            offset: args.offset ?? 0,
+        });
+
+        return {
+            directory: await sanitizePath(directory, await getConfiguredDirectory('outputDirectory', args.contextDirectory)) || '.',
+            transcripts: indexResult.transcripts.map((t) => ({
+                path: t.path,
+                relativePath: t.path,
+                title: t.title,
+                date: t.date,
+                project: null,
+                tags: undefined,
+                status: t.status,
+                duration: null,
+                contentPreview: undefined,
+            })),
+            pagination: {
+                total: indexResult.total,
+                limit: args.limit ?? 50,
+                offset: args.offset ?? 0,
+                hasMore: indexResult.hasMore,
+                nextOffset: indexResult.hasMore ? (args.offset ?? 0) + (args.limit ?? 50) : null,
+            },
+            filters: {
+                sortBy: args.sortBy ?? 'date',
+                startDate: args.startDate,
+                endDate: args.endDate,
+                search: args.search,
+                entityId: args.entityId,
+                entityType: args.entityType,
+            },
+        };
+    }
+
+    // Use protokoll-format storage API directly (local filesystem)
     const result = await listTranscriptsFromStorage({
         directory,
         limit: args.limit ?? 50,
