@@ -277,9 +277,11 @@ describe('TranscriptionWorker', () => {
     });
 
     it('processes transcript successfully and marks enhanced status', async () => {
+        const onTranscriptStatusChanged = vi.fn();
         const worker = new TranscriptionWorker({
             outputDirectory: '/tmp/out',
             uploadDirectory: '/tmp/uploads',
+            onTranscriptStatusChanged,
         });
 
         (worker as any).pipeline = { process: mocks.pipelineProcess };
@@ -372,6 +374,12 @@ describe('TranscriptionWorker', () => {
                 callIndex: 1,
                 phase: 'initial',
                 durationMs: 42,
+            })
+        );
+        expect(onTranscriptStatusChanged).toHaveBeenCalledWith(
+            expect.objectContaining({
+                uuid: 'uuid-1',
+                reason: 'processing_complete',
             })
         );
     });

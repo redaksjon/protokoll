@@ -18,6 +18,7 @@ import type { ContextInstance } from '@redaksjon/context';
 import type { FileStorageProvider } from '../storage/fileProviders';
 import type { StorageFileMetadata } from '../storage/fileProviders';
 import { markTranscriptIndexDirtyForStorage } from '../resources/transcriptIndexService';
+import { addEngineMessageListener } from '../engineLogging';
 
 const { findUploadedTranscripts, markTranscriptAsTranscribing, markTranscriptAsFailed, resetTranscriptToUploaded } = TranscriptOps;
 const logger = Logging.getLogger('@redaksjon/protokoll-mcp').get('transcription-worker');
@@ -26,6 +27,7 @@ const WEIGHT_MODEL_FILENAME = '.protokoll-weight-model.json';
 const WEIGHT_MODEL_STORAGE_PATH = WEIGHT_MODEL_FILENAME;
 const WEIGHT_MODEL_VISIBILITY_PATH = '.protokoll/weight-model.snapshot.json';
 const STALE_TRANSCRIBING_TIMEOUT_MS = 30 * 60 * 1000;
+const PROGRESS_SYNC_MIN_INTERVAL_MS = 10 * 1000;
 
 /**
  * Worker configuration
@@ -42,6 +44,7 @@ export interface WorkerConfig {
     scanInterval?: number;         // Milliseconds between queue scans (default: 60000)
     model?: string;                // AI model for enhancement
     transcriptionModel?: string;   // Whisper model
+    onTranscriptStatusChanged?: (event: { uuid: string; transcriptPath?: string; reason: string }) => void | Promise<void>;
 }
 
 /**
@@ -83,6 +86,12 @@ type TranscriptEntities = {
     projects?: Array<{ id?: string }>;
     terms?: Array<{ id?: string }>;
     companies?: Array<{ id?: string }>;
+};
+
+type EngineProgressEvent = {
+    phase: 'transcribe' | 'enhance';
+    action: string;
+    details: Record<string, unknown>;
 };
 
 function createEmptyWeightModel(): Weighting.WeightModel {
@@ -260,6 +269,100 @@ function getLatestTranscribingTimestamp(metadata: TranscriptMetadata): number | 
     return Number.isFinite(fallback) ? fallback : null;
 }
 
+function parseEngineProgressMessage(message: string): EngineProgressEvent | null {
+    const splitComplete = message.match(/Split audio file into (\d+) chunks/i);
+    if (splitComplete) {
+        return {
+            phase: 'transcribe',
+            action: 'split_complete',
+            details: {
+                totalChunks: Number(splitComplete[1]),
+                message,
+            },
+        };
+    }
+
+    const chunkStart = message.match(/Transcribing chunk (\d+)\/(\d+)/i);
+    if (chunkStart) {
+        return {
+            phase: 'transcribe',
+            action: 'chunk_start',
+            details: {
+                chunkIndex: Number(chunkStart[1]),
+                totalChunks: Number(chunkStart[2]),
+                message,
+            },
+        };
+    }
+
+    const transcriptionStart = message.match(/Step 1\/2: Transcribing audio \(([\d.]+) MB\)/i);
+    if (transcriptionStart) {
+        return {
+            phase: 'transcribe',
+            action: 'transcription_start',
+            details: {
+                workingAudioSizeMb: Number(transcriptionStart[1]),
+                message,
+            },
+        };
+    }
+
+    if (/Audio file exceeds maximum size.*splitting into chunks/i.test(message)) {
+        return {
+            phase: 'transcribe',
+            action: 'split_start',
+            details: { message },
+        };
+    }
+
+    if (/Converting .* file to mp3/i.test(message)) {
+        return {
+            phase: 'transcribe',
+            action: 'conversion_start',
+            details: { message },
+        };
+    }
+
+    if (/Successfully converted to:/i.test(message)) {
+        return {
+            phase: 'transcribe',
+            action: 'conversion_complete',
+            details: { message },
+        };
+    }
+
+    const rawComplete = message.match(/Transcription: (\d+) chars in ([\d.]+)s/i);
+    if (rawComplete) {
+        return {
+            phase: 'transcribe',
+            action: 'raw_transcription_complete',
+            details: {
+                characterCount: Number(rawComplete[1]),
+                durationSeconds: Number(rawComplete[2]),
+                message,
+            },
+        };
+    }
+
+    if (/Running simple-replace/i.test(message)) {
+        return {
+            phase: 'enhance',
+            action: 'simple_replace_start',
+            details: { message },
+        };
+    }
+
+    if (/Enhancing with/i.test(message)) {
+        return {
+            phase: 'enhance',
+            action: 'llm_refinement_start',
+            details: { message },
+        };
+    }
+
+    return null;
+}
+
 async function listFilesWithMetadataCompat(
     provider: FileStorageProvider,
     prefix: string,
@@ -309,6 +412,8 @@ export class TranscriptionWorker {
     private weightModelBuilder: Weighting.WeightModelBuilder | null = null;
     private weightModelPath: string | null = null;
     private readonly uploadStatusCache = new Map<string, { version: string; status: string | null }>();
+    private readonly progressSyncs = new Map<string, Promise<void>>();
+    private readonly lastProgressSyncAt = new Map<string, number>();
 
     constructor(config: WorkerConfig) {
         this.config = config;
@@ -316,6 +421,71 @@ export class TranscriptionWorker {
             totalProcessed: 0,
             startTime: Date.now(),
         };
+    }
+
+    private emitTranscriptStatusChanged(uuid: string, reason: string, transcriptPath?: string): void {
+        Promise.resolve(this.config.onTranscriptStatusChanged?.({ uuid, transcriptPath, reason }))
+            .catch((error) => {
+                logger.warning('worker.status_change_callback_failed', {
+                    uuid,
+                    reason,
+                    transcriptPath: transcriptPath || null,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            });
+    }
+
+    private queueProgressSync(options: {
+        outputStorage?: FileStorageProvider;
+        transcriptPath: string;
+        localPath: string;
+        uuid: string;
+        reason: string;
+        force?: boolean;
+    }): Promise<void> {
+        if (options.outputStorage?.name !== 'gcs') {
+            return Promise.resolve();
+        }
+
+        const now = Date.now();
+        const lastSyncedAt = this.lastProgressSyncAt.get(options.uuid) || 0;
+        if (!options.force && now - lastSyncedAt < PROGRESS_SYNC_MIN_INTERVAL_MS) {
+            return Promise.resolve();
+        }
+        this.lastProgressSyncAt.set(options.uuid, now);
+
+        const previous = this.progressSyncs.get(options.uuid) ?? Promise.resolve();
+        const next = previous
+            .catch(() => undefined)
+            .then(async () => {
+                await syncTranscriptToStorage(options.outputStorage!, options.transcriptPath, options.localPath);
+                markTranscriptIndexDirtyForStorage(
+                    options.outputStorage,
+                    this.config.outputDirectory,
+                    options.transcriptPath,
+                );
+                logger.debug('worker.progress.synced', {
+                    uuid: options.uuid,
+                    reason: options.reason,
+                    storagePath: options.transcriptPath,
+                });
+            })
+            .catch((error) => {
+                logger.warning('worker.progress.sync_failed', {
+                    uuid: options.uuid,
+                    reason: options.reason,
+                    storagePath: options.transcriptPath,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            })
+            .finally(() => {
+                if (this.progressSyncs.get(options.uuid) === next) {
+                    this.progressSyncs.delete(options.uuid);
+                }
+            });
+
+        this.progressSyncs.set(options.uuid, next);
+        return next;
     }
 
     /**
@@ -663,7 +833,8 @@ export class TranscriptionWorker {
      * Process a single transcript
      */
     private async processNextTranscript(item: UploadedTranscript): Promise<void> {
-        this.stats.currentTask = `Processing ${item.uuid}`;
+        const displayName = item.metadata.originalFilename || item.metadata.audioFile || item.uuid;
+        this.stats.currentTask = `Processing ${displayName}`;
         let localTempAudioPath: string | null = null;
         let localTempTranscriptPath: string | null = null;
         const outputStorage = this.config.outputStorage;
@@ -671,6 +842,20 @@ export class TranscriptionWorker {
         let workingTranscriptPath = item.filePath;
         let transcriptStoragePath = toStorageCandidatePath(this.config.outputDirectory, item.filePath);
         const originalTranscriptStoragePath = transcriptStoragePath;
+        let removeEngineProgressListener: (() => void) | null = null;
+        const queueProgressSync = (reason: string, force = false): void => {
+            if (!isGcsOutput || !outputStorage) {
+                return;
+            }
+            this.queueProgressSync({
+                outputStorage,
+                transcriptPath: transcriptStoragePath,
+                localPath: workingTranscriptPath,
+                uuid: item.uuid,
+                reason,
+                force,
+            });
+        };
         
         logger.info('worker.transcript.start', {
             uuid: item.uuid,
@@ -691,12 +876,32 @@ export class TranscriptionWorker {
             // Open PKL early so we can write incremental enhancement log entries
             // during pipeline execution, giving real-time visibility into tool calls.
             const transcript = PklTranscript.open(workingTranscriptPath);
+            const seenEngineProgress = new Set<string>();
+            removeEngineProgressListener = addEngineMessageListener((entry) => {
+                const progress = parseEngineProgressMessage(entry.message);
+                if (!progress) {
+                    return;
+                }
+                const key = `${progress.phase}:${progress.action}:${JSON.stringify(progress.details)}`;
+                if (seenEngineProgress.has(key)) {
+                    return;
+                }
+                seenEngineProgress.add(key);
+                try {
+                    transcript.enhancementLog.logStep(entry.at, progress.phase, progress.action, progress.details);
+                    this.emitTranscriptStatusChanged(item.uuid, progress.action, transcriptStoragePath);
+                    queueProgressSync(progress.action, progress.action === 'chunk_start' || progress.action.endsWith('_start'));
+                } catch {
+                    // Never let progress logging interrupt processing.
+                }
+            });
 
             // Mark as transcribing
             await markTranscriptAsTranscribing(workingTranscriptPath);
             if (isGcsOutput && outputStorage) {
                 await syncTranscriptToStorage(outputStorage, transcriptStoragePath, workingTranscriptPath);
             }
+            this.emitTranscriptStatusChanged(item.uuid, 'transcribing_started', transcriptStoragePath);
             markTranscriptIndexDirtyForStorage(
                 outputStorage,
                 this.config.outputDirectory,
@@ -756,6 +961,8 @@ export class TranscriptionWorker {
                 maxIterations: 20,
                 audioFile: item.metadata.audioFile,
             });
+            this.emitTranscriptStatusChanged(item.uuid, 'enhancement_started', transcriptStoragePath);
+            queueProgressSync('enhancement_started', true);
 
             let toolCallCount = 0;
 
@@ -784,6 +991,8 @@ export class TranscriptionWorker {
                                 entityType: mapping.entityType,
                             });
                         }
+                        this.emitTranscriptStatusChanged(item.uuid, 'simple_replace_complete', transcriptStoragePath);
+                        queueProgressSync('simple_replace_complete');
                     } catch {
                         // Never let log errors interrupt processing
                     }
@@ -801,6 +1010,8 @@ export class TranscriptionWorker {
                             tool,
                             input,
                         });
+                        this.emitTranscriptStatusChanged(item.uuid, 'tool_start', transcriptStoragePath);
+                        queueProgressSync('tool_start');
                     } catch {
                         // Never let log errors interrupt processing
                     }
@@ -820,6 +1031,8 @@ export class TranscriptionWorker {
                             durationMs: entry.durationMs,
                             success: entry.success,
                         });
+                        this.emitTranscriptStatusChanged(item.uuid, 'tool_complete', transcriptStoragePath);
+                        queueProgressSync('tool_complete');
                     } catch {
                         // Never let log errors interrupt processing
                     }
@@ -840,6 +1053,8 @@ export class TranscriptionWorker {
                             phase: entry.phase,
                             request: entry.request,
                         });
+                        this.emitTranscriptStatusChanged(item.uuid, 'model_call_start', transcriptStoragePath);
+                        queueProgressSync('model_call_start');
                     } catch {
                         // Never let log errors interrupt processing
                     }
@@ -863,6 +1078,8 @@ export class TranscriptionWorker {
                             durationMs: entry.durationMs,
                             response: entry.response,
                         });
+                        this.emitTranscriptStatusChanged(item.uuid, 'model_call_complete', transcriptStoragePath);
+                        queueProgressSync('model_call_complete');
                     } catch {
                         // Never let log errors interrupt processing
                     }
@@ -905,6 +1122,12 @@ export class TranscriptionWorker {
                 audioHash: item.metadata.audioHash,
                 transcribedAt: new Date().toISOString(),
             });
+            transcript.enhancementLog.logStep(new Date(), 'transcribe', 'transcription_complete', {
+                audioFile: item.metadata.audioFile,
+                processingTimeMs: result.processingTime,
+            });
+            this.emitTranscriptStatusChanged(item.uuid, 'transcription_complete', transcriptStoragePath);
+            queueProgressSync('transcription_complete', true);
             
             // Update content with enhanced text (or raw if enhancement failed)
             transcript.updateContent(result.enhancedText || result.rawTranscript);
@@ -923,6 +1146,7 @@ export class TranscriptionWorker {
             transcript.close();
 
             if (isGcsOutput && outputStorage) {
+                await this.progressSyncs.get(item.uuid)?.catch(() => undefined);
                 let persistedToRoutedPath = false;
                 if (result.outputPath && result.outputPath !== workingTranscriptPath) {
                     const desiredRoutedPath = toStorageCandidatePath(this.config.outputDirectory, result.outputPath);
@@ -943,6 +1167,7 @@ export class TranscriptionWorker {
                             this.uploadStatusCache.delete(transcriptStoragePath);
                             transcriptStoragePath = finalStoragePath;
                             persistedToRoutedPath = true;
+                            this.emitTranscriptStatusChanged(item.uuid, 'transcript_promoted', transcriptStoragePath);
                             logger.info('worker.transcript.promoted', {
                                 uuid: item.uuid,
                                 fromPath: toStorageCandidatePath(this.config.outputDirectory, item.filePath),
@@ -969,6 +1194,7 @@ export class TranscriptionWorker {
             this.stats.lastProcessedTime = new Date().toISOString();
             this.stats.lastProcessedUuid = item.uuid;
             this.stats.currentTask = undefined;
+            this.emitTranscriptStatusChanged(item.uuid, 'processing_complete', transcriptStoragePath);
             
             logger.info('worker.transcript.complete', {
                 uuid: item.uuid,
@@ -1004,6 +1230,7 @@ export class TranscriptionWorker {
                 if (isGcsOutput && outputStorage) {
                     await syncTranscriptToStorage(outputStorage, transcriptStoragePath, workingTranscriptPath);
                 }
+                this.emitTranscriptStatusChanged(item.uuid, 'processing_failed', transcriptStoragePath);
             } catch {
                 // If we cannot persist failure status, keep original error context in logs.
             }
@@ -1015,6 +1242,9 @@ export class TranscriptionWorker {
             
             this.stats.currentTask = undefined;
         } finally {
+            if (removeEngineProgressListener) {
+                removeEngineProgressListener();
+            }
             if (localTempAudioPath) {
                 await fs.rm(localTempAudioPath, { force: true });
             }

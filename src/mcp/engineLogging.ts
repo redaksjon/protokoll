@@ -6,6 +6,27 @@ import Logging from '@fjell/logging';
 const logger = Logging.getLogger('@redaksjon/protokoll-mcp').get('engine-logging');
 let configured = false;
 let stdioBridgeInstalled = false;
+const engineMessageListeners = new Set<(entry: { level: string; message: string; at: Date }) => void>();
+
+export function addEngineMessageListener(
+    listener: (entry: { level: string; message: string; at: Date }) => void,
+): () => void {
+    engineMessageListeners.add(listener);
+    return () => {
+        engineMessageListeners.delete(listener);
+    };
+}
+
+function notifyEngineMessage(level: string, message: string): void {
+    const at = new Date();
+    for (const listener of engineMessageListeners) {
+        try {
+            listener({ level, message, at });
+        } catch {
+            // Observability listeners must never affect pipeline execution.
+        }
+    }
+}
 
 function coerceMessage(args: unknown[]): string {
     return args
@@ -66,12 +87,16 @@ function installStdIoBridge(): void {
                 try {
                     if (rawLevel === 'error') {
                         engineLog.error('engine.message', { message });
+                        notifyEngineMessage('error', message);
                     } else if (rawLevel === 'warn' || rawLevel === 'warning') {
                         engineLog.warning('engine.message', { message });
+                        notifyEngineMessage('warning', message);
                     } else if (rawLevel === 'debug') {
                         engineLog.debug('engine.message', { message });
+                        notifyEngineMessage('debug', message);
                     } else {
                         engineLog.info('engine.message', { message });
+                        notifyEngineMessage('info', message);
                     }
                 } finally {
                     inBridgeWrite = false;
@@ -175,16 +200,24 @@ export async function configureEngineLoggingBridge(): Promise<void> {
 
         const engineLog = Logging.getLogger('@redaksjon/protokoll-mcp').get('engine');
         engineLogger.info = (...args: unknown[]) => {
-            engineLog.info('engine.message', { message: coerceMessage(args) });
+            const message = coerceMessage(args);
+            engineLog.info('engine.message', { message });
+            notifyEngineMessage('info', message);
         };
         engineLogger.debug = (...args: unknown[]) => {
-            engineLog.debug('engine.message', { message: coerceMessage(args) });
+            const message = coerceMessage(args);
+            engineLog.debug('engine.message', { message });
+            notifyEngineMessage('debug', message);
         };
         engineLogger.warn = (...args: unknown[]) => {
-            engineLog.warning('engine.message', { message: coerceMessage(args) });
+            const message = coerceMessage(args);
+            engineLog.warning('engine.message', { message });
+            notifyEngineMessage('warning', message);
         };
         engineLogger.error = (...args: unknown[]) => {
-            engineLog.error('engine.message', { message: coerceMessage(args) });
+            const message = coerceMessage(args);
+            engineLog.error('engine.message', { message });
+            notifyEngineMessage('error', message);
         };
 
         engineLogger.__protokollBridgeInstalled = true;

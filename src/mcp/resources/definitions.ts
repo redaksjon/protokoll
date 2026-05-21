@@ -25,6 +25,12 @@ export const resourceTemplates: McpResourceTemplate[] = [
         mimeType: 'text/markdown',
     },
     {
+        uriTemplate: 'protokoll://transcript/status/{uuid}',
+        name: 'Transcript Status',
+        description: 'Stable per-upload status snapshot keyed by transcript UUID',
+        mimeType: 'application/json',
+    },
+    {
         uriTemplate: 'protokoll://entity/{type}/{id}',
         name: 'Context Entity',
         description: 'A context entity (person, project, term, company)',

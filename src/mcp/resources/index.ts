@@ -7,6 +7,7 @@ import type {
     McpResourceTemplate,
     McpResourceContents,
     TranscriptUri,
+    TranscriptStatusUri,
     EntityUri,
     ConfigUri,
     TranscriptsListUri,
@@ -22,6 +23,7 @@ import Logging from '@fjell/logging';
 export * from './definitions';
 export * from './discovery';
 export * from './transcriptResources';
+export * from './transcriptStatusResources';
 export * from './entityResources';
 export * from './audioResources';
 export * from './configResource';
@@ -30,6 +32,7 @@ export * from './configResource';
 import { directResources, resourceTemplates } from './definitions';
 import { getDynamicResources } from './discovery';
 import { readTranscriptResource, readTranscriptsListResource } from './transcriptResources';
+import { readTranscriptStatusResource } from './transcriptStatusResources';
 import { readEntityResource, readEntitiesListResource } from './entityResources';
 import { readAudioInboundResource, readAudioProcessedResource } from './audioResources';
 import { readConfigResource } from './configResource';
@@ -72,6 +75,8 @@ export async function handleReadResource(uri: string): Promise<McpResourceConten
     switch (parsed.resourceType) {
         case 'transcript':
             return readTranscriptResource((parsed as TranscriptUri).transcriptPath);
+        case 'transcript-status':
+            return readTranscriptStatusResource((parsed as TranscriptStatusUri).uuid);
         case 'entity': {
             const entityUri = parsed as EntityUri;
             // Use server's workspace root when in remote mode (HTTP server)

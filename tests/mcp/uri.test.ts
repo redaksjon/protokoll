@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
     parseUri,
     buildTranscriptUri,
+    buildTranscriptStatusUri,
     buildEntityUri,
     buildConfigUri,
     buildTranscriptsListUri,
@@ -41,6 +42,12 @@ describe('URI Parser', () => {
             it('should throw on empty transcript path', () => {
                 expect(() => parseUri('protokoll://transcript')).toThrow();
                 expect(() => parseUri('protokoll://transcript/')).toThrow();
+            });
+
+            it('should parse transcript status URI', () => {
+                const result = parseUri('protokoll://transcript/status/1234-abcd');
+                expect(result.resourceType).toBe('transcript-status');
+                expect(result.uuid).toBe('1234-abcd');
             });
         });
 
@@ -177,6 +184,13 @@ describe('URI Parser', () => {
             });
         });
 
+        describe('buildTranscriptStatusUri', () => {
+            it('should build transcript status URI', () => {
+                expect(buildTranscriptStatusUri('1234-abcd'))
+                    .toBe('protokoll://transcript/status/1234-abcd');
+            });
+        });
+
         describe('buildEntityUri', () => {
             it('should build entity URIs', () => {
                 expect(buildEntityUri('person', 'john-smith'))
@@ -258,6 +272,7 @@ describe('URI Parser', () => {
         describe('getResourceType', () => {
             it('should extract resource type', () => {
                 expect(getResourceType('protokoll://transcript/x')).toBe('transcript');
+                expect(getResourceType('protokoll://transcript/status/x')).toBe('transcript-status');
                 expect(getResourceType('protokoll://entity/person/x')).toBe('entity');
                 expect(getResourceType('protokoll://transcripts?dir=x')).toBe('transcripts-list');
                 expect(getResourceType('protokoll://entities/person')).toBe('entities-list');

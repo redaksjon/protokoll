@@ -59,18 +59,27 @@ describe('Queue Tools', () => {
                 id: 'test-uuid-1',
                 status: 'uploaded',
                 audioFile: 'test-audio.m4a',
+                originalFilename: 'Team Sync.m4a',
+                audioSizeBytes: 2048,
                 date: new Date('2026-02-15T10:00:00Z'),
             };
             
             const filePath = path.join(testDir, 'test-uui-upload.pkl');
             const transcript = PklTranscript.create(filePath, metadata);
+            transcript.addArtifact('upload_info', Buffer.from(JSON.stringify({
+                originalFilename: 'Team Sync.m4a',
+                audioSizeBytes: 2048,
+            }), 'utf8'));
             await transcript.close();
 
             const result = await handleQueueStatus();
             
             expect(result.pending.length).toBe(1);
             expect(result.pending[0].uuid).toBe('test-uuid-1');
-            expect(result.pending[0].filename).toBe('test-audio.m4a');
+            expect(result.pending[0].filename).toBe('Team Sync.m4a');
+            expect(result.pending[0].fileSizeBytes).toBe(2048);
+            expect(result.pending[0].statusLabel).toBe('Queued for transcription');
+            expect(result.pending[0].queuePosition).toBe(1);
             expect(result.totalPending).toBe(1);
         });
 
@@ -80,6 +89,7 @@ describe('Queue Tools', () => {
                 id: 'test-uuid-2',
                 status: 'transcribing',
                 audioFile: 'processing-audio.m4a',
+                originalFilename: 'Interview.m4a',
                 date: new Date('2026-02-15T10:00:00Z'),
             };
             
@@ -91,7 +101,8 @@ describe('Queue Tools', () => {
             
             expect(result.processing.length).toBe(1);
             expect(result.processing[0].uuid).toBe('test-uuid-2');
-            expect(result.processing[0].filename).toBe('processing-audio.m4a');
+            expect(result.processing[0].filename).toBe('Interview.m4a');
+            expect(result.processing[0].stage).toBe('transcribing');
         });
 
         it('should include recent completed transcripts and transcribing start from history', async () => {
@@ -189,6 +200,7 @@ describe('Queue Tools', () => {
                 id: 'abcd1234-5678-90ab-cdef-123456789012',
                 status: 'uploaded',
                 audioFile: 'test.m4a',
+                originalFilename: 'Original Upload.m4a',
                 date: new Date(),
             };
             
@@ -201,6 +213,10 @@ describe('Queue Tools', () => {
             expect(result.found).toBe(true);
             expect(result.uuid).toBe('abcd1234-5678-90ab-cdef-123456789012');
             expect(result.metadata?.status).toBe('uploaded');
+            expect(result.displayName).toBe('Original Upload.m4a');
+            expect(result.transcriptStatusUri).toBe(
+                'protokoll://transcript/status/abcd1234-5678-90ab-cdef-123456789012'
+            );
         });
 
         it('should return not found for non-existent UUID', async () => {

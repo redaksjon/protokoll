@@ -26,10 +26,54 @@ import { getOutputDirectory, getOutputStorage } from '../serverConfig';
 import { sanitizePath } from './shared';
 import { unlink } from 'node:fs/promises';
 import type { TranscriptionWorker } from '../worker/transcription-worker';
+import { buildTranscriptStatusUri, buildTranscriptUri } from '../uri';
 
 // Worker instance will be set by server
 let workerInstance: TranscriptionWorker | null = null;
 const logger = Logging.getLogger('@redaksjon/protokoll-mcp').get('queue-tools');
+
+const READY_STATUSES = new Set(['initial', 'enhanced', 'reviewed', 'in_progress', 'closed', 'archived']);
+
+export interface TranscriptStatusActivity {
+    phase?: string;
+    action?: string;
+    label: string;
+    at?: string;
+    details?: Record<string, unknown>;
+}
+
+export interface TranscriptStatusView {
+    uuid: string;
+    displayName: string;
+    originalFilename?: string;
+    storedAudioFile?: string;
+    fileSizeBytes?: number;
+    status: string;
+    stage: 'queued' | 'transcribing' | 'enhancing' | 'completed' | 'failed' | 'cancelled' | 'unknown';
+    statusLabel: string;
+    statusDetail: string;
+    uploadedAt?: string;
+    startedAt?: string;
+    completedAt?: string;
+    lastUpdatedAt?: string;
+    queuePosition?: number;
+    activity?: TranscriptStatusActivity;
+    transcriptPath?: string;
+    transcriptUri?: string;
+    transcriptStatusUri: string;
+    title?: string;
+    project?: string;
+    projectId?: string;
+    errorDetails?: string;
+    canCancel: boolean;
+    canRetry: boolean;
+}
+
+type QueueTranscriptRecord = {
+    uuid: string;
+    filePath: string;
+    metadata: TranscriptMetadata;
+};
 
 export function setWorkerInstance(worker: TranscriptionWorker | null): void {
     workerInstance = worker;
@@ -154,6 +198,260 @@ function getCompletionTime(metadata: TranscriptMetadata): string {
     return lastTransition?.at.toISOString() || '';
 }
 
+function getDisplayName(metadata: TranscriptMetadata): string {
+    return metadata.originalFilename
+        || metadata.audioFile
+        || metadata.title
+        || 'Untitled audio';
+}
+
+function parseUploadInfoArtifact(raw: Buffer | null | undefined): {
+    originalFilename?: string;
+    audioSizeBytes?: number;
+} {
+    if (!raw) {
+        return {};
+    }
+    try {
+        const parsed = JSON.parse(raw.toString('utf8')) as Record<string, unknown>;
+        return {
+            originalFilename: typeof parsed.originalFilename === 'string' ? parsed.originalFilename : undefined,
+            audioSizeBytes: typeof parsed.audioSizeBytes === 'number' ? parsed.audioSizeBytes : undefined,
+        };
+    } catch {
+        return {};
+    }
+}
+
+function normalizeStatus(status?: string): string {
+    return status || 'unknown';
+}
+
+function humanizeToolName(toolName: unknown): string {
+    if (typeof toolName !== 'string' || toolName.trim().length === 0) {
+        return 'context tool';
+    }
+    return toolName
+        .replace(/^protokoll_/, '')
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function describeLatestActivity(
+    status: string,
+    metadata: TranscriptMetadata,
+    enhancementEntries: Array<{
+        timestamp: Date;
+        phase: string;
+        action: string;
+        details?: Record<string, unknown>;
+    }>
+): {
+    stage: TranscriptStatusView['stage'];
+    label: string;
+    detail: string;
+    at?: string;
+    details?: Record<string, unknown>;
+} {
+    const latest = enhancementEntries[enhancementEntries.length - 1];
+
+    if (status === 'uploaded') {
+        return {
+            stage: 'queued',
+            label: 'Queued for transcription',
+            detail: 'Upload complete. Waiting for the transcription worker to start.',
+            at: metadata.date?.toISOString(),
+        };
+    }
+
+    if (status === 'error') {
+        const cancelled = metadata.errorDetails === 'Cancelled by user';
+        return {
+            stage: cancelled ? 'cancelled' : 'failed',
+            label: cancelled ? 'Cancelled' : 'Transcription failed',
+            detail: metadata.errorDetails || 'The transcript could not be processed.',
+            at: getCompletionTime(metadata) || undefined,
+        };
+    }
+
+    if (READY_STATUSES.has(status)) {
+        return {
+            stage: 'completed',
+            label: 'Transcript ready',
+            detail: status === 'enhanced'
+                ? 'Enhanced transcript is ready to review.'
+                : 'Transcript is ready.',
+            at: getCompletionTime(metadata) || undefined,
+        };
+    }
+
+    if (latest) {
+        const at = latest.timestamp?.toISOString?.() || undefined;
+        const details = latest.details;
+
+        if (latest.phase === 'enhance' && latest.action === 'tool_start') {
+            const toolLabel = humanizeToolName(details?.tool);
+            return {
+                stage: 'enhancing',
+                label: 'Using context tools',
+                detail: `Checking ${toolLabel} while refining the transcript.`,
+                at,
+                details,
+            };
+        }
+
+        if (latest.phase === 'enhance' && latest.action === 'llm_refinement_start') {
+            return {
+                stage: 'enhancing',
+                label: 'Refining transcript',
+                detail: 'Raw transcription is complete. The LLM is applying project, people, and terminology context.',
+                at,
+                details,
+            };
+        }
+
+        if (latest.phase === 'enhance' && latest.action === 'simple_replace_start') {
+            return {
+                stage: 'enhancing',
+                label: 'Applying known corrections',
+                detail: 'Checking known sounds-like corrections before LLM refinement.',
+                at,
+                details,
+            };
+        }
+
+        if (latest.phase === 'enhance' && latest.action === 'model_call_start') {
+            return {
+                stage: 'enhancing',
+                label: 'Refining transcript',
+                detail: 'Applying project, people, and terminology context.',
+                at,
+                details,
+            };
+        }
+
+        if (latest.phase === 'transcribe' && latest.action === 'conversion_start') {
+            return {
+                stage: 'transcribing',
+                label: 'Preparing audio',
+                detail: 'Converting the uploaded audio to a transcription-friendly format.',
+                at,
+                details,
+            };
+        }
+
+        if (latest.phase === 'transcribe' && latest.action === 'conversion_complete') {
+            return {
+                stage: 'transcribing',
+                label: 'Audio prepared',
+                detail: 'Audio conversion finished. Preparing to send audio to the transcription model.',
+                at,
+                details,
+            };
+        }
+
+        if (latest.phase === 'transcribe' && latest.action === 'split_start') {
+            return {
+                stage: 'transcribing',
+                label: 'Splitting audio',
+                detail: 'The audio is too large for one transcription request, so it is being split into chunks.',
+                at,
+                details,
+            };
+        }
+
+        if (latest.phase === 'transcribe' && latest.action === 'split_complete') {
+            const totalChunks = typeof details?.totalChunks === 'number' ? details.totalChunks : null;
+            return {
+                stage: 'transcribing',
+                label: 'Audio split complete',
+                detail: totalChunks
+                    ? `Audio was split into ${totalChunks} chunks. Transcription requests are starting.`
+                    : 'Audio splitting finished. Transcription requests are starting.',
+                at,
+                details,
+            };
+        }
+
+        if (latest.phase === 'transcribe' && latest.action === 'chunk_start') {
+            const chunkIndex = typeof details?.chunkIndex === 'number' ? details.chunkIndex : null;
+            const totalChunks = typeof details?.totalChunks === 'number' ? details.totalChunks : null;
+            return {
+                stage: 'transcribing',
+                label: chunkIndex && totalChunks ? `Transcribing chunk ${chunkIndex} of ${totalChunks}` : 'Transcribing audio chunk',
+                detail: chunkIndex && totalChunks
+                    ? `Whisper is processing chunk ${chunkIndex} of ${totalChunks}.`
+                    : 'Whisper is processing one audio chunk.',
+                at,
+                details,
+            };
+        }
+
+        if (latest.phase === 'transcribe' && latest.action === 'raw_transcription_complete') {
+            const characterCount = typeof details?.characterCount === 'number' ? details.characterCount : null;
+            return {
+                stage: 'enhancing',
+                label: 'Raw transcript captured',
+                detail: characterCount
+                    ? `Whisper returned ${characterCount.toLocaleString()} characters. Context refinement is starting.`
+                    : 'Whisper returned the raw transcript. Context refinement is starting.',
+                at,
+                details,
+            };
+        }
+
+        if (latest.phase === 'simple-replace' && latest.action === 'phase_complete') {
+            const totalReplacements = typeof details?.totalReplacements === 'number'
+                ? details.totalReplacements
+                : null;
+            return {
+                stage: 'enhancing',
+                label: 'Applying known corrections',
+                detail: totalReplacements && totalReplacements > 0
+                    ? `Applied ${totalReplacements} known corrections from context.`
+                    : 'Applying known corrections from context.',
+                at,
+                details,
+            };
+        }
+
+        if (latest.phase === 'enhance' && latest.action === 'enhancement_complete') {
+            return {
+                stage: 'completed',
+                label: 'Transcript ready',
+                detail: 'Transcript processing finished successfully.',
+                at,
+                details,
+            };
+        }
+
+        if (latest.phase === 'transcribe' && latest.action === 'transcription_complete') {
+            return {
+                stage: 'enhancing',
+                label: 'Raw transcript captured',
+                detail: 'The audio has been transcribed. Final cleanup and enrichment are in progress.',
+                at,
+                details,
+            };
+        }
+    }
+
+    if (status === 'transcribing') {
+        return {
+            stage: 'transcribing',
+            label: 'Transcribing audio',
+            detail: 'The worker is converting audio into text.',
+            at: getTranscribingStartTime(metadata) || undefined,
+        };
+    }
+
+    return {
+        stage: 'unknown',
+        label: 'Processing',
+        detail: 'Transcript activity is in progress.',
+    };
+}
+
 function isQueueCandidatePath(pathValue: string): boolean {
     const normalized = pathValue.replace(/^\/+/, '').replace(/\\/g, '/');
     if (!normalized.toLowerCase().endsWith('.pkl')) {
@@ -212,11 +510,154 @@ async function materializeTranscriptFromStorage(
     return tempPath;
 }
 
+async function findTranscriptRecordByUuid(
+    uuid: string,
+    outputDir: string,
+    outputStorage: FileStorageProvider,
+): Promise<QueueTranscriptRecord | null> {
+    if (outputStorage.name !== 'gcs') {
+        const filePath = await findTranscriptByUuid(uuid, [outputDir]);
+        if (!filePath) {
+            return null;
+        }
+        const transcript = PklTranscript.open(filePath, { readOnly: true });
+        try {
+            return {
+                uuid: transcript.metadata.id,
+                filePath,
+                metadata: transcript.metadata,
+            };
+        } finally {
+            await transcript.close();
+        }
+    }
+
+    const files = await listFilesWithMetadataCompat(outputStorage, '', '.pkl');
+    const candidates = files
+        .map((metadata) => metadata.path.replace(/^\/+/, '').replace(/\\/g, '/'))
+        .filter(isQueueCandidatePath);
+
+    for (const filePath of candidates) {
+        let tempPath: string | null = null;
+        try {
+            tempPath = await materializeTranscriptFromStorage(outputStorage, filePath);
+            const transcript = PklTranscript.open(tempPath, { readOnly: true });
+            const metadata = transcript.metadata;
+            await transcript.close();
+            if (metadata.id === uuid) {
+                return {
+                    uuid: metadata.id,
+                    filePath,
+                    metadata,
+                };
+            }
+        } catch {
+            // Ignore unreadable transcripts while scanning for a UUID match.
+        } finally {
+            if (tempPath) {
+                await fs.rm(tempPath, { force: true });
+            }
+        }
+    }
+
+    return null;
+}
+
+async function buildTranscriptStatusView(
+    record: QueueTranscriptRecord,
+    outputDir: string,
+    outputStorage: FileStorageProvider,
+    options?: {
+        transcriptPath?: string;
+        queuePosition?: number;
+    },
+): Promise<TranscriptStatusView> {
+    const transcriptStatusUri = buildTranscriptStatusUri(record.uuid);
+    const transcriptPath = options?.transcriptPath
+        ?? await sanitizePath(record.filePath, outputDir);
+    const transcriptUri = transcriptPath ? buildTranscriptUri(transcriptPath.replace(/\.pkl$/i, '')) : undefined;
+
+    let enhancementEntries: Array<{
+        timestamp: Date;
+        phase: string;
+        action: string;
+        details?: Record<string, unknown>;
+    }> = [];
+    let uploadInfo: { originalFilename?: string; audioSizeBytes?: number } = {};
+
+    if (outputStorage.name !== 'gcs') {
+        const transcript = PklTranscript.open(record.filePath, { readOnly: true });
+        try {
+            enhancementEntries = transcript.getEnhancementLog();
+            uploadInfo = parseUploadInfoArtifact(transcript.getArtifact('upload_info')?.data);
+        } finally {
+            await transcript.close();
+        }
+    } else {
+        let tempPath: string | null = null;
+        try {
+            tempPath = await materializeTranscriptFromStorage(outputStorage, record.filePath);
+            const transcript = PklTranscript.open(tempPath, { readOnly: true });
+            enhancementEntries = transcript.getEnhancementLog();
+            uploadInfo = parseUploadInfoArtifact(transcript.getArtifact('upload_info')?.data);
+            await transcript.close();
+        } catch {
+            enhancementEntries = [];
+        } finally {
+            if (tempPath) {
+                await fs.rm(tempPath, { force: true });
+            }
+        }
+    }
+
+    const status = normalizeStatus(record.metadata.status);
+    const activity = describeLatestActivity(status, record.metadata, enhancementEntries);
+    const uploadedAt = record.metadata.date?.toISOString();
+    const startedAt = getTranscribingStartTime(record.metadata) || undefined;
+    const completedAt = getCompletionTime(record.metadata) || undefined;
+    const lastUpdatedAt = activity.at || completedAt || startedAt || uploadedAt;
+
+    const metadataWithOptionalSize = record.metadata as TranscriptMetadata & { audioSizeBytes?: number };
+
+    return {
+        uuid: record.uuid,
+        displayName: uploadInfo.originalFilename || getDisplayName(record.metadata),
+        originalFilename: record.metadata.originalFilename || uploadInfo.originalFilename,
+        storedAudioFile: record.metadata.audioFile,
+        fileSizeBytes: metadataWithOptionalSize.audioSizeBytes || uploadInfo.audioSizeBytes,
+        status,
+        stage: activity.stage,
+        statusLabel: activity.label,
+        statusDetail: activity.detail,
+        uploadedAt,
+        startedAt,
+        completedAt,
+        lastUpdatedAt,
+        queuePosition: options?.queuePosition,
+        activity: {
+            phase: enhancementEntries[enhancementEntries.length - 1]?.phase,
+            action: enhancementEntries[enhancementEntries.length - 1]?.action,
+            label: activity.label,
+            at: activity.at,
+            details: activity.details,
+        },
+        transcriptPath,
+        transcriptUri,
+        transcriptStatusUri,
+        title: record.metadata.title,
+        project: record.metadata.project,
+        projectId: record.metadata.projectId,
+        errorDetails: record.metadata.errorDetails,
+        canCancel: status === 'uploaded' || status === 'transcribing',
+        canRetry: status === 'error',
+    };
+}
+
 async function findQueueTranscriptsFromStorage(
     outputStorage: FileStorageProvider,
 ): Promise<{
-    uploaded: Array<{ uuid: string; metadata: TranscriptMetadata }>;
-    transcribing: Array<{ uuid: string; metadata: TranscriptMetadata }>;
+    uploaded: QueueTranscriptRecord[];
+    transcribing: QueueTranscriptRecord[];
 }> {
     const files = await listFilesWithMetadataCompat(outputStorage, '', '-upload.pkl');
     const candidates = files
@@ -224,8 +665,8 @@ async function findQueueTranscriptsFromStorage(
         .filter((metadata) => isQueueCandidatePath(metadata.path))
         .filter((metadata) => isUploadPlaceholderPath(metadata.path));
 
-    const uploaded: Array<{ uuid: string; metadata: TranscriptMetadata }> = [];
-    const transcribing: Array<{ uuid: string; metadata: TranscriptMetadata }> = [];
+    const uploaded: QueueTranscriptRecord[] = [];
+    const transcribing: QueueTranscriptRecord[] = [];
 
     for (const metadata of candidates) {
         let tempPath: string | null = null;
@@ -236,9 +677,9 @@ async function findQueueTranscriptsFromStorage(
             await transcript.close();
 
             if (transcriptMetadata.status === 'uploaded') {
-                uploaded.push({ uuid: transcriptMetadata.id, metadata: transcriptMetadata });
+                uploaded.push({ uuid: transcriptMetadata.id, filePath: metadata.path, metadata: transcriptMetadata });
             } else if (transcriptMetadata.status === 'transcribing') {
-                transcribing.push({ uuid: transcriptMetadata.id, metadata: transcriptMetadata });
+                transcribing.push({ uuid: transcriptMetadata.id, filePath: metadata.path, metadata: transcriptMetadata });
             }
         } catch {
             // Ignore unreadable queue placeholders.
@@ -325,15 +766,15 @@ async function findRecentTranscripts(
  * Get current queue status
  */
 export async function handleQueueStatus(): Promise<{
-    pending: Array<{ uuid: string; filename: string; uploadedAt: string }>;
-    processing: Array<{ uuid: string; filename: string; startedAt: string }>;
-    recent: Array<{ uuid: string; filename: string; completedAt: string; status: string }>;
+    pending: Array<TranscriptStatusView & { filename: string }>;
+    processing: Array<TranscriptStatusView & { filename: string }>;
+    recent: Array<TranscriptStatusView & { filename: string }>;
     totalPending: number;
 }> {
     const outputDir = getOutputDirectory();
     const outputStorage = getOutputStorage();
-    let uploaded: Array<{ uuid: string; metadata: TranscriptMetadata }> = [];
-    let transcribing: Array<{ uuid: string; metadata: TranscriptMetadata }> = [];
+    let uploaded: QueueTranscriptRecord[] = [];
+    let transcribing: QueueTranscriptRecord[] = [];
 
     if (outputStorage.name === 'gcs') {
         const storageQueue = await findQueueTranscriptsFromStorage(outputStorage);
@@ -346,23 +787,42 @@ export async function handleQueueStatus(): Promise<{
 
     const recent = await findRecentTranscripts([outputDir], 10);
     
+    const pending = await Promise.all(
+        uploaded.map(async (record, index) => {
+            const statusView = await buildTranscriptStatusView(record, outputDir, outputStorage, {
+                queuePosition: index + 1,
+            });
+            return {
+                ...statusView,
+                filename: statusView.displayName,
+            };
+        }),
+    );
+
+    const processing = await Promise.all(
+        transcribing.map(async (record) => {
+            const statusView = await buildTranscriptStatusView(record, outputDir, outputStorage);
+            return {
+                ...statusView,
+                filename: statusView.displayName,
+            };
+        }),
+    );
+
+    const recentViews = await Promise.all(
+        recent.map(async (record) => {
+            const statusView = await buildTranscriptStatusView(record, outputDir, outputStorage);
+            return {
+                ...statusView,
+                filename: statusView.displayName,
+            };
+        }),
+    );
+
     return {
-        pending: uploaded.map(t => ({
-            uuid: t.uuid,
-            filename: t.metadata.audioFile || 'unknown',
-            uploadedAt: t.metadata.date?.toISOString() || '',
-        })),
-        processing: transcribing.map(t => ({
-            uuid: t.uuid,
-            filename: t.metadata.audioFile || 'unknown',
-            startedAt: getTranscribingStartTime(t.metadata),
-        })),
-        recent: recent.map(t => ({
-            uuid: t.uuid,
-            filename: t.metadata.audioFile || t.metadata.title || 'unknown',
-            completedAt: getCompletionTime(t.metadata),
-            status: t.metadata.status || 'unknown',
-        })),
+        pending,
+        processing,
+        recent: recentViews,
         totalPending: uploaded.length,
     };
 }
@@ -379,37 +839,66 @@ export async function handleGetTranscriptByUuid(args: {
     filePath?: string;
     metadata?: TranscriptMetadata;
     content?: string;
+    displayName?: string;
+    transcriptStatusUri?: string;
+    statusView?: TranscriptStatusView;
     error?: string;
 }> {
     try {
         const outputDir = getOutputDirectory();
-        const filePath = await findTranscriptByUuid(args.uuid, [outputDir]);
+        const outputStorage = getOutputStorage();
+        const record = await findTranscriptRecordByUuid(args.uuid, outputDir, outputStorage);
         
-        if (!filePath) {
+        if (!record) {
             return { found: false, error: `No transcript found for UUID: ${args.uuid}` };
         }
-        
-        const transcript = PklTranscript.open(filePath, { readOnly: true });
-        const metadata = transcript.metadata;
-        
+
+        const sanitizedPath = await sanitizePath(record.filePath, outputDir);
+        const statusView = await buildTranscriptStatusView(record, outputDir, outputStorage, {
+            transcriptPath: sanitizedPath,
+        });
         const result: {
             found: boolean;
             uuid?: string;
             filePath?: string;
             metadata?: TranscriptMetadata;
             content?: string;
+            displayName?: string;
+            transcriptStatusUri?: string;
+            statusView?: TranscriptStatusView;
         } = {
             found: true,
-            uuid: metadata.id,
-            filePath: await sanitizePath(filePath, outputDir),
-            metadata,
+            uuid: record.metadata.id,
+            filePath: sanitizedPath,
+            metadata: record.metadata,
+            displayName: statusView.displayName,
+            transcriptStatusUri: statusView.transcriptStatusUri,
+            statusView,
         };
-        
-        if (args.includeContent && ['initial', 'enhanced', 'reviewed'].includes(metadata.status || '')) {
-            result.content = transcript.content || '';
+
+        if (args.includeContent && ['initial', 'enhanced', 'reviewed'].includes(record.metadata.status || '')) {
+            if (outputStorage.name !== 'gcs') {
+                const transcript = PklTranscript.open(record.filePath, { readOnly: true });
+                try {
+                    result.content = transcript.content || '';
+                } finally {
+                    await transcript.close();
+                }
+            } else {
+                let tempPath: string | null = null;
+                try {
+                    tempPath = await materializeTranscriptFromStorage(outputStorage, record.filePath);
+                    const transcript = PklTranscript.open(tempPath, { readOnly: true });
+                    result.content = transcript.content || '';
+                    await transcript.close();
+                } finally {
+                    if (tempPath) {
+                        await fs.rm(tempPath, { force: true });
+                    }
+                }
+            }
         }
-        
-        await transcript.close();
+
         return result;
     } catch (error) {
         return { found: false, error: error instanceof Error ? error.message : String(error) };

@@ -211,6 +211,17 @@ describe('contextTools handlers (extended)', () => {
             expect(result.projects[0].id).toBe('p1');
         });
 
+        it('returns projects sorted alphabetically by name', async () => {
+            mockContext.getAllProjects.mockReturnValue([
+                { id: 'p3', name: 'Zebra', active: true, routing: {}, classification: {} },
+                { id: 'p1', name: 'Alpha', active: true, routing: {}, classification: {} },
+                { id: 'p2', name: 'Beta', active: true, routing: {}, classification: {} },
+            ]);
+
+            const result = await handleListProjects({});
+            expect(result.projects.map((p) => p.name)).toEqual(['Alpha', 'Beta', 'Zebra']);
+        });
+
         it('includes inactive projects when includeInactive is true', async () => {
             mockContext.getAllProjects.mockReturnValue([
                 { id: 'p1', name: 'Active', active: true, routing: {}, classification: {} },

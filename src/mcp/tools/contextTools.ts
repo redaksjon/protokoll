@@ -533,6 +533,8 @@ export async function handleListProjects(args: {
         );
     }
 
+    projects.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+
     const total = projects.length;
     const limit = args.limit ?? 50;
     const offset = args.offset ?? 0;

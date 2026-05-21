@@ -543,6 +543,10 @@ export const editTranscriptTool: Tool = {
                 type: 'string',
                 description: 'New project ID to assign',
             },
+            projectName: {
+                type: 'string',
+                description: 'Project name — used as a fallback display name when projectId refers to a newly-created project that is not yet reflected in the server context or entity index.',
+            },
             tagsToAdd: {
                 type: 'array',
                 items: { type: 'string' },
@@ -1092,6 +1096,7 @@ export async function handleReadTranscript(args: {
     const access = await openToolTranscript(args.transcriptPath, args.contextDirectory);
     let summaries: StoredSummary[] = [];
     let transcriptData: Awaited<ReturnType<typeof readTranscriptFromStorage>>;
+    let rawTranscript: NonNullable<ReturnType<typeof PklTranscript.open>['rawTranscript']> | null = null;
     try {
         // Use protokoll-format storage API directly - returns structured JSON
         transcriptData = await readTranscriptFromStorage(access.pklPath);
@@ -1101,6 +1106,7 @@ export async function handleReadTranscript(args: {
             const historyArtifact = transcriptHandle.getArtifact('summary_history');
             const rawHistory = historyArtifact?.data?.toString('utf8') || '[]';
             summaries = parseStoredSummaries(rawHistory);
+            rawTranscript = transcriptHandle.rawTranscript;
         } finally {
             transcriptHandle.close();
         }
@@ -1135,6 +1141,7 @@ export async function handleReadTranscript(args: {
         },
         content: transcriptData.content,
         hasRawTranscript: transcriptData.hasRawTranscript,
+        rawTranscript: rawTranscript || undefined,
         contentLength: transcriptData.content.length,
         summaries,
     };
@@ -1561,6 +1568,7 @@ export async function handleEditTranscript(args: {
     transcriptPath: string;
     title?: string;
     projectId?: string;
+    projectName?: string;
     tagsToAdd?: string[];
     tagsToRemove?: string[];
     comments?: TranscriptCommentInput[];
@@ -1607,6 +1615,12 @@ export async function handleEditTranscript(args: {
                         if (gcsEntity && typeof gcsEntity.id === 'string' && typeof gcsEntity.name === 'string') {
                             resolvedId = gcsEntity.id;
                             resolvedName = gcsEntity.name;
+                        } else if (args.projectName && args.projectName.trim()) {
+                            // Fallback for freshly-created projects that haven't propagated to the
+                            // server context or entity index yet (e.g. different Cloud Run instance,
+                            // or index TTL not yet expired). Trust the caller-supplied name.
+                            resolvedId = args.projectId;
+                            resolvedName = args.projectName.trim();
                         } else {
                             throw new Error(`Project not found: ${args.projectId}`);
                         }

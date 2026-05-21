@@ -14,6 +14,7 @@
 import type {
     ParsedResourceUri,
     TranscriptUri,
+    TranscriptStatusUri,
     EntityUri,
     ConfigUri,
     TranscriptsListUri,
@@ -46,6 +47,9 @@ export function parseUri(uri: string): ParsedResourceUri {
 
     switch (firstSegment) {
         case 'transcript':
+            if (segments[1] === 'status') {
+                return parseTranscriptStatusUri(uri, segments, params);
+            }
             return parseTranscriptUri(uri, segments, params);
         case 'entity':
             return parseEntityUri(uri, segments, params);
@@ -62,6 +66,29 @@ export function parseUri(uri: string): ParsedResourceUri {
         default:
             throw new Error(`Unknown resource type: ${firstSegment}`);
     }
+}
+
+function parseTranscriptStatusUri(
+    uri: string,
+    segments: string[],
+    params: Record<string, string>
+): TranscriptStatusUri {
+    if (segments.length < 3 || segments[1] !== 'status') {
+        throw new Error(`Invalid transcript status URI: ${uri}. Expected protokoll://transcript/status/{uuid}`);
+    }
+
+    const uuid = decodeURIComponent(segments.slice(2).join('/'));
+    if (!uuid) {
+        throw new Error(`Invalid transcript status URI: ${uri}. No UUID specified.`);
+    }
+
+    return {
+        scheme: SCHEME,
+        resourceType: 'transcript-status',
+        path: `status/${uuid}`,
+        params,
+        uuid,
+    };
 }
 
 function parseQueryParams(queryPart?: string): Record<string, string> {
@@ -262,6 +289,10 @@ export function buildTranscriptUri(transcriptPath: string): string {
     return `${SCHEME}://transcript/${encoded}`;
 }
 
+export function buildTranscriptStatusUri(uuid: string): string {
+    return `${SCHEME}://transcript/status/${encodeURIComponent(uuid)}`;
+}
+
 /**
  * Build an entity resource URI
  */
@@ -353,6 +384,9 @@ export function getResourceType(uri: string): ResourceType | null {
     
     if (firstSegment === 'transcripts') return 'transcripts-list';
     if (firstSegment === 'entities') return 'entities-list';
+    if (firstSegment === 'transcript' && segments[1]?.split('?')[0] === 'status') {
+        return 'transcript-status';
+    }
     if (firstSegment === 'audio') {
         const secondSegment = segments[1]?.split('?')[0];
         if (secondSegment === 'inbound') return 'audio-inbound';

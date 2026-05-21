@@ -16,6 +16,7 @@ export interface FileStorageProvider {
     writeFile(path: string, data: Buffer | string): Promise<void>;
     listFiles(prefix: string, pattern?: string): Promise<string[]>;
     listFilesWithMetadata(prefix: string, pattern?: string): Promise<StorageFileMetadata[]>;
+    composeFiles?(sourcePaths: string[], destinationPath: string): Promise<void>;
     deleteFile(path: string): Promise<void>;
     exists(path: string): Promise<boolean>;
     mkdir(path: string): Promise<void>;
@@ -97,6 +98,11 @@ export class FilesystemStorageProvider implements FileStorageProvider {
             return entries;
         }
         return entries.filter((entry) => entry.path.includes(pattern));
+    }
+
+    async composeFiles(sourcePaths: string[], destinationPath: string): Promise<void> {
+        const buffers = await Promise.all(sourcePaths.map((sourcePath) => this.readFile(sourcePath)));
+        await this.writeFile(destinationPath, Buffer.concat(buffers));
     }
 
     async deleteFile(pathValue: string): Promise<void> {

@@ -19,9 +19,16 @@ describe('definitions', () => {
 
         it('should have transcript template', () => {
             const transcriptTemplate = resourceTemplates.find(t => 
-                t.uriTemplate.includes('transcript')
+                t.uriTemplate === 'protokoll://transcript/{path}'
             );
             expect(transcriptTemplate).toBeDefined();
+        });
+
+        it('should have transcript status template', () => {
+            const transcriptStatusTemplate = resourceTemplates.find(t =>
+                t.uriTemplate === 'protokoll://transcript/status/{uuid}'
+            );
+            expect(transcriptStatusTemplate).toBeDefined();
         });
 
         it('should have entity template', () => {

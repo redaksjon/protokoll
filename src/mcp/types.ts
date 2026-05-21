@@ -31,6 +31,7 @@ export interface McpResourceContents {
 
 export type ResourceType = 
     | 'transcript'
+    | 'transcript-status'
     | 'entity'
     | 'config'
     | 'transcripts-list'
@@ -94,6 +95,11 @@ export interface ParsedResourceUri {
 export interface TranscriptUri extends ParsedResourceUri {
     resourceType: 'transcript';
     transcriptPath: string;
+}
+
+export interface TranscriptStatusUri extends ParsedResourceUri {
+    resourceType: 'transcript-status';
+    uuid: string;
 }
 
 export interface EntityUri extends ParsedResourceUri {

@@ -147,6 +147,24 @@ export class GcsStorageProvider implements FileStorageProvider {
         return filtered;
     }
 
+    async composeFiles(sourcePaths: string[], destinationPath: string): Promise<void> {
+        const startedAt = Date.now();
+        const sourceObjects = sourcePaths.map((sourcePath) => this.objectPath(sourcePath));
+        const destinationObject = this.objectPath(destinationPath);
+        logger.info('gcs.compose.start', {
+            bucket: this.bucketName,
+            sourceCount: sourceObjects.length,
+            destinationObject,
+        });
+        await this.storage.bucket(this.bucketName).combine(sourceObjects, destinationObject);
+        logger.info('gcs.compose.complete', {
+            bucket: this.bucketName,
+            sourceCount: sourceObjects.length,
+            destinationObject,
+            elapsedMs: Date.now() - startedAt,
+        });
+    }
+
     async deleteFile(pathValue: string): Promise<void> {
         const startedAt = Date.now();
         const objectPath = this.objectPath(pathValue);

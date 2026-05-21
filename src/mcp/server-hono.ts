@@ -33,6 +33,7 @@ import { join, extname, basename, dirname } from 'node:path';
 import { mkdir, readFile, writeFile, rm, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { homedir } from 'node:os';
+import { pathToFileURL } from 'node:url';
 import { load as parseYaml } from 'js-yaml';
 // eslint-disable-next-line import/extensions
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -55,12 +56,12 @@ import * as Prompts from './prompts';
 import { tools, handleToolCall } from './tools';
 import * as TranscriptTools from './tools/transcriptTools';
 import * as ServerConfig from './serverConfig';
-import { parseUri } from './uri';
+import { buildTranscriptStatusUri, parseUri } from './uri';
 import * as Roots from './roots';
 import type { McpRoot } from './types';
 import { DEFAULT_CONFIG_FILE, createQuietLogger } from './configDiscovery';
 import { TranscriptionWorker } from './worker/transcription-worker';
-import { setWorkerInstance } from './tools/queueTools';
+import { handleGetTranscriptByUuid, setWorkerInstance } from './tools/queueTools';
 import { configureEngineLoggingBridge } from './engineLogging';
 import { markTranscriptIndexDirtyForStorage } from './resources/transcriptIndexService';
 import {
@@ -82,6 +83,12 @@ type TranscriptMetadataLookup = {
     audioFile?: string;
     originalFilename?: string;
 };
+
+const DUPLICATE_READY_STATUSES = new Set(['enhanced', 'reviewed', 'in_progress', 'closed', 'archived']);
+
+function isUsableDuplicateStatus(status?: string): boolean {
+    return !!status && DUPLICATE_READY_STATUSES.has(status);
+}
 
 function isTranscriptPklPath(pathValue: string): boolean {
     const normalized = pathValue.replace(/^\/+/, '').replace(/\\/g, '/').toLowerCase();
@@ -144,7 +151,7 @@ async function findTranscriptByAudioHashInDirectory(
     for (const filePath of files) {
         try {
             const metadata = await readTranscriptMetadata(outputStorage, searchDirectory, filePath);
-            if (metadata.audioHash === audioHash && metadata.id) {
+            if (metadata.audioHash === audioHash && metadata.id && isUsableDuplicateStatus(metadata.status)) {
                 return {
                     uuid: metadata.id,
                     status: metadata.status,
@@ -219,6 +226,12 @@ let serverConfigInitKey: string | null = null;
 // Audio upload constants
 const DEFAULT_MAX_AUDIO_SIZE = 1024 * 1024 * 1024; // 1GB
 const DEFAULT_AUDIO_EXTENSIONS = ['mp3', 'm4a', 'wav', 'webm', 'mp4', 'aac', 'ogg', 'flac'];
+const statusUrlForUpload = (uuid: string) => `/audio/${encodeURIComponent(uuid)}/status`;
+const MAX_UPLOAD_CHUNK_SIZE = 64 * 1024 * 1024; // 64MB
+const STALE_ASSEMBLING_UPLOAD_MS = 60 * 1000;
+const uploadSessionStatusUrl = (uploadId: string) => `/audio/upload-sessions/${encodeURIComponent(uploadId)}/status`;
+const uploadSessionFinalizeUrl = (uploadId: string) => `/audio/upload-sessions/${encodeURIComponent(uploadId)}/finalize`;
+const uploadSessionChunkUrlTemplate = (uploadId: string) => `/audio/upload-sessions/${encodeURIComponent(uploadId)}/chunks/{index}`;
 const REQUEST_ID_CONTEXT_KEY = 'requestId';
 const AUTH_CONTEXT_KEY = 'authContext';
 const AUTH_FAILURE_STATUS_BY_REASON: Record<string, number> = {
@@ -1159,6 +1172,18 @@ async function notifyResourceChanged(resourceUri: string): Promise<void> {
     });
 }
 
+async function notifyTranscriptStatusChanged(uuid: string, transcriptPath?: string): Promise<void> {
+    const resourceUris = new Set<string>([buildTranscriptStatusUri(uuid)]);
+    const transcriptUri = transcriptPath ? toTranscriptResourceUri(transcriptPath) : null;
+    if (transcriptUri) {
+        resourceUris.add(transcriptUri);
+    }
+
+    for (const resourceUri of resourceUris) {
+        await notifyResourceChanged(resourceUri);
+    }
+}
+
 function toTranscriptResourceUri(transcriptPath: string): string | null {
     const trimmed = transcriptPath.trim();
     if (!trimmed) {
@@ -1246,18 +1271,44 @@ async function sendTranscriptChangeNotifications(
     toolName: string,
     args: Record<string, unknown> | undefined,
 ): Promise<void> {
-    if (!args || toolName !== 'protokoll_enhance_transcript') {
+    const mutatingTools = new Set([
+        'protokoll_enhance_transcript',
+        'protokoll_update_transcript_content',
+        'protokoll_update_transcript_entity_references',
+        'protokoll_edit_transcript',
+        'protokoll_set_status',
+        'protokoll_create_task',
+        'protokoll_complete_task',
+        'protokoll_delete_task',
+        'protokoll_provide_feedback',
+        'protokoll_reject_correction',
+        'protokoll_correct_to_entity',
+        'protokoll_retry_transcription',
+        'protokoll_cancel_transcription',
+    ]);
+    if (!mutatingTools.has(toolName)) {
+        return;
+    }
+
+    if (!args) {
         return;
     }
 
     const transcriptPath = typeof args.transcriptPath === 'string' ? args.transcriptPath : '';
-    const transcriptUri = toTranscriptResourceUri(transcriptPath);
-    if (!transcriptUri) {
+    const transcriptUri = transcriptPath ? toTranscriptResourceUri(transcriptPath) : null;
+    const uuid = typeof args.uuid === 'string' ? args.uuid : '';
+
+    if (!transcriptUri && !uuid) {
         return;
     }
 
     try {
-        await notifyResourceChanged(transcriptUri);
+        if (transcriptUri) {
+            await notifyResourceChanged(transcriptUri);
+        }
+        if (uuid) {
+            await notifyTranscriptStatusChanged(uuid, transcriptPath || undefined);
+        }
     } catch (err) {
         rootLogger.error('transcript.notification.error', {
             toolName,
@@ -1653,6 +1704,542 @@ function getAudioMimeType(ext: string): string {
     return mimeTypes[ext.toLowerCase()] || 'application/octet-stream';
 }
 
+type UploadSessionStatus = 'receiving' | 'assembling' | 'queued' | 'duplicate' | 'failed';
+
+interface UploadSessionChunk {
+    index: number;
+    sizeBytes: number;
+    sha256: string;
+    receivedAt: string;
+}
+
+interface UploadSessionRecord {
+    uploadId: string;
+    status: UploadSessionStatus;
+    filename: string;
+    extension: string;
+    contentType?: string;
+    sizeBytes?: number;
+    receivedBytes: number;
+    chunks: Record<string, UploadSessionChunk>;
+    title?: string;
+    project?: string;
+    createdAt: string;
+    updatedAt: string;
+    finalizedAt?: string;
+    error?: string;
+    transcriptUuid?: string;
+    transcriptStatusUri?: string;
+    transcriptStatusUrl?: string;
+    uploadSessionStatusUrl: string;
+    uploadSessionFinalizeUrl: string;
+    uploadSessionChunkUrlTemplate: string;
+}
+
+function uploadSessionRoot(uploadId: string): string {
+    return `uploads/.sessions/${uploadId}`;
+}
+
+function uploadSessionManifestPath(uploadId: string): string {
+    return `${uploadSessionRoot(uploadId)}/session.json`;
+}
+
+function uploadSessionChunkPath(uploadId: string, index: number): string {
+    return `${uploadSessionRoot(uploadId)}/chunks/${String(index).padStart(8, '0')}.part`;
+}
+
+function publicUploadSessionView(session: UploadSessionRecord): UploadSessionRecord & {
+    expectedBytes?: number;
+    missingBytes?: number;
+    chunkCount: number;
+} {
+    const expectedBytes = session.sizeBytes;
+    const missingBytes = expectedBytes !== undefined
+        ? Math.max(expectedBytes - session.receivedBytes, 0)
+        : undefined;
+    return {
+        ...session,
+        expectedBytes,
+        missingBytes,
+        chunkCount: Object.keys(session.chunks).length,
+    };
+}
+
+async function writeUploadSession(
+    outputStorage: FileStorageProvider,
+    session: UploadSessionRecord,
+): Promise<void> {
+    session.updatedAt = new Date().toISOString();
+    await outputStorage.writeFile(uploadSessionManifestPath(session.uploadId), JSON.stringify(session, null, 2));
+}
+
+async function readUploadSession(
+    outputStorage: FileStorageProvider,
+    uploadId: string,
+): Promise<UploadSessionRecord | null> {
+    try {
+        const raw = await outputStorage.readFile(uploadSessionManifestPath(uploadId));
+        const parsed = JSON.parse(raw.toString('utf8')) as UploadSessionRecord;
+        return parsed;
+    } catch {
+        return null;
+    }
+}
+
+function getValidatedAudioExtension(filename: string): string {
+    const ext = extname(filename).toLowerCase().replace('.', '');
+    if (!DEFAULT_AUDIO_EXTENSIONS.includes(ext)) {
+        throw new Error(`Unsupported file type: ${ext}. Supported: ${DEFAULT_AUDIO_EXTENSIONS.join(', ')}`);
+    }
+    return ext;
+}
+
+function parseOptionalPositiveInteger(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+        return Math.floor(value);
+    }
+    if (typeof value === 'string' && value.trim()) {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed) && parsed > 0) {
+            return Math.floor(parsed);
+        }
+    }
+    return undefined;
+}
+
+function applyProjectScopeToUploadProject(
+    authContext: AuthContext | undefined,
+    requestedProject: string | undefined,
+): string | undefined {
+    let project = requestedProject;
+    if (hasProjectScope(authContext ?? null)) {
+        const allowedProjects = normalizeAllowedProjects(authContext ?? null);
+        if (!project && allowedProjects.length === 1) {
+            project = allowedProjects[0];
+        }
+        if (!project || !isProjectAllowed(project, allowedProjects)) {
+            throw new Error('Project-scoped key cannot upload outside allowed projects');
+        }
+    }
+    return project;
+}
+
+function assertUploadSessionProjectAccess(
+    authContext: AuthContext | undefined,
+    session: UploadSessionRecord,
+): void {
+    const allowedProjects = normalizeAllowedProjects(authContext ?? null);
+    if (allowedProjects.length === 0) {
+        return;
+    }
+    const project = session.project?.trim() || '';
+    if (!isProjectAllowed(project, allowedProjects)) {
+        throw new Error(`Project-scoped key cannot access upload from project "${project || 'unassigned'}"`);
+    }
+}
+
+function uploadSessionChunkPaths(session: UploadSessionRecord): string[] {
+    return Object.values(session.chunks)
+        .sort((a, b) => a.index - b.index)
+        .map((chunk) => uploadSessionChunkPath(session.uploadId, chunk.index));
+}
+
+async function hashAndVerifyUploadSessionChunks(
+    outputStorage: FileStorageProvider,
+    session: UploadSessionRecord,
+): Promise<{ sha256: string; sizeBytes: number }> {
+    const chunks = Object.values(session.chunks).sort((a, b) => a.index - b.index);
+    if (chunks.length === 0) {
+        throw new Error('No chunks have been uploaded for this session');
+    }
+
+    const hash = createHash('sha256');
+    let sizeBytes = 0;
+    for (const chunk of chunks) {
+        const buffer = await outputStorage.readFile(uploadSessionChunkPath(session.uploadId, chunk.index));
+        const chunkHash = createHash('sha256').update(buffer).digest('hex');
+        if (chunkHash !== chunk.sha256) {
+            throw new Error(`Chunk ${chunk.index} failed integrity check`);
+        }
+        hash.update(buffer);
+        sizeBytes += buffer.length;
+    }
+
+    return {
+        sizeBytes,
+        sha256: hash.digest('hex'),
+    };
+}
+
+async function persistUploadSessionAudio(
+    outputStorage: FileStorageProvider,
+    session: UploadSessionRecord,
+    uploadObjectPath: string,
+): Promise<void> {
+    const sourcePaths = uploadSessionChunkPaths(session);
+    if (typeof outputStorage.composeFiles === 'function') {
+        await outputStorage.composeFiles(sourcePaths, uploadObjectPath);
+        return;
+    }
+    const buffers = await Promise.all(sourcePaths.map((sourcePath) => outputStorage.readFile(sourcePath)));
+    await outputStorage.writeFile(uploadObjectPath, Buffer.concat(buffers));
+}
+
+async function resolveUploadSessionAudioIdentity(
+    outputStorage: FileStorageProvider,
+    session: UploadSessionRecord,
+): Promise<{ audioHash: string; objectKey: string; sizeBytes: number; contentHash: boolean }> {
+    if (outputStorage.name === 'gcs') {
+        const chunks = Object.values(session.chunks);
+        const sizeBytes = chunks.reduce((total, chunk) => total + chunk.sizeBytes, 0);
+        if (session.sizeBytes !== undefined && sizeBytes !== session.sizeBytes) {
+            throw new Error(`Assembled file size ${sizeBytes} does not match expected ${session.sizeBytes}`);
+        }
+        // For GCS-backed chunked uploads, each chunk is hashed as it arrives.
+        // Avoid re-downloading all chunks just to compute a full-file hash; compose
+        // them server-side and use the stable upload ID as the storage key/hash.
+        return {
+            audioHash: session.uploadId,
+            objectKey: session.uploadId,
+            sizeBytes,
+            contentHash: false,
+        };
+    }
+
+    const assembled = await hashAndVerifyUploadSessionChunks(outputStorage, session);
+    if (session.sizeBytes !== undefined && assembled.sizeBytes !== session.sizeBytes) {
+        throw new Error(`Assembled file size ${assembled.sizeBytes} does not match expected ${session.sizeBytes}`);
+    }
+    return {
+        audioHash: assembled.sha256,
+        objectKey: assembled.sha256,
+        sizeBytes: assembled.sizeBytes,
+        contentHash: true,
+    };
+}
+
+/**
+ * Create a durable upload session before sending audio bytes.
+ *
+ * Clients can upload chunks, poll this session status, and finalize it into the
+ * normal transcript queue once all bytes are present.
+ */
+app.post('/audio/upload-sessions', async (c) => {
+    try {
+        const body: Record<string, unknown> = await c.req.json<Record<string, unknown>>().catch(() => ({}));
+        const filename = typeof body.filename === 'string' ? body.filename.trim() : '';
+        if (!filename) {
+            return c.json({ error: 'filename is required' }, 400);
+        }
+
+        const ext = getValidatedAudioExtension(filename);
+        const sizeBytes = parseOptionalPositiveInteger(body.sizeBytes);
+        if (sizeBytes !== undefined && sizeBytes > DEFAULT_MAX_AUDIO_SIZE) {
+            return c.json({
+                error: `Audio file is too large. Max size is ${DEFAULT_MAX_AUDIO_SIZE} bytes.`,
+            }, 413);
+        }
+
+        const rawTitle = body.title;
+        const rawProject = body.project;
+        const title = (typeof rawTitle === 'string' && rawTitle.trim()) ? rawTitle.trim() : undefined;
+        const requestedProject = (typeof rawProject === 'string' && rawProject.trim()) ? rawProject.trim() : undefined;
+        const project = applyProjectScopeToUploadProject(
+            c.get(AUTH_CONTEXT_KEY) as AuthContext | undefined,
+            requestedProject,
+        );
+
+        const uploadId = randomUUID();
+        const outputStorage = ServerConfig.getOutputStorage();
+        await outputStorage.mkdir(`${uploadSessionRoot(uploadId)}/chunks`);
+
+        const now = new Date().toISOString();
+        const session: UploadSessionRecord = {
+            uploadId,
+            status: 'receiving',
+            filename,
+            extension: ext,
+            contentType: typeof body.contentType === 'string' ? body.contentType : getAudioMimeType(`.${ext}`),
+            sizeBytes,
+            receivedBytes: 0,
+            chunks: {},
+            title,
+            project,
+            createdAt: now,
+            updatedAt: now,
+            uploadSessionStatusUrl: uploadSessionStatusUrl(uploadId),
+            uploadSessionFinalizeUrl: uploadSessionFinalizeUrl(uploadId),
+            uploadSessionChunkUrlTemplate: uploadSessionChunkUrlTemplate(uploadId),
+        };
+        await writeUploadSession(outputStorage, session);
+
+        uploadLogger.info('audio.upload_session.created', {
+            uploadId,
+            filename,
+            sizeBytes: sizeBytes ?? null,
+            storageBackend: outputStorage.name,
+        });
+
+        return c.json(publicUploadSessionView(session), 201);
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const status = message.includes('Project-scoped key') ? 403 : 400;
+        return c.json({ error: message }, status);
+    }
+});
+
+app.get('/audio/upload-sessions/:uploadId/status', async (c) => {
+    const uploadId = c.req.param('uploadId');
+    const outputStorage = ServerConfig.getOutputStorage();
+    const session = await readUploadSession(outputStorage, uploadId);
+    if (!session) {
+        return c.json({ error: `Upload session not found: ${uploadId}` }, 404);
+    }
+
+    try {
+        assertUploadSessionProjectAccess(c.get(AUTH_CONTEXT_KEY) as AuthContext | undefined, session);
+    } catch (error) {
+        return c.json({ error: error instanceof Error ? error.message : String(error) }, 403);
+    }
+
+    c.header('Cache-Control', 'no-store');
+    return c.json(publicUploadSessionView(session));
+});
+
+app.put('/audio/upload-sessions/:uploadId/chunks/:index',
+    bodyLimit({ maxSize: MAX_UPLOAD_CHUNK_SIZE }),
+    async (c) => {
+        const uploadId = c.req.param('uploadId');
+        const indexRaw = c.req.param('index');
+        const index = Number(indexRaw);
+        if (!Number.isInteger(index) || index < 0) {
+            return c.json({ error: 'Chunk index must be a non-negative integer' }, 400);
+        }
+
+        const outputStorage = ServerConfig.getOutputStorage();
+        const session = await readUploadSession(outputStorage, uploadId);
+        if (!session) {
+            return c.json({ error: `Upload session not found: ${uploadId}` }, 404);
+        }
+
+        try {
+            assertUploadSessionProjectAccess(c.get(AUTH_CONTEXT_KEY) as AuthContext | undefined, session);
+        } catch (error) {
+            return c.json({ error: error instanceof Error ? error.message : String(error) }, 403);
+        }
+
+        if (session.status !== 'receiving') {
+            return c.json({
+                error: `Cannot upload chunks while session is ${session.status}`,
+                status: publicUploadSessionView(session),
+            }, 409);
+        }
+
+        const chunk = Buffer.from(await c.req.arrayBuffer());
+        if (chunk.length === 0) {
+            return c.json({ error: 'Chunk body is empty' }, 400);
+        }
+
+        const previousSize = session.chunks[String(index)]?.sizeBytes ?? 0;
+        const nextReceivedBytes = session.receivedBytes - previousSize + chunk.length;
+        if (session.sizeBytes !== undefined && nextReceivedBytes > session.sizeBytes) {
+            return c.json({
+                error: `Chunk would exceed expected upload size of ${session.sizeBytes} bytes`,
+                status: publicUploadSessionView(session),
+            }, 409);
+        }
+
+        await outputStorage.writeFile(uploadSessionChunkPath(uploadId, index), chunk);
+        session.chunks[String(index)] = {
+            index,
+            sizeBytes: chunk.length,
+            sha256: createHash('sha256').update(chunk).digest('hex'),
+            receivedAt: new Date().toISOString(),
+        };
+        session.receivedBytes = nextReceivedBytes;
+        await writeUploadSession(outputStorage, session);
+
+        uploadLogger.info('audio.upload_session.chunk_received', {
+            uploadId,
+            chunkIndex: index,
+            chunkBytes: chunk.length,
+            receivedBytes: session.receivedBytes,
+            expectedBytes: session.sizeBytes ?? null,
+        });
+
+        return c.json(publicUploadSessionView(session));
+    }
+);
+
+app.post('/audio/upload-sessions/:uploadId/finalize', async (c) => {
+    const uploadId = c.req.param('uploadId');
+    const outputStorage = ServerConfig.getOutputStorage();
+    const outputDir = ServerConfig.getOutputDirectory();
+    const session = await readUploadSession(outputStorage, uploadId);
+    if (!session) {
+        return c.json({ error: `Upload session not found: ${uploadId}` }, 404);
+    }
+
+    try {
+        assertUploadSessionProjectAccess(c.get(AUTH_CONTEXT_KEY) as AuthContext | undefined, session);
+    } catch (error) {
+        return c.json({ error: error instanceof Error ? error.message : String(error) }, 403);
+    }
+
+    if (session.transcriptUuid && session.status === 'queued') {
+        c.header('Cache-Control', 'no-store');
+        return c.json(publicUploadSessionView(session));
+    }
+
+    if (session.transcriptUuid && session.status === 'duplicate') {
+        const existing = await findTranscriptByUuidInStorage(session.transcriptUuid, outputStorage, outputDir);
+        if (existing && isUsableDuplicateStatus(existing.metadata.status)) {
+            c.header('Cache-Control', 'no-store');
+            return c.json(publicUploadSessionView(session));
+        }
+
+        uploadLogger.warning('audio.upload_session.reopen_unusable_duplicate', {
+            uploadId,
+            transcriptUuid: session.transcriptUuid,
+            existingStatus: existing?.metadata.status ?? null,
+        });
+        session.status = 'receiving';
+        session.finalizedAt = undefined;
+        session.transcriptUuid = undefined;
+        session.transcriptStatusUri = undefined;
+        session.transcriptStatusUrl = undefined;
+        await writeUploadSession(outputStorage, session);
+    }
+
+    if (session.status === 'assembling') {
+        const updatedAt = new Date(session.updatedAt).getTime();
+        const isStale = !Number.isFinite(updatedAt) || Date.now() - updatedAt > STALE_ASSEMBLING_UPLOAD_MS;
+        if (!isStale) {
+            return c.json({
+                error: 'Upload is already being finalized. Check the upload session status shortly.',
+                status: publicUploadSessionView(session),
+            }, 409);
+        }
+        uploadLogger.warning('audio.upload_session.recover_stale_assembling', {
+            uploadId,
+            updatedAt: session.updatedAt,
+            staleMs: Number.isFinite(updatedAt) ? Date.now() - updatedAt : null,
+        });
+    } else if (session.status !== 'receiving' && session.status !== 'failed') {
+        return c.json({
+            error: `Cannot finalize upload session while it is ${session.status}`,
+            status: publicUploadSessionView(session),
+        }, 409);
+    }
+
+    if (session.sizeBytes !== undefined && session.receivedBytes !== session.sizeBytes) {
+        return c.json({
+            error: `Upload is incomplete: received ${session.receivedBytes} of ${session.sizeBytes} bytes`,
+            status: publicUploadSessionView(session),
+        }, 409);
+    }
+
+    session.status = 'assembling';
+    session.error = undefined;
+    await writeUploadSession(outputStorage, session);
+
+    try {
+        const audioIdentity = await resolveUploadSessionAudioIdentity(outputStorage, session);
+        const uploadObjectPath = `uploads/${audioIdentity.objectKey}.${session.extension}`;
+        const hashObjectExists = await outputStorage.exists(uploadObjectPath);
+        if (hashObjectExists && audioIdentity.contentHash) {
+            const existingTranscript = await findTranscriptByAudioHashInDirectory(audioIdentity.audioHash, outputDir, outputStorage);
+            if (existingTranscript) {
+                session.status = 'duplicate';
+                session.finalizedAt = new Date().toISOString();
+                session.transcriptUuid = existingTranscript.uuid;
+                session.transcriptStatusUri = buildTranscriptStatusUri(existingTranscript.uuid);
+                session.transcriptStatusUrl = statusUrlForUpload(existingTranscript.uuid);
+                await writeUploadSession(outputStorage, session);
+
+                uploadLogger.info('audio.upload_session.duplicate_detected', {
+                    uploadId,
+                    transcriptUuid: existingTranscript.uuid,
+                    bytes: audioIdentity.sizeBytes,
+                    objectPath: uploadObjectPath,
+                    storageBackend: outputStorage.name,
+                });
+
+                return c.json(publicUploadSessionView(session));
+            }
+        }
+
+        if (!hashObjectExists) {
+            await persistUploadSessionAudio(outputStorage, session, uploadObjectPath);
+        }
+        await mkdir(outputDir, { recursive: true });
+
+        const { uuid, filePath } = await createUploadTranscript({
+            audioFile: basename(uploadObjectPath),
+            originalFilename: session.filename,
+            audioHash: audioIdentity.audioHash,
+            outputDirectory: outputDir,
+            title: session.title,
+            project: session.project,
+        });
+
+        const transcript = PklTranscript.open(filePath);
+        try {
+            transcript.addArtifact('upload_info', Buffer.from(JSON.stringify({
+                originalFilename: session.filename,
+                audioSizeBytes: audioIdentity.sizeBytes,
+                uploadSessionId: uploadId,
+            }), 'utf8'));
+        } finally {
+            transcript.close();
+        }
+
+        if (outputStorage.name === 'gcs') {
+            const transcriptObjectPath = basename(filePath);
+            const transcriptBytes = await readFile(filePath);
+            await outputStorage.writeFile(transcriptObjectPath, transcriptBytes);
+            markTranscriptIndexDirtyForStorage(outputStorage, outputDir, transcriptObjectPath);
+        }
+
+        session.status = 'queued';
+        session.finalizedAt = new Date().toISOString();
+        session.transcriptUuid = uuid;
+        session.transcriptStatusUri = buildTranscriptStatusUri(uuid);
+        session.transcriptStatusUrl = statusUrlForUpload(uuid);
+        await writeUploadSession(outputStorage, session);
+
+        for (const chunk of Object.values(session.chunks)) {
+            outputStorage.deleteFile(uploadSessionChunkPath(uploadId, chunk.index)).catch(() => undefined);
+        }
+
+        uploadLogger.info('audio.upload_session.finalized', {
+            uploadId,
+            transcriptUuid: uuid,
+            bytes: audioIdentity.sizeBytes,
+            objectPath: uploadObjectPath,
+            storageBackend: outputStorage.name,
+        });
+
+        await notifyTranscriptStatusChanged(uuid, filePath);
+        c.header('Cache-Control', 'no-store');
+        return c.json(publicUploadSessionView(session));
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        session.status = 'failed';
+        session.error = message;
+        await writeUploadSession(outputStorage, session);
+        uploadLogger.error('audio.upload_session.finalize_failed', {
+            uploadId,
+            error: message,
+        });
+        return c.json({
+            error: 'Upload finalize failed',
+            details: message,
+            status: publicUploadSessionView(session),
+        }, 500);
+    }
+});
+
 /**
  * Audio upload endpoint
  * 
@@ -1708,16 +2295,23 @@ app.post('/audio/upload',
                         success: true,
                         duplicate: true,
                         uuid: existingTranscript.uuid,
+                        statusUri: buildTranscriptStatusUri(existingTranscript.uuid),
+                        statusUrl: statusUrlForUpload(existingTranscript.uuid),
                         message: 'Duplicate audio detected. Returning existing transcript.',
                         filename: file.name,
+                        displayName: file.name,
                         size: buffer.byteLength,
                         existingStatus: existingTranscript.status ?? null,
                     });
                 }
             }
             
-            // Save uploaded file with hash-based name
-            await outputStorage.writeFile(uploadObjectPath, Buffer.from(buffer));
+            // Save uploaded file with hash-based name unless those exact bytes
+            // are already present. A non-ready transcript with the same hash is
+            // not a usable duplicate, but the audio object can still be reused.
+            if (!hashObjectExists) {
+                await outputStorage.writeFile(uploadObjectPath, Buffer.from(buffer));
+            }
             
             // Extract optional title and project hints from form data
             const rawTitle = body['title'];
@@ -1751,6 +2345,16 @@ app.post('/audio/upload',
                 project,
             });
 
+            const transcript = PklTranscript.open(filePath);
+            try {
+                transcript.addArtifact('upload_info', Buffer.from(JSON.stringify({
+                    originalFilename: file.name,
+                    audioSizeBytes: buffer.byteLength,
+                }), 'utf8'));
+            } finally {
+                transcript.close();
+            }
+
             // In GCS mode, persist the upload transcript record to shared storage
             // so any worker instance can discover and process it.
             if (outputStorage.name === 'gcs') {
@@ -1767,15 +2371,31 @@ app.post('/audio/upload',
                 objectPath: uploadObjectPath,
                 storageBackend: outputStorage.name,
             });
+
+            await notifyTranscriptStatusChanged(uuid, filePath);
             
             return c.json({
                 success: true,
                 uuid,
-                message: 'Audio uploaded successfully. Use protokoll_get_transcript_by_uuid to track progress.',
+                statusUri: buildTranscriptStatusUri(uuid),
+                statusUrl: statusUrlForUpload(uuid),
+                message: 'Audio uploaded successfully.',
                 filename: file.name,
+                displayName: file.name,
                 size: buffer.byteLength,
                 title: title ?? null,
                 project: project ?? null,
+                status: {
+                    uuid,
+                    displayName: file.name,
+                    status: 'uploaded',
+                    stage: 'queued',
+                    statusLabel: 'Queued for transcription',
+                    statusDetail: 'Upload complete. Waiting for the transcription worker to start.',
+                    fileSizeBytes: buffer.byteLength,
+                    uploadedAt: new Date().toISOString(),
+                    transcriptStatusUri: buildTranscriptStatusUri(uuid),
+                },
             });
             
         } catch (error) {
@@ -1789,6 +2409,47 @@ app.post('/audio/upload',
         }
     }
 );
+
+/**
+ * Audio upload/transcription status endpoint.
+ *
+ * Mirrors the MCP transcript-status resource over plain HTTP so upload clients
+ * and Cloud Run operators have a direct URL to poll after receiving a UUID.
+ */
+app.get('/audio/:uuid/status', async (c) => {
+    const uuid = c.req.param('uuid');
+    try {
+        const result = await handleGetTranscriptByUuid({ uuid, includeContent: false });
+        if (!result.found || !result.statusView) {
+            return c.json({
+                error: result.error || `Transcript not found for UUID: ${uuid}`,
+            }, 404);
+        }
+
+        const authContext = c.get(AUTH_CONTEXT_KEY) as AuthContext | undefined;
+        const allowedProjects = normalizeAllowedProjects(authContext ?? null);
+        if (allowedProjects.length > 0) {
+            const projectId = result.statusView.projectId?.trim() || '';
+            if (!isProjectAllowed(projectId, allowedProjects)) {
+                return c.json({
+                    error: `Project-scoped key cannot access transcript from project "${projectId || 'unassigned'}"`,
+                }, 403);
+            }
+        }
+
+        c.header('Cache-Control', 'no-store');
+        return c.json(result.statusView);
+    } catch (error) {
+        uploadLogger.error('audio.status.error', {
+            uuid,
+            error: error instanceof Error ? error.message : String(error),
+        });
+        return c.json({
+            error: 'Status lookup failed',
+            details: error instanceof Error ? error.message : String(error),
+        }, 500);
+    }
+});
 
 /**
  * Audio download endpoint
@@ -2347,6 +3008,9 @@ async function ensureTranscriptionWorkerStarted(): Promise<void> {
             scanInterval: 60_000,
             model: (startupConfig as any).model,
             transcriptionModel: (startupConfig as any).transcriptionModel,
+            onTranscriptStatusChanged: async ({ uuid, transcriptPath }) => {
+                await notifyTranscriptStatusChanged(uuid, transcriptPath);
+            },
         });
 
         await transcriptionWorker.start();
@@ -2531,6 +3195,15 @@ async function main() {
     const resolvedConfigDirsForBanner = (cardigantimeConfig as any).resolvedConfigDirs as string[] | undefined;
     const configRoot = resolvedConfigDirsForBanner?.[0] ?? process.env.WORKSPACE_ROOT ?? process.cwd();
     const configPathDisplay = resolve(configRoot, DEFAULT_CONFIG_FILE);
+
+    // Direct HTTP routes such as /audio/upload-sessions can be called before
+    // any MCP initialize request. Initialize server config during startup so
+    // those routes use the configured storage backend instead of fallback local
+    // filesystem storage.
+    await ensureServerConfigInitialized([{
+        uri: pathToFileURL(configRoot).href,
+        name: 'Server configuration root',
+    }]);
 
     const inputDir = (cardigantimeConfig as any).inputDirectory || 'NOT SET';
     const outputDir = (cardigantimeConfig as any).outputDirectory || 'NOT SET';
