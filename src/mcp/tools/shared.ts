@@ -41,7 +41,24 @@ import type { ProtokollContextInstance } from '@/context';
 import type { Person, Project, Term, Company, IgnoredTerm, Entity } from '@/context/types';
 import { parseUri, isProtokolUri } from '../uri';
 import { parseGcsUri } from '../storage/gcsUri';
-import { listContextEntitiesFromGcs } from '../resources/entityIndexService';
+import {
+    deleteContextEntityFromGcs,
+    listContextEntitiesFromGcs,
+    type IndexedEntityType,
+} from '../resources/entityIndexService';
+
+function toIndexedEntityType(entityType: string): IndexedEntityType | null {
+    switch (entityType) {
+        case 'person':
+        case 'project':
+        case 'term':
+        case 'company':
+        case 'ignored':
+            return entityType;
+        default:
+            return null;
+    }
+}
 
 // ============================================================================
 // Shared Utilities
@@ -248,6 +265,13 @@ export async function createToolContext(contextDirectory?: string): Promise<Prot
                 return baseContext.saveEntity(entity, allowUpdate);
             },
             deleteEntity: async (entity: Entity) => {
+                const indexedType = toIndexedEntityType(entity.type);
+                if (indexedType) {
+                    const deletedFromIndex = await deleteContextEntityFromGcs(indexedType, entity.id);
+                    if (deletedFromIndex) {
+                        return true;
+                    }
+                }
                 if (!baseContext?.deleteEntity) {
                     return false;
                 }

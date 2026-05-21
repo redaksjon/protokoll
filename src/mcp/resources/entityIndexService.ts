@@ -154,6 +154,37 @@ class EntityIndexService {
     }
 
     async find(entityType: IndexedEntityType, entityId: string): Promise<Record<string, unknown> | null> {
+        const entry = await this.findEntry(entityType, entityId);
+        return entry?.payload ?? null;
+    }
+
+    async delete(entityType: IndexedEntityType, entityId: string): Promise<boolean> {
+        const entry = await this.findEntry(entityType, entityId);
+        if (!entry) {
+            return false;
+        }
+
+        const provider = createGcsStorageProvider(
+            this.contextGcs.uri,
+            this.contextGcs.credentialsFile,
+            this.contextGcs.projectId,
+        );
+        await provider.deleteFile(entry.path);
+
+        const entries = this.byType.get(entityType);
+        entries?.delete(entry.path);
+        this.markDirty(entityType);
+        this.schedulePersist();
+
+        logger.info('entities.index.delete.complete', {
+            entityType,
+            entityId: entry.id,
+            path: entry.path,
+        });
+        return true;
+    }
+
+    private async findEntry(entityType: IndexedEntityType, entityId: string): Promise<EntityIndexEntry | null> {
         await this.refreshTypeIfNeeded(entityType);
         const normalized = entityId.trim().toLowerCase();
         const prefix = normalized.match(/^([a-f0-9]{8})/)?.[1];
@@ -163,13 +194,13 @@ class EntityIndexService {
             const idLower = entry.id.toLowerCase();
             const slugLower = (entry.slug || '').toLowerCase();
             if (idLower === normalized || slugLower === normalized) {
-                return entry.payload;
+                return entry;
             }
             if (normalized && (idLower.startsWith(normalized) || normalized.startsWith(idLower))) {
-                return entry.payload;
+                return entry;
             }
             if (prefix && idLower.startsWith(prefix)) {
-                return entry.payload;
+                return entry;
             }
         }
         return null;
@@ -455,4 +486,16 @@ export function markContextEntityIndexDirty(entityType?: IndexedEntityType): voi
     }
     const service = getOrCreateService(contextGcs);
     service.markDirty(entityType);
+}
+
+export async function deleteContextEntityFromGcs(
+    entityType: IndexedEntityType,
+    entityId: string,
+): Promise<boolean> {
+    const contextGcs = getContextGcsConfig();
+    if (!contextGcs) {
+        return false;
+    }
+    const service = getOrCreateService(contextGcs);
+    return service.delete(entityType, entityId);
 }

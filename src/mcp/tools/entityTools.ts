@@ -4,6 +4,8 @@
  */
  
 import { randomUUID } from 'crypto';
+import { readdir, unlink } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { Person, Project, Term, Company, Entity, EntityRelationship } from '@/context/types';
 import { 
@@ -15,7 +17,11 @@ import {
 } from '@redaksjon/protokoll-engine';
  
 import { formatEntity, slugify, mergeArray, createToolContext } from './shared.js';
-import { markContextEntityIndexDirty } from '../resources/entityIndexService';
+import {
+    deleteContextEntityFromGcs,
+    markContextEntityIndexDirty,
+    type IndexedEntityType,
+} from '../resources/entityIndexService';
 
 /**
  * Check if a string is a valid UUID
@@ -58,6 +64,67 @@ async function markEntityIndexDirtyIfGcs(entityType?: 'person' | 'project' | 'te
         return;
     }
     markContextEntityIndexDirty(entityType);
+}
+
+const ENTITY_TYPE_TO_DIRECTORY: Record<string, string> = {
+    person: 'people',
+    project: 'projects',
+    term: 'terms',
+    company: 'companies',
+    ignored: 'ignored',
+};
+
+function toIndexedEntityType(entityType: string): IndexedEntityType | null {
+    switch (entityType) {
+        case 'person':
+        case 'project':
+        case 'term':
+        case 'company':
+        case 'ignored':
+            return entityType;
+        default:
+            return null;
+    }
+}
+
+async function deleteEntityFromFilesystem(entity: Entity, context: Awaited<ReturnType<typeof createToolContext>>): Promise<boolean> {
+    const knownPath = context.getEntityFilePath?.(entity);
+    if (knownPath) {
+        try {
+            await unlink(knownPath);
+            return true;
+        } catch {
+            // Fall through to directory scan.
+        }
+    }
+
+    const directoryName = ENTITY_TYPE_TO_DIRECTORY[entity.type];
+    if (!directoryName) {
+        return false;
+    }
+
+    const uuidPrefix = entity.id.substring(0, 10);
+    for (const contextDir of context.getContextDirs()) {
+        const candidateDirs = [
+            join(contextDir, directoryName),
+            join(contextDir, 'context', directoryName),
+        ];
+        for (const dir of candidateDirs) {
+            try {
+                const files = await readdir(dir);
+                for (const file of files) {
+                    if (file.startsWith(uuidPrefix) && (file.endsWith('.yaml') || file.endsWith('.yml'))) {
+                        await unlink(join(dir, file));
+                        return true;
+                    }
+                }
+            } catch {
+                // Directory may not exist for this context root.
+            }
+        }
+    }
+
+    return false;
 }
 
 // ============================================================================
@@ -1761,17 +1828,30 @@ export async function handleDeleteEntity(args: { entityType: string; entityId: s
     }
 
     const deleted = await context.deleteEntity(entity);
-    if (deleted) {
+    let removed = deleted;
+    if (!removed) {
+        const indexedType = toIndexedEntityType(args.entityType);
+        const ServerConfig = await import('../serverConfig');
+        if (indexedType && ServerConfig.getStorageConfig().backend === 'gcs') {
+            removed = await deleteContextEntityFromGcs(indexedType, args.entityId);
+        } else {
+            removed = await deleteEntityFromFilesystem(entity, context);
+        }
+    }
+
+    if (removed) {
         await markEntityIndexDirtyIfGcs(args.entityType as 'person' | 'project' | 'term' | 'company' | 'ignored');
     }
 
-    if (!deleted) {
-        throw new Error(`Failed to delete ${args.entityType} "${args.entityId}"`);
+    if (!removed) {
+        throw new Error(
+            `Failed to delete ${args.entityType} "${entity.name}" (${args.entityId}): entity file not found or could not be removed`
+        );
     }
 
     return {
         success: true,
-        message: `${args.entityType} "${args.entityId}" deleted successfully`,
+        message: `${args.entityType} "${entity.name}" deleted successfully`,
     };
 }
 
