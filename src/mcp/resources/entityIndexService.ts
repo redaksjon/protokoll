@@ -18,6 +18,15 @@ const ENTITY_DIRECTORY: Record<IndexedEntityType, string> = {
     ignored: 'ignored',
 };
 
+/** Singular directory names used by the web app (context/default/{singular}/) */
+const ENTITY_DIRECTORY_DEFAULT: Record<IndexedEntityType, string> = {
+    person: 'person',
+    project: 'project',
+    term: 'term',
+    company: 'company',
+    ignored: 'ignored',
+};
+
 interface ContextGcsConfig {
     uri: string;
     projectId?: string;
@@ -60,6 +69,11 @@ function metadataVersionKey(metadata: StorageFileMetadata): string {
 function isYamlPath(pathValue: string): boolean {
     const normalized = normalizePath(pathValue).toLowerCase();
     return normalized.endsWith('.yaml') || normalized.endsWith('.yml');
+}
+
+function isJsonPath(pathValue: string): boolean {
+    const normalized = normalizePath(pathValue).toLowerCase();
+    return normalized.endsWith('.json');
 }
 
 async function listFilesWithMetadataCompat(
@@ -180,12 +194,29 @@ class EntityIndexService {
             this.contextGcs.credentialsFile,
             this.contextGcs.projectId,
         );
+
+        // Scan YAML files from context/{plural}/ (e.g. projects/)
         const directory = ENTITY_DIRECTORY[entityType];
         const listed = await listFilesWithMetadataCompat(provider as any, `${directory}/`);
         const yamlEntries = listed
             .map((metadata) => ({ ...metadata, path: normalizePath(metadata.path) }))
             .filter((metadata) => isYamlPath(metadata.path));
-        const byPath = new Map(yamlEntries.map((metadata) => [metadata.path, metadata]));
+
+        // Scan JSON files from context/default/{singular}/ (e.g. project/)
+        // The web app creates entities as JSON in the singular directory
+        const defaultDirectory = ENTITY_DIRECTORY_DEFAULT[entityType];
+        let defaultListed: StorageFileMetadata[] = [];
+        try {
+            defaultListed = await listFilesWithMetadataCompat(provider as any, `default/${defaultDirectory}/`);
+        } catch {
+            // Directory may not exist in all contexts
+        }
+        const jsonEntries = defaultListed
+            .map((metadata) => ({ ...metadata, path: normalizePath(metadata.path) }))
+            .filter((metadata) => isJsonPath(metadata.path));
+
+        const allEntries = [...yamlEntries, ...jsonEntries];
+        const byPath = new Map(allEntries.map((metadata) => [metadata.path, metadata]));
         const existing = this.byType.get(entityType) || new Map<string, EntityIndexEntry>();
         let changedCount = 0;
         let cacheHitCount = 0;
@@ -200,7 +231,7 @@ class EntityIndexService {
             }
         }
 
-        for (const metadata of yamlEntries) {
+        for (const metadata of allEntries) {
             const cached = existing.get(metadata.path);
             const sameVersion = cached
                 ? [
@@ -219,7 +250,10 @@ class EntityIndexService {
             changedCount++;
             try {
                 const raw = await provider.readFile(metadata.path);
-                const parsed = yaml.load(raw.toString('utf8'));
+                const isJson = isJsonPath(metadata.path);
+                const parsed = isJson
+                    ? JSON.parse(raw.toString('utf8'))
+                    : yaml.load(raw.toString('utf8'));
                 if (!parsed || typeof parsed !== 'object') {
                     hydrateFailed++;
                     continue;
@@ -265,6 +299,7 @@ class EntityIndexService {
             entityType,
             listed: listed.length,
             yamlCandidates: yamlEntries.length,
+            jsonCandidates: jsonEntries.length,
             cacheHitCount,
             changedCount,
             removedCount,
