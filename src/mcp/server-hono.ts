@@ -696,6 +696,8 @@ function normalizeAllowedProjects(auth: AuthContext | null): string[] {
 
 function isProjectAllowed(projectId: string | null | undefined, allowedProjects: string[]): boolean {
     if (!projectId) return false;
+    // Empty allowedProjects means no restrictions (admin key) — all projects allowed
+    if (allowedProjects.length === 0) return true;
     const normalized = projectId.trim().toLowerCase();
     return allowedProjects.some((allowed) => allowed.toLowerCase() === normalized);
 }
