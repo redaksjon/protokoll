@@ -4,7 +4,7 @@
  */
  
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, basename } from 'node:path';
 import { mkdir, mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -689,6 +689,37 @@ export const changeTranscriptDateTool: Tool = {
             },
         },
         required: ['transcriptPath', 'newDate'],
+    },
+};
+
+export const joinTranscriptsTool: Tool = {
+    name: 'protokoll_join_transcripts',
+    description:
+        'Join multiple transcripts into an existing target transcript. ' +
+        'Content sections are ordered chronologically by recording date/time. ' +
+        'The target file is updated in place; other source files are deleted after joining.',
+    inputSchema: {
+        type: 'object',
+        properties: {
+            targetPath: {
+                type: 'string',
+                description:
+                    'Transcript URI or relative path for the target file that will receive the combined content. ' +
+                    'This should be the first-selected transcript in the UI.',
+            },
+            transcriptPaths: {
+                type: 'array',
+                items: { type: 'string' },
+                description:
+                    'All transcript paths/URIs to join, including the target. ' +
+                    'The server orders them chronologically by recording date/time.',
+            },
+            contextDirectory: {
+                type: 'string',
+                description: 'Optional: Path to the .protokoll context directory',
+            },
+        },
+        required: ['targetPath', 'transcriptPaths'],
     },
 };
 
@@ -1935,6 +1966,152 @@ export async function handleChangeTranscriptDate(args: {
         outputPath: relativeOutputPath,
         moved: true,
         message: `Transcript moved from ${relativeOriginalPath} to ${relativeOutputPath}`,
+    };
+}
+
+export async function handleJoinTranscripts(args: {
+    targetPath: string;
+    transcriptPaths: string[];
+    contextDirectory?: string;
+}) {
+    await validateNotRemoteMode(args.contextDirectory);
+
+    if (!args.targetPath?.trim()) {
+        throw new Error('targetPath is required');
+    }
+    if (!Array.isArray(args.transcriptPaths) || args.transcriptPaths.length < 2) {
+        throw new Error('At least 2 transcript files are required');
+    }
+
+    const ServerConfig = await import('../serverConfig');
+    const outputStorage = ServerConfig.getOutputStorage();
+    const outputDirectory = await getConfiguredDirectory('outputDirectory', args.contextDirectory);
+
+    const uniqueRefs = Array.from(new Set([
+        args.targetPath.trim(),
+        ...args.transcriptPaths.map((ref) => ref.trim()).filter(Boolean),
+    ]));
+    if (uniqueRefs.length < 2) {
+        throw new Error('At least 2 unique transcript files are required');
+    }
+
+    if (outputStorage.name === 'gcs') {
+        const tmpRoot = await mkdtemp(`${tmpdir()}/protokoll-mcp-join-`);
+        try {
+            const localEntries: Array<{ localPath: string; storagePath: string }> = [];
+            for (const ref of uniqueRefs) {
+                const storagePath = await resolveStorageTranscriptPath(ref, outputStorage);
+                if (!storagePath) {
+                    throw new Error(`Transcript not found: ${ref}`);
+                }
+                const localPath = resolve(tmpRoot, `${localEntries.length}-${basename(storagePath)}`);
+                await writeFile(localPath, await outputStorage.readFile(storagePath));
+                localEntries.push({ localPath, storagePath });
+            }
+
+            const targetStoragePath = await resolveStorageTranscriptPath(args.targetPath, outputStorage);
+            if (!targetStoragePath) {
+                throw new Error(`Target transcript not found: ${args.targetPath}`);
+            }
+
+            const targetEntry = localEntries.find((entry) => entry.storagePath === targetStoragePath);
+            if (!targetEntry) {
+                throw new Error(`Target transcript not found among selected transcripts: ${args.targetPath}`);
+            }
+
+            const result = await Transcript.joinTranscriptsIntoTarget(
+                targetEntry.localPath,
+                localEntries.map((entry) => entry.localPath),
+            );
+
+            await outputStorage.writeFile(targetStoragePath, await readFile(targetEntry.localPath));
+            markTranscriptIndexDirtyForStorage(outputStorage, outputDirectory, targetStoragePath);
+
+            const deletedFiles: string[] = [];
+            for (const entry of localEntries) {
+                if (entry.storagePath === targetStoragePath) {
+                    continue;
+                }
+                await outputStorage.deleteFile(entry.storagePath);
+                markTranscriptIndexDirtyForStorage(outputStorage, outputDirectory, entry.storagePath);
+                deletedFiles.push(entry.storagePath);
+            }
+
+            const relativeOutputPath = await sanitizePath(targetStoragePath, outputDirectory);
+            const relativeDeletedFiles = await Promise.all(
+                deletedFiles.map((storagePath) => sanitizePath(storagePath, outputDirectory))
+            );
+            const relativeOrderedPaths = await Promise.all(
+                result.orderedPaths.map(async (localPath: string) => {
+                    const entry = localEntries.find((candidate) => candidate.localPath === localPath);
+                    return entry
+                        ? sanitizePath(entry.storagePath, outputDirectory)
+                        : sanitizePath(localPath, outputDirectory);
+                })
+            );
+
+            return {
+                success: true,
+                outputPath: relativeOutputPath,
+                orderedPaths: relativeOrderedPaths,
+                deletedFiles: relativeDeletedFiles,
+                message: `Joined ${uniqueRefs.length} transcripts into: ${relativeOutputPath}`,
+            };
+        } finally {
+            await rm(tmpRoot, { recursive: true, force: true });
+        }
+    }
+
+    const absoluteTarget = await resolveTranscriptPath(args.targetPath, args.contextDirectory);
+    const absolutePaths: string[] = [];
+    for (const ref of uniqueRefs) {
+        absolutePaths.push(await resolveTranscriptPath(ref, args.contextDirectory));
+    }
+
+    await validatePathWithinOutputDirectory(absoluteTarget, args.contextDirectory);
+    for (const absolutePath of absolutePaths) {
+        await validatePathWithinOutputDirectory(absolutePath, args.contextDirectory);
+    }
+
+    const result = await Transcript.joinTranscriptsIntoTarget(absoluteTarget, absolutePaths);
+
+    const fsPromises = await import('node:fs/promises');
+    const deletedFiles: string[] = [];
+    for (const sourcePath of absolutePaths) {
+        if (resolve(sourcePath) === resolve(absoluteTarget)) {
+            continue;
+        }
+        try {
+            await fsPromises.unlink(sourcePath);
+            deletedFiles.push(sourcePath);
+        } catch {
+            // Ignore deletion errors
+        }
+    }
+
+    markTranscriptIndexDirtyForStorage(outputStorage, outputDirectory, await sanitizePath(absoluteTarget, outputDirectory));
+    for (const deletedPath of deletedFiles) {
+        markTranscriptIndexDirtyForStorage(
+            outputStorage,
+            outputDirectory,
+            await sanitizePath(deletedPath, outputDirectory),
+        );
+    }
+
+    const relativeOutputPath = await sanitizePath(result.outputPath || '', outputDirectory);
+    const relativeOrderedPaths = await Promise.all(
+        result.orderedPaths.map((orderedPath: string) => sanitizePath(orderedPath || '', outputDirectory))
+    );
+    const relativeDeletedFiles = await Promise.all(
+        deletedFiles.map((deletedPath) => sanitizePath(deletedPath || '', outputDirectory))
+    );
+
+    return {
+        success: true,
+        outputPath: relativeOutputPath,
+        orderedPaths: relativeOrderedPaths,
+        deletedFiles: relativeDeletedFiles,
+        message: `Joined ${absolutePaths.length} transcripts into: ${relativeOutputPath}`,
     };
 }
 
