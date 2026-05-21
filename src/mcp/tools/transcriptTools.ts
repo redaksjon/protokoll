@@ -1211,6 +1211,8 @@ export async function handleListTranscripts(args: {
             startDate: args.startDate,
             endDate: args.endDate,
             projectId: args.entityType === 'project' ? args.entityId : undefined,
+            entityId: args.entityType && args.entityType !== 'project' ? args.entityId : undefined,
+            entityType: args.entityType && args.entityType !== 'project' ? args.entityType : undefined,
             limit: args.limit ?? 50,
             offset: args.offset ?? 0,
         });

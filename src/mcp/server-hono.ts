@@ -867,7 +867,7 @@ async function enforceProjectScopeForTool(
         return args;
     }
 
-    if (toolName === 'protokoll_add_project' || toolName === 'protokoll_delete_entity') {
+    if (toolName === 'protokoll_add_project' || toolName === 'protokoll_delete_entity' || toolName === 'protokoll_convert_entity_type') {
         throw new Error('Project-scoped keys cannot create or delete projects/entities.');
     }
 

@@ -750,6 +750,41 @@ export const deleteEntityTool: Tool = {
     },
 };
 
+export const convertEntityTypeTool: Tool = {
+    name: 'protokoll_convert_entity_type',
+    description:
+        'Convert an entity from one type to another (currently company ↔ person). ' +
+        'Creates the target entity, migrates transcript entity references, and deletes the source entity.',
+    inputSchema: {
+        type: 'object',
+        properties: {
+            entityId: {
+                type: 'string',
+                description: 'ID of the entity to convert',
+            },
+            fromType: {
+                type: 'string',
+                enum: ['company', 'person'],
+                description: 'Current entity type',
+            },
+            toType: {
+                type: 'string',
+                enum: ['company', 'person'],
+                description: 'Target entity type',
+            },
+            migrateTranscriptReferences: {
+                type: 'boolean',
+                description: 'Move transcript entity references from the old type to the new type (default: true)',
+            },
+            contextDirectory: {
+                type: 'string',
+                description: 'Path to the .protokoll context directory',
+            },
+        },
+        required: ['entityId', 'fromType', 'toType'],
+    },
+};
+
 // ============================================================================
 // Tool Handlers
 // ============================================================================
@@ -1737,5 +1772,193 @@ export async function handleDeleteEntity(args: { entityType: string; entityId: s
     return {
         success: true,
         message: `${args.entityType} "${args.entityId}" deleted successfully`,
+    };
+}
+
+type ConvertibleEntityType = 'company' | 'person';
+
+type EntityRefBucket = {
+    people?: Array<{ id: string; name: string }>;
+    projects?: Array<{ id: string; name: string }>;
+    terms?: Array<{ id: string; name: string }>;
+    companies?: Array<{ id: string; name: string }>;
+};
+
+function cloneEntityRefBucket(
+    entities: EntityRefBucket | undefined,
+): Required<EntityRefBucket> {
+    const cloneList = (list: Array<{ id: string; name: string }> | undefined) =>
+        (list || []).map((entry) => ({ id: entry.id, name: entry.name }));
+
+    return {
+        people: cloneList(entities?.people),
+        projects: cloneList(entities?.projects),
+        terms: cloneList(entities?.terms),
+        companies: cloneList(entities?.companies),
+    };
+}
+
+async function migrateTranscriptEntityReferences(args: {
+    entityId: string;
+    entityName: string;
+    fromType: ConvertibleEntityType;
+    toType: ConvertibleEntityType;
+    contextDirectory?: string;
+}): Promise<number> {
+    const {
+        handleListTranscripts,
+        handleReadTranscript,
+        handleUpdateTranscriptEntityReferences,
+    } = await import('./transcriptTools.js');
+
+    const fromKey = args.fromType === 'person' ? 'people' : 'companies';
+    const toKey = args.toType === 'person' ? 'people' : 'companies';
+    let updatedCount = 0;
+    let offset = 0;
+    const limit = 100;
+
+    while (true) {
+        const listResult = await handleListTranscripts({
+            entityId: args.entityId,
+            entityType: args.fromType,
+            limit,
+            offset,
+            contextDirectory: args.contextDirectory,
+        });
+
+        const transcripts = listResult.transcripts || [];
+        if (transcripts.length === 0) {
+            break;
+        }
+
+        for (const transcript of transcripts) {
+            const readResult = await handleReadTranscript({
+                transcriptPath: transcript.path,
+                contextDirectory: args.contextDirectory,
+            });
+            const currentEntities = cloneEntityRefBucket(readResult.metadata?.entities as EntityRefBucket | undefined);
+            const fromList = currentEntities[fromKey];
+            const matchIndex = fromList.findIndex((entry) => entry.id === args.entityId);
+            if (matchIndex === -1) {
+                continue;
+            }
+
+            const matchedRef = fromList[matchIndex];
+            currentEntities[fromKey] = fromList.filter((entry) => entry.id !== args.entityId);
+            if (!currentEntities[toKey].some((entry) => entry.id === args.entityId)) {
+                currentEntities[toKey] = [
+                    ...currentEntities[toKey],
+                    { id: matchedRef.id, name: matchedRef.name || args.entityName },
+                ];
+            }
+
+            await handleUpdateTranscriptEntityReferences({
+                transcriptPath: transcript.path,
+                entities: currentEntities,
+                contextDirectory: args.contextDirectory,
+            });
+            updatedCount++;
+        }
+
+        if (!listResult.pagination?.hasMore) {
+            break;
+        }
+        offset += limit;
+    }
+
+    return updatedCount;
+}
+
+export async function handleConvertEntityType(args: {
+    entityId: string;
+    fromType: ConvertibleEntityType;
+    toType: ConvertibleEntityType;
+    migrateTranscriptReferences?: boolean;
+    contextDirectory?: string;
+}) {
+    if (args.fromType === args.toType) {
+        throw new Error(`Entity is already a ${args.toType}`);
+    }
+
+    const context = await createToolContext(args.contextDirectory);
+    await assertContextAvailableForEntityEdit(context);
+
+    const entityId = resolveCanonicalEntityId(args.entityId);
+    const migrateTranscriptReferences = args.migrateTranscriptReferences !== false;
+    let entityName = '';
+    let convertedEntity: Person | Company;
+
+    if (args.fromType === 'company' && args.toType === 'person') {
+        const company = findCompanyResilient(context, entityId);
+        entityName = company.name;
+
+        if (context.getPerson(entityId)) {
+            throw new Error(`Person with ID "${entityId}" already exists`);
+        }
+
+        const person: Person = {
+            id: company.id,
+            slug: company.slug || slugify(company.name),
+            name: company.name,
+            type: 'person',
+            ...(company.sounds_like && { sounds_like: [...company.sounds_like] }),
+            ...(company.fullName && { context: company.fullName }),
+            ...(company.createdAt && { createdAt: company.createdAt }),
+            updatedAt: new Date(),
+        };
+
+        await context.saveEntity(person);
+        convertedEntity = person;
+        await markEntityIndexDirtyIfGcs('person');
+    } else if (args.fromType === 'person' && args.toType === 'company') {
+        const person = findPersonResilient(context, entityId);
+        entityName = person.name;
+
+        if (context.getCompany(entityId)) {
+            throw new Error(`Company with ID "${entityId}" already exists`);
+        }
+
+        const company: Company = {
+            id: person.id,
+            slug: person.slug || slugify(person.name),
+            name: person.name,
+            type: 'company',
+            ...(person.sounds_like && { sounds_like: [...person.sounds_like] }),
+            ...(person.context && { fullName: person.context }),
+            ...(person.createdAt && { createdAt: person.createdAt }),
+            updatedAt: new Date(),
+        };
+
+        await context.saveEntity(company);
+        convertedEntity = company;
+        await markEntityIndexDirtyIfGcs('company');
+    } else {
+        throw new Error(`Unsupported conversion: ${args.fromType} -> ${args.toType}`);
+    }
+
+    let migratedTranscripts = 0;
+    if (migrateTranscriptReferences) {
+        migratedTranscripts = await migrateTranscriptEntityReferences({
+            entityId,
+            entityName,
+            fromType: args.fromType,
+            toType: args.toType,
+            contextDirectory: args.contextDirectory,
+        });
+    }
+
+    if (args.fromType === 'company') {
+        await context.deleteEntity(findCompanyResilient(context, entityId));
+        await markEntityIndexDirtyIfGcs('company');
+    } else {
+        await context.deleteEntity(findPersonResilient(context, entityId));
+        await markEntityIndexDirtyIfGcs('person');
+    }
+
+    return {
+        success: true,
+        message: `Converted ${args.fromType} "${entityName}" to ${args.toType}`,
+        entity: formatEntity(convertedEntity),
+        migratedTranscripts,
     };
 }

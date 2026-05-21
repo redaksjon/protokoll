@@ -74,6 +74,48 @@ function asOptionalString(value: unknown): string | undefined {
     return typeof value === 'string' ? value : undefined;
 }
 
+type EntityFilterType = 'person' | 'project' | 'term' | 'company';
+
+const ENTITY_TYPE_TO_FIELD: Record<EntityFilterType, string> = {
+    person: 'people',
+    project: 'projects',
+    term: 'terms',
+    company: 'companies',
+};
+
+export function transcriptReferencesEntity(
+    entities: unknown,
+    entityId: string,
+    entityType?: EntityFilterType,
+): boolean {
+    if (!entities || typeof entities !== 'object') {
+        return false;
+    }
+
+    const record = entities as Record<string, unknown>;
+    if (entityType) {
+        const fieldName = ENTITY_TYPE_TO_FIELD[entityType];
+        const list = record[fieldName];
+        if (!Array.isArray(list)) {
+            return false;
+        }
+        return list.some((entry) => entry
+            && typeof entry === 'object'
+            && (entry as { id?: string }).id === entityId);
+    }
+
+    for (const fieldName of Object.values(ENTITY_TYPE_TO_FIELD)) {
+        const list = record[fieldName];
+        if (Array.isArray(list) && list.some((entry) => entry
+            && typeof entry === 'object'
+            && (entry as { id?: string }).id === entityId)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 function passesDateFilter(date: string | undefined, startDate?: string, endDate?: string): boolean {
     const normalized = normalizeDateOnly(date);
     if (!normalized) {
@@ -155,6 +197,8 @@ export interface TranscriptIndexListOptions {
     endDate?: string;
     projectId?: string;
     projectName?: string;
+    entityId?: string;
+    entityType?: EntityFilterType;
     limit: number;
     offset: number;
 }
@@ -209,7 +253,7 @@ class TranscriptIndexService {
         const startedAt = Date.now();
         await this.refreshIndexIfNeeded();
 
-        const { startDate, endDate, projectId, projectName, limit, offset } = options;
+        const { startDate, endDate, projectId, projectName, entityId, entityType, limit, offset } = options;
         const filtered = Array.from(this.entries.values())
             .filter((entry) => {
                 if (projectId) {
@@ -218,6 +262,9 @@ class TranscriptIndexService {
                     if (!projectMatches) {
                         return false;
                     }
+                }
+                if (entityId && !transcriptReferencesEntity(entry.entities, entityId, entityType)) {
+                    return false;
                 }
                 return passesDateFilter(entry.date, startDate, endDate);
             })
@@ -604,6 +651,8 @@ export async function listTranscriptsViaIndex(args: {
     endDate?: string;
     projectId?: string;
     projectName?: string;
+    entityId?: string;
+    entityType?: EntityFilterType;
     limit: number;
     offset: number;
 }): Promise<TranscriptIndexListResponse> {
@@ -613,6 +662,8 @@ export async function listTranscriptsViaIndex(args: {
         endDate: args.endDate,
         projectId: args.projectId,
         projectName: args.projectName,
+        entityId: args.entityId,
+        entityType: args.entityType,
         limit: args.limit,
         offset: args.offset,
     });

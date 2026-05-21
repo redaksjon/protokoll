@@ -72,6 +72,7 @@ export const tools: Tool[] = [
     EntityTools.addCompanyTool,
     EntityTools.editCompanyTool,
     EntityTools.deleteEntityTool,
+    EntityTools.convertEntityTypeTool,
 
     // Relationship Management
     RelationshipTools.addRelationshipTool,
@@ -194,6 +195,8 @@ export async function handleToolCall(name: string, args: unknown): Promise<unkno
             return EntityTools.handleEditCompany(args as Parameters<typeof EntityTools.handleEditCompany>[0]);
         case 'protokoll_delete_entity':
             return EntityTools.handleDeleteEntity(args as Parameters<typeof EntityTools.handleDeleteEntity>[0]);
+        case 'protokoll_convert_entity_type':
+            return EntityTools.handleConvertEntityType(args as Parameters<typeof EntityTools.handleConvertEntityType>[0]);
 
         // Smart Assistance
         case 'protokoll_suggest_project_metadata':
