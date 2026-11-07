@@ -27,10 +27,10 @@ describe('Transcripts list integration (projectId filter)', () => {
 
     // Create fixture transcripts
     const t1 = PklTranscript.create(path.join(tempDir, '2026-01-01-meeting.pkl'), {
-      title: 'Walmart Meeting',
+      title: 'Globex Meeting',
       date: new Date('2026-01-01'),
-      project: 'Walmart',
-      projectId: 'cffd998f-ff32-4d27-9ea7-7976172c44d1',
+      project: 'Globex',
+      projectId: 'ff62a90e-d91d-454d-847e-7ad8dd55f0d4',
       tags: ['meeting'],
       status: 'reviewed',
     });
@@ -48,11 +48,11 @@ describe('Transcripts list integration (projectId filter)', () => {
     t2.updateContent('Other content');
     t2.close();
 
-    const t3 = PklTranscript.create(path.join(tempDir, '2026-03-01-walmart-review.pkl'), {
-      title: 'Walmart Review',
+    const t3 = PklTranscript.create(path.join(tempDir, '2026-03-01-globex-review.pkl'), {
+      title: 'Globex Review',
       date: new Date('2026-03-01'),
-      project: 'Walmart',
-      projectId: 'cffd998f-ff32-4d27-9ea7-7976172c44d1',
+      project: 'Globex',
+      projectId: 'ff62a90e-d91d-454d-847e-7ad8dd55f0d4',
       tags: ['review'],
       status: 'reviewed',
     });
@@ -105,14 +105,14 @@ describe('Transcripts list integration (projectId filter)', () => {
   it('should filter by projectId and return matching transcripts', async () => {
     const result = await readTranscriptsListResource({
       limit: 100,
-      projectId: 'cffd998f-ff32-4d27-9ea7-7976172c44d1',
+      projectId: 'ff62a90e-d91d-454d-847e-7ad8dd55f0d4',
     });
 
     const data = JSON.parse(result.text);
     expect(data.pagination.total).toBe(2);
     expect(data.transcripts).toHaveLength(2);
     const titles = data.transcripts.map((t: { title: string }) => t.title).sort();
-    expect(titles).toEqual(['Walmart Meeting', 'Walmart Review']);
+    expect(titles).toEqual(['Globex Meeting', 'Globex Review']);
   });
 
   it('should return empty when projectId matches no transcripts', async () => {

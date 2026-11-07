@@ -50,9 +50,9 @@ describe('Entities integration', () => {
       'id: jane-smith\nname: Jane Smith\n'
     );
     await fs.writeFile(
-      path.join(contextDir, 'projects', 'walmart.yaml'),
-      `id: walmart
-name: Walmart
+      path.join(contextDir, 'projects', 'globex.yaml'),
+      `id: globex
+name: Globex
 classification:
   context_type: work
 routing:
@@ -150,7 +150,7 @@ routing:
       const data = JSON.parse(result.text);
       expect(data.entityType).toBe('project');
       expect(data.count).toBe(2);
-      expect(data.entities.some((e: { id: string }) => e.id === 'walmart')).toBe(true);
+      expect(data.entities.some((e: { id: string }) => e.id === 'globex')).toBe(true);
       expect(data.entities.some((e: { id: string }) => e.id === 'acme-project')).toBe(true);
     });
 
@@ -167,7 +167,7 @@ routing:
 
       expect(result.projects).toHaveLength(2);
       const names = result.projects.map((p: { name: string }) => p.name).sort();
-      expect(names).toEqual(['Acme Project', 'Walmart']);
+      expect(names).toEqual(['Acme Project', 'Globex']);
     });
 
     it('should filter projects by search', async () => {
@@ -265,16 +265,16 @@ routing:
 
     it('should edit project with protokoll_edit_project', async () => {
       const result = await handleEditProject({
-        id: 'walmart',
-        description: 'Updated Walmart project',
+        id: 'globex',
+        description: 'Updated Globex project',
         contextDirectory: tempDir,
       });
 
       expect(result.success).toBe(true);
-      expect(result.project?.description).toBe('Updated Walmart project');
+      expect(result.project?.description).toBe('Updated Globex project');
 
-      const resource = await readEntityResource('project', 'walmart', tempDir);
-      expect(resource.text).toContain('Updated Walmart project');
+      const resource = await readEntityResource('project', 'globex', tempDir);
+      expect(resource.text).toContain('Updated Globex project');
     });
   });
 });

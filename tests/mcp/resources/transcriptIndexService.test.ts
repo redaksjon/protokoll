@@ -4,15 +4,15 @@ import { transcriptReferencesEntity } from '../../../src/mcp/resources/transcrip
 describe('transcriptReferencesEntity', () => {
     it('matches a company reference when entity type is company', () => {
         expect(transcriptReferencesEntity({
-            companies: [{ id: '4ec1dee6-cc33-45c2-8b01-29d5ff5feb74', name: 'Jae Evans' }],
+            companies: [{ id: '2a211344-754e-46ba-aeff-c55df927f134', name: 'Initech' }],
             people: [{ id: 'other-person', name: 'Other Person' }],
-        }, '4ec1dee6-cc33-45c2-8b01-29d5ff5feb74', 'company')).toBe(true);
+        }, '2a211344-754e-46ba-aeff-c55df927f134', 'company')).toBe(true);
     });
 
     it('does not match a different entity type bucket', () => {
         expect(transcriptReferencesEntity({
-            companies: [{ id: '4ec1dee6-cc33-45c2-8b01-29d5ff5feb74', name: 'Jae Evans' }],
-        }, '4ec1dee6-cc33-45c2-8b01-29d5ff5feb74', 'person')).toBe(false);
+            companies: [{ id: '2a211344-754e-46ba-aeff-c55df927f134', name: 'Initech' }],
+        }, '2a211344-754e-46ba-aeff-c55df927f134', 'person')).toBe(false);
     });
 
     it('returns false when entities are missing', () => {

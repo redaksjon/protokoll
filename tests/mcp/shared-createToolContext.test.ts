@@ -83,7 +83,7 @@ describe('createToolContext', () => {
 
         mockListContextEntitiesFromGcs.mockImplementation(async (type: string) => {
             if (type === 'person') {
-                return [{ id: 'd798ad57-97bc-4fa0-aae8-6060b85b51ab', slug: 'jerry-geisler', name: 'Jerry Geisler', sounds_like: ['jeri'] }];
+                return [{ id: '95c614a9-1e1f-4a79-9736-a747e25254c4', slug: 'jordan-vale', name: 'Jordan Vale', sounds_like: ['jordy'] }];
             }
             if (type === 'project') {
                 return [{ id: 'project-alpha', slug: 'project-alpha', name: 'Project Alpha' }];
@@ -92,7 +92,7 @@ describe('createToolContext', () => {
                 return [{ id: 'term-api', slug: 'term-api', name: 'API' }];
             }
             if (type === 'company') {
-                return [{ id: '4ec1dee6-cc33-45c2-8b01-29d5ff5feb74', slug: 'walmart', name: 'Walmart' }];
+                return [{ id: '2a211344-754e-46ba-aeff-c55df927f134', slug: 'globex', name: 'Globex' }];
             }
             return [{ id: 'ignore-1', slug: 'ignore-1', name: 'uh' }];
         });
@@ -111,14 +111,14 @@ describe('createToolContext', () => {
         expect(context.getAllTerms()).toHaveLength(1);
         expect(context.getAllCompanies()).toHaveLength(1);
         expect(context.getAllIgnored()).toHaveLength(1);
-        expect(context.getPerson('jerry-geisler')?.name).toBe('Jerry Geisler');
-        expect(context.getPerson('d798ad57')).toBeTruthy();
-        expect(context.getCompany('walmart')?.id).toBe('4ec1dee6-cc33-45c2-8b01-29d5ff5feb74');
+        expect(context.getPerson('jordan-vale')?.name).toBe('Jordan Vale');
+        expect(context.getPerson('95c614a9')).toBeTruthy();
+        expect(context.getCompany('globex')?.id).toBe('2a211344-754e-46ba-aeff-c55df927f134');
         expect(context.getProject('project-alpha')?.name).toBe('Project Alpha');
         expect(context.getTerm('term-api')?.name).toBe('API');
         expect(context.isIgnored('UH')).toBe(true);
-        expect(context.search('jeri')).toHaveLength(1);
-        expect(context.findBySoundsLike('JERI')?.name).toBe('Jerry Geisler');
+        expect(context.search('jordy')).toHaveLength(1);
+        expect(context.findBySoundsLike('JORDY')?.name).toBe('Jordan Vale');
         expect(context.searchWithContext('project')).toHaveLength(1);
         expect(context.getRelatedProjects('any')).toEqual([]);
         await expect(context.saveEntity({ id: 'x', name: 'X', type: 'person' } as any, true)).resolves.toBeUndefined();
