@@ -301,14 +301,14 @@ describe('transcriptResources', () => {
 
             vi.mocked(ServerConfig.isInitialized).mockReturnValueOnce(true);
             vi.mocked(ServerConfig.getContext).mockReturnValueOnce({
-                getProject: vi.fn().mockReturnValue({ name: 'Walmart' }),
+                getProject: vi.fn().mockReturnValue({ name: 'Globex' }),
             } as any);
 
             const { Transcript: EngineTranscript } = await import('@redaksjon/protokoll-engine');
             vi.mocked(EngineTranscript.readTranscriptContent)
                 .mockResolvedValueOnce({
                     content: 'A',
-                    metadata: { date: '2026-02-14', project: 'Walmart', tasks: [{ status: 'completed' }] },
+                    metadata: { date: '2026-02-14', project: 'Globex', tasks: [{ status: 'completed' }] },
                     title: 'Keep',
                 } as any)
                 .mockResolvedValueOnce({
