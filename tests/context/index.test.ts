@@ -136,23 +136,23 @@ routing:
 
       await fs.writeFile(
         path.join(peopleDir, 'alias-person.yaml'),
-        `id: cffd998f-ff32-4d27-9ea7-7976172c44d1
+        `id: ff62a90e-d91d-454d-847e-7ad8dd55f0d4
 name: Alias Person
 slug: alias-person`
       );
       await fs.writeFile(
         path.join(peopleDir, 'same-prefix.yaml'),
-        `id: cffd998f-1111-2222-3333-444444444444
+        `id: ff62a90e-1111-2222-3333-444444444444
 name: Prefix Variant`
       );
 
       const context = await Context.create({ startingDir: tempDir });
 
-      expect(context.getPerson('alias-person')?.id).toBe('cffd998f-ff32-4d27-9ea7-7976172c44d1');
+      expect(context.getPerson('alias-person')?.id).toBe('ff62a90e-d91d-454d-847e-7ad8dd55f0d4');
       expect(context.getPerson('ALIAS-PERSON')?.name).toBe('Alias Person');
-      expect(context.getPerson('CFFD998F-FF32-4D27-9EA7-7976172C44D1')).toBeDefined();
-      expect(context.getPerson('cffd998f')).toBeDefined();
-      expect(context.getPerson('cffd998f-9999-8888-7777-666666666666')).toBeDefined();
+      expect(context.getPerson('FF62A90E-D91D-454D-847E-7AD8DD55F0D4')).toBeDefined();
+      expect(context.getPerson('ff62a90e')).toBeDefined();
+      expect(context.getPerson('ff62a90e-9999-8888-7777-666666666666')).toBeDefined();
       expect(context.getPerson('   ')).toBeUndefined();
     });
   });
